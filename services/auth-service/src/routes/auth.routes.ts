@@ -1,0 +1,745 @@
+import { Router, Request, Response, NextFunction } from 'express';
+import { v4 as uuid } from 'uuid';
+import crypto from 'crypto';
+import bcrypt from 'bcryptjs';
+import Redis from 'ioredis';
+import { RedisClient, KafkaProducer, authMiddleware, ValidationError, UnauthorizedError, ForbiddenError, createLogger } from '@tepla/common';
+import { EventType, EventTopic, UserId } from '@tepla/types';
+import {
+  SecurityRateLimiter,
+  DeviceSecurity,
+  SecurityMetrics,
+  SessionManager,
+  AuditLogger,
+  CryptoCore,
+} from '@tepla/security';
+import { OtpService } from '../services/otp.service';
+import { TokenService } from '../services/token.service';
+import { UserRepository } from '../repositories/user.repository';
+
+const logger = createLogger('auth-routes');
+
+export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
+  const router = Router();
+  const otpService = new OtpService(redis);
+  const tokenService = new TokenService(redis);
+  const userRepo = new UserRepository();
+
+  // Security framework components (raw ioredis instance)
+  const rawRedis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379');
+  const rateLimiter = new SecurityRateLimiter(rawRedis);
+  const deviceSecurity = new DeviceSecurity(rawRedis);
+  const sessionManager = new SessionManager(rawRedis);
+
+  // Set audit logger redis
+  AuditLogger.setRedis(rawRedis);
+
+  // POST /api/auth/login/phone — request OTP
+  router.post('/login/phone', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { phone } = req.body;
+      if (!phone || typeof phone !== 'string') {
+        throw new ValidationError('Phone number is required');
+      }
+
+      const normalized = normalizePhone(phone);
+
+      // Security: check auth rate limit with progressive lockout
+      await rateLimiter.checkAuth(normalized);
+
+      await otpService.sendOtp(normalized);
+
+      await AuditLogger.log('otp_requested', {
+        phone: maskPhone(normalized),
+        ip: req.ip,
+      });
+
+      res.json({ success: true, data: { message: 'OTP sent', phone: maskPhone(normalized) } });
+    } catch (err) { next(err); }
+  });
+
+  // POST /api/auth/login/verify — verify OTP, return tokens
+  router.post('/login/verify', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { phone, code } = req.body;
+      if (!phone || !code) throw new ValidationError('Phone and code are required');
+
+      const normalized = normalizePhone(phone);
+      const valid = await otpService.verifyOtp(normalized, code);
+
+      if (!valid) {
+        // Record auth failure for progressive lockout
+        await rateLimiter.recordAuthFailure(normalized);
+        await SecurityMetrics.authFailure(rawRedis);
+        await AuditLogger.log('otp_verify_failed', {
+          phone: maskPhone(normalized),
+          ip: req.ip,
+        });
+        throw new UnauthorizedError('Invalid or expired OTP');
+      }
+
+      // Clear failures on success
+      await rateLimiter.clearAuthFailures(normalized);
+      await SecurityMetrics.authSuccess(rawRedis);
+
+      let user = await userRepo.findByPhone(normalized);
+      if (!user) {
+        throw new UnauthorizedError('No account found. Please register first.');
+      }
+
+      // Generate JWT tokens
+      const tokens = tokenService.generateTokens({
+        sub: user.id as UserId,
+        username: user.username,
+        isPremium: user.is_premium,
+      });
+
+      // Create secure session (tracked in SessionManager)
+      const deviceFingerprint = DeviceSecurity.fingerprint(
+        req.headers as Record<string, string>,
+        req.cookies?.deviceId
+      );
+      const session = await sessionManager.create(user.id, {
+        deviceFingerprint,
+        userAgent: req.headers['user-agent'] || 'unknown',
+        ip: req.ip || 'unknown',
+      });
+
+      // Also store refresh token mapping
+      await redis.set(`session:${tokens.refreshToken}`, user.id, 30 * 24 * 3600);
+      await userRepo.updateLastSeen(user.id);
+
+      // Register device
+      await deviceSecurity.registerDevice(user.id, deviceFingerprint, {
+        userAgent: req.headers['user-agent'] || 'unknown',
+        ip: req.ip || 'unknown',
+      });
+
+      // Check for suspicious device/IP
+      const anomaly = await deviceSecurity.detectAnomaly(
+        user.id,
+        deviceFingerprint,
+        req.ip || 'unknown'
+      );
+
+      await AuditLogger.log('login_success', {
+        userId: user.id,
+        ip: req.ip,
+        deviceFingerprint,
+        anomaly: anomaly.suspicious ? anomaly.reason : null,
+      });
+
+      // Publish login event
+      await kafka.publish({
+        id: uuid(),
+        type: EventType.USER_LOGGED_IN,
+        topic: EventTopic.USER_EVENTS,
+        timestamp: new Date().toISOString(),
+        source: 'auth-service',
+        correlationId: req.correlationId || uuid(),
+        userId: user.id as UserId,
+        payload: {
+          userId: user.id,
+          deviceFingerprint,
+          ip: req.ip,
+        },
+      });
+
+      res.json({
+        success: true,
+        data: {
+          user: mapUser(user),
+          tokens,
+          sessionId: session,
+          securityAlert: anomaly.suspicious ? {
+            message: 'New device or location detected',
+            reason: anomaly.reason,
+          } : undefined,
+        },
+      });
+    } catch (err) { next(err); }
+  });
+
+  // POST /api/auth/register — create account
+  router.post('/register', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { username, displayName, phone, email, language, birthDate, publicKey, signingPublicKey } = req.body;
+
+      if (!username || username.length < 4 || username.length > 32) {
+        throw new ValidationError('Username must be 4-32 characters');
+      }
+      if (!/^[a-zA-Z0-9_]+$/.test(username)) {
+        throw new ValidationError('Username can only contain letters, numbers, underscores');
+      }
+
+      const existing = await userRepo.findByUsername(username);
+      if (existing) throw new ValidationError('Username already taken');
+
+      if (phone) {
+        const existingPhone = await userRepo.findByPhone(normalizePhone(phone));
+        if (existingPhone) throw new ValidationError('Phone already registered');
+      }
+
+      const user = await userRepo.create({
+        username: username.toLowerCase(),
+        display_name: displayName || null,
+        phone: phone ? normalizePhone(phone) : null,
+        email: email || null,
+        language: language || 'en',
+        birth_date: birthDate || null,
+        public_key: publicKey || '',
+        signing_public_key: signingPublicKey || '',
+      });
+
+      const tokens = tokenService.generateTokens({
+        sub: user.id as UserId,
+        username: user.username,
+        isPremium: false,
+      });
+
+      // Create secure session
+      const deviceFingerprint = DeviceSecurity.fingerprint(
+        req.headers as Record<string, string>,
+        req.cookies?.deviceId
+      );
+      const session = await sessionManager.create(user.id, {
+        deviceFingerprint,
+        userAgent: req.headers['user-agent'] || 'unknown',
+        ip: req.ip || 'unknown',
+      });
+
+      await redis.set(`session:${tokens.refreshToken}`, user.id, 30 * 24 * 3600);
+
+      // Register first device as trusted
+      await deviceSecurity.registerDevice(user.id, deviceFingerprint, {
+        userAgent: req.headers['user-agent'] || 'unknown',
+        ip: req.ip || 'unknown',
+      });
+      await deviceSecurity.trustDevice(user.id, deviceFingerprint);
+
+      await AuditLogger.log('user_registered', {
+        userId: user.id,
+        username: user.username,
+        ip: req.ip,
+      });
+
+      // Publish user.created event
+      await kafka.publish<{ userId: string }>({
+        id: uuid(),
+        type: EventType.USER_CREATED,
+        topic: EventTopic.USER_EVENTS,
+        timestamp: new Date().toISOString(),
+        source: 'auth-service',
+        correlationId: req.correlationId || uuid(),
+        userId: user.id as UserId,
+        payload: { userId: user.id },
+      });
+
+      res.status(201).json({
+        success: true,
+        data: { user: mapUser(user), tokens, sessionId: session },
+      });
+    } catch (err) { next(err); }
+  });
+
+  // POST /api/auth/login — email + password login
+  router.post('/login', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { email, password } = req.body;
+      if (!email || !password) throw new ValidationError('Email and password are required');
+
+      await rateLimiter.checkAuth(email);
+
+      const user = await userRepo.findByEmail(email.toLowerCase().trim());
+      if (!user || !user.password_hash) {
+        await rateLimiter.recordAuthFailure(email);
+        await SecurityMetrics.authFailure(rawRedis);
+        throw new UnauthorizedError('Invalid email or password');
+      }
+
+      const valid = await bcrypt.compare(password, user.password_hash);
+      if (!valid) {
+        await rateLimiter.recordAuthFailure(email);
+        await SecurityMetrics.authFailure(rawRedis);
+        throw new UnauthorizedError('Invalid email or password');
+      }
+
+      await rateLimiter.clearAuthFailures(email);
+      await SecurityMetrics.authSuccess(rawRedis);
+
+      // Check if 2FA is enabled — require second step
+      const totpRow = await userRepo.getTotpSecret(user.id);
+      if (totpRow?.is_verified) {
+        // Don't issue tokens yet — return a temporary 2FA challenge
+        const challengeId = uuid();
+        await redis.set(`2fa:challenge:${challengeId}`, user.id, 300); // 5 min TTL
+        return res.json({
+          success: true,
+          data: { requires2FA: true, challengeId },
+        });
+      }
+
+      const tokens = tokenService.generateTokens({
+        sub: user.id as UserId,
+        username: user.username,
+        isPremium: user.is_premium,
+      });
+
+      const deviceFingerprint = DeviceSecurity.fingerprint(
+        req.headers as Record<string, string>,
+        req.cookies?.deviceId
+      );
+      const session = await sessionManager.create(user.id, {
+        deviceFingerprint,
+        userAgent: req.headers['user-agent'] || 'unknown',
+        ip: req.ip || 'unknown',
+      });
+
+      await redis.set(`session:${tokens.refreshToken}`, user.id, 30 * 24 * 3600);
+      await userRepo.updateLastSeen(user.id);
+      await deviceSecurity.registerDevice(user.id, deviceFingerprint, {
+        userAgent: req.headers['user-agent'] || 'unknown',
+        ip: req.ip || 'unknown',
+      });
+
+      await AuditLogger.log('login_email_success', { userId: user.id, ip: req.ip });
+
+      await kafka.publish({
+        id: uuid(),
+        type: EventType.USER_LOGGED_IN,
+        topic: EventTopic.USER_EVENTS,
+        timestamp: new Date().toISOString(),
+        source: 'auth-service',
+        correlationId: req.correlationId || uuid(),
+        userId: user.id as UserId,
+        payload: { userId: user.id, method: 'email' },
+      });
+
+      res.json({
+        success: true,
+        data: { user: mapUser(user), tokens, sessionId: session },
+      });
+    } catch (err) { next(err); }
+  });
+
+  // POST /api/auth/register/email — register with email + password
+  router.post('/register/email', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { username, displayName, email, password, language } = req.body;
+
+      if (!email || !password) throw new ValidationError('Email and password are required');
+      if (password.length < 6) throw new ValidationError('Password must be at least 6 characters');
+      if (!username || username.length < 4 || username.length > 32) {
+        throw new ValidationError('Username must be 4-32 characters');
+      }
+      if (!/^[a-zA-Z0-9_]+$/.test(username)) {
+        throw new ValidationError('Username can only contain letters, numbers, underscores');
+      }
+
+      const existingUsername = await userRepo.findByUsername(username);
+      if (existingUsername) throw new ValidationError('Username already taken');
+
+      const existingEmail = await userRepo.findByEmail(email.toLowerCase().trim());
+      if (existingEmail) throw new ValidationError('Email already registered');
+
+      const passwordHash = await bcrypt.hash(password, 10);
+
+      const user = await userRepo.create({
+        username: username.toLowerCase(),
+        display_name: displayName || null,
+        phone: null,
+        email: email.toLowerCase().trim(),
+        password_hash: passwordHash,
+        language: language || 'en',
+        birth_date: null,
+        public_key: '',
+        signing_public_key: '',
+      });
+
+      const tokens = tokenService.generateTokens({
+        sub: user.id as UserId,
+        username: user.username,
+        isPremium: false,
+      });
+
+      const deviceFingerprint = DeviceSecurity.fingerprint(
+        req.headers as Record<string, string>,
+        req.cookies?.deviceId
+      );
+      const session = await sessionManager.create(user.id, {
+        deviceFingerprint,
+        userAgent: req.headers['user-agent'] || 'unknown',
+        ip: req.ip || 'unknown',
+      });
+
+      await redis.set(`session:${tokens.refreshToken}`, user.id, 30 * 24 * 3600);
+      await deviceSecurity.registerDevice(user.id, deviceFingerprint, {
+        userAgent: req.headers['user-agent'] || 'unknown',
+        ip: req.ip || 'unknown',
+      });
+      await deviceSecurity.trustDevice(user.id, deviceFingerprint);
+
+      await AuditLogger.log('user_registered_email', {
+        userId: user.id, username: user.username, ip: req.ip,
+      });
+
+      await kafka.publish<{ userId: string }>({
+        id: uuid(),
+        type: EventType.USER_CREATED,
+        topic: EventTopic.USER_EVENTS,
+        timestamp: new Date().toISOString(),
+        source: 'auth-service',
+        correlationId: req.correlationId || uuid(),
+        userId: user.id as UserId,
+        payload: { userId: user.id },
+      });
+
+      res.status(201).json({
+        success: true,
+        data: { user: mapUser(user), tokens, sessionId: session },
+      });
+    } catch (err) { next(err); }
+  });
+
+  // POST /api/auth/refresh — refresh tokens
+  router.post('/refresh', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { refreshToken } = req.body;
+      if (!refreshToken) throw new ValidationError('Refresh token required');
+
+      const userId = await redis.get(`session:${refreshToken}`);
+      if (!userId) throw new UnauthorizedError('Invalid or expired refresh token');
+
+      const user = await userRepo.findById(userId);
+      if (!user) throw new UnauthorizedError('User not found');
+
+      // Rotate tokens
+      await redis.del(`session:${refreshToken}`);
+      const tokens = tokenService.generateTokens({
+        sub: user.id as UserId,
+        username: user.username,
+        isPremium: user.is_premium,
+      });
+      await redis.set(`session:${tokens.refreshToken}`, user.id, 30 * 24 * 3600);
+
+      await AuditLogger.log('token_refreshed', { userId: user.id, ip: req.ip });
+
+      res.json({ success: true, data: { tokens } });
+    } catch (err) { next(err); }
+  });
+
+  // POST /api/auth/logout
+  router.post('/logout', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { refreshToken, sessionId } = req.body;
+
+      if (refreshToken) {
+        await redis.del(`session:${refreshToken}`);
+      }
+
+      // Revoke security session
+      if (sessionId) {
+        await sessionManager.revoke(sessionId);
+      }
+
+      await AuditLogger.log('logout', { ip: req.ip });
+
+      res.json({ success: true, data: { message: 'Logged out' } });
+    } catch (err) { next(err); }
+  });
+
+  // POST /api/auth/logout/all — revoke all sessions
+  router.post('/logout/all', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const userId = req.headers['x-user-id'] as string;
+      if (!userId) throw new UnauthorizedError('User ID required');
+
+      await sessionManager.revokeAll(userId);
+
+      await AuditLogger.log('logout_all_sessions', { userId, ip: req.ip });
+
+      res.json({ success: true, data: { message: 'All sessions revoked' } });
+    } catch (err) { next(err); }
+  });
+
+  // GET /api/auth/sessions — list active sessions
+  router.get('/sessions', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const userId = req.headers['x-user-id'] as string;
+      if (!userId) throw new UnauthorizedError('User ID required');
+
+      const sessions = await sessionManager.getActiveSessions(userId);
+
+      res.json({ success: true, data: sessions });
+    } catch (err) { next(err); }
+  });
+
+  // GET /api/auth/devices — list registered devices
+  router.get('/devices', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const userId = req.headers['x-user-id'] as string;
+      if (!userId) throw new UnauthorizedError('User ID required');
+
+      const devices = await deviceSecurity.getUserDevices(userId);
+
+      res.json({ success: true, data: devices });
+    } catch (err) { next(err); }
+  });
+
+  // DELETE /api/auth/devices/:fingerprint — revoke device
+  router.delete('/devices/:fingerprint', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const userId = req.headers['x-user-id'] as string;
+      if (!userId) throw new UnauthorizedError('User ID required');
+
+      await deviceSecurity.revokeDevice(userId, req.params.fingerprint);
+
+      await AuditLogger.log('device_revoked', {
+        userId,
+        deviceFingerprint: req.params.fingerprint,
+        ip: req.ip,
+      });
+
+      res.json({ success: true, data: { message: 'Device revoked' } });
+    } catch (err) { next(err); }
+  });
+
+  // ─── 2FA / TOTP ─────────────────────────────
+
+  const auth = authMiddleware();
+
+  // POST /api/auth/2fa/setup — generate TOTP secret + backup codes
+  router.post('/2fa/setup', auth, async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const userId = req.user!.sub;
+
+      // Check if already has verified 2FA
+      const existing = await userRepo.getTotpSecret(userId);
+      if (existing?.is_verified) {
+        throw new ValidationError('2FA is already enabled. Disable it first.');
+      }
+
+      // Generate 20-byte secret (base32 encoded for authenticator apps)
+      const secretBytes = crypto.randomBytes(20);
+      const secret = base32Encode(secretBytes);
+
+      // Generate 8 backup codes
+      const backupCodes = Array.from({ length: 8 }, () =>
+        crypto.randomBytes(4).toString('hex')
+      );
+
+      await userRepo.saveTotpSecret(userId, secret, backupCodes);
+
+      const user = await userRepo.findById(userId);
+      const issuer = 'Tepla';
+      const otpauthUrl = `otpauth://totp/${issuer}:${user.username}?secret=${secret}&issuer=${issuer}&digits=6&period=30`;
+
+      await AuditLogger.log('2fa_setup_started', { userId, ip: req.ip });
+
+      res.json({
+        success: true,
+        data: { secret, otpauthUrl, backupCodes },
+      });
+    } catch (err) { next(err); }
+  });
+
+  // POST /api/auth/2fa/verify — verify TOTP code to activate 2FA
+  router.post('/2fa/verify', auth, async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const userId = req.user!.sub;
+      const { code } = req.body;
+      if (!code) throw new ValidationError('TOTP code is required');
+
+      const totpRow = await userRepo.getTotpSecret(userId);
+      if (!totpRow) throw new ValidationError('2FA not set up. Call /2fa/setup first.');
+      if (totpRow.is_verified) throw new ValidationError('2FA is already verified');
+
+      const valid = verifyTotp(totpRow.secret, code);
+      if (!valid) throw new UnauthorizedError('Invalid TOTP code');
+
+      await userRepo.verifyTotp(userId);
+      await AuditLogger.log('2fa_enabled', { userId, ip: req.ip });
+
+      res.json({ success: true, data: { message: '2FA enabled successfully' } });
+    } catch (err) { next(err); }
+  });
+
+  // POST /api/auth/2fa/disable — disable 2FA (requires current TOTP code or backup code)
+  router.post('/2fa/disable', auth, async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const userId = req.user!.sub;
+      const { code } = req.body;
+      if (!code) throw new ValidationError('TOTP code or backup code is required');
+
+      const totpRow = await userRepo.getTotpSecret(userId);
+      if (!totpRow || !totpRow.is_verified) {
+        throw new ValidationError('2FA is not enabled');
+      }
+
+      // Try TOTP code first, then backup code
+      const validTotp = verifyTotp(totpRow.secret, code);
+      if (!validTotp) {
+        const usedBackup = await userRepo.useBackupCode(userId, code);
+        if (!usedBackup) throw new UnauthorizedError('Invalid code');
+      }
+
+      await userRepo.deleteTotp(userId);
+      await AuditLogger.log('2fa_disabled', { userId, ip: req.ip });
+
+      res.json({ success: true, data: { message: '2FA disabled' } });
+    } catch (err) { next(err); }
+  });
+
+  // POST /api/auth/2fa/login — complete login with 2FA code (after challenge)
+  router.post('/2fa/login', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { challengeId, code } = req.body;
+      if (!challengeId || !code) throw new ValidationError('challengeId and code are required');
+
+      const userId = await redis.get(`2fa:challenge:${challengeId}`);
+      if (!userId) throw new UnauthorizedError('Invalid or expired 2FA challenge');
+
+      const totpRow = await userRepo.getTotpSecret(userId);
+      if (!totpRow || !totpRow.is_verified) {
+        throw new ValidationError('2FA is not enabled');
+      }
+
+      const validTotp = verifyTotp(totpRow.secret, code);
+      if (!validTotp) {
+        const usedBackup = await userRepo.useBackupCode(userId, code);
+        if (!usedBackup) {
+          await SecurityMetrics.authFailure(rawRedis);
+          throw new UnauthorizedError('Invalid 2FA code');
+        }
+      }
+
+      // 2FA passed — issue tokens
+      await redis.del(`2fa:challenge:${challengeId}`);
+      const user = await userRepo.findById(userId);
+      if (!user) throw new UnauthorizedError('User not found');
+
+      const tokens = tokenService.generateTokens({
+        sub: user.id as UserId,
+        username: user.username,
+        isPremium: user.is_premium,
+      });
+
+      const deviceFingerprint = DeviceSecurity.fingerprint(
+        req.headers as Record<string, string>,
+        req.cookies?.deviceId
+      );
+      const session = await sessionManager.create(user.id, {
+        deviceFingerprint,
+        userAgent: req.headers['user-agent'] || 'unknown',
+        ip: req.ip || 'unknown',
+      });
+
+      await redis.set(`session:${tokens.refreshToken}`, user.id, 30 * 24 * 3600);
+      await userRepo.updateLastSeen(user.id);
+
+      await AuditLogger.log('2fa_login_success', { userId: user.id, ip: req.ip });
+
+      res.json({
+        success: true,
+        data: { user: mapUser(user), tokens, sessionId: session },
+      });
+    } catch (err) { next(err); }
+  });
+
+  return router;
+}
+
+// ─── TOTP Helpers ─────────────────────────────
+function generateHOTP(secret: string, counter: number): string {
+  const decodedSecret = base32Decode(secret);
+  const buffer = Buffer.alloc(8);
+  for (let i = 7; i >= 0; i--) {
+    buffer[i] = counter & 0xff;
+    counter = counter >> 8;
+  }
+  const hmac = crypto.createHmac('sha1', decodedSecret);
+  hmac.update(buffer);
+  const hmacResult = hmac.digest();
+  const offset = hmacResult[hmacResult.length - 1] & 0xf;
+  const code =
+    ((hmacResult[offset] & 0x7f) << 24) |
+    ((hmacResult[offset + 1] & 0xff) << 16) |
+    ((hmacResult[offset + 2] & 0xff) << 8) |
+    (hmacResult[offset + 3] & 0xff);
+  return (code % 1_000_000).toString().padStart(6, '0');
+}
+
+function verifyTotp(secret: string, code: string, window: number = 1): boolean {
+  const counter = Math.floor(Date.now() / 30_000);
+  for (let i = -window; i <= window; i++) {
+    if (generateHOTP(secret, counter + i) === code) return true;
+  }
+  return false;
+}
+
+const BASE32_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+
+function base32Encode(buffer: Buffer): string {
+  let bits = 0;
+  let value = 0;
+  let output = '';
+  for (const byte of buffer) {
+    value = (value << 8) | byte;
+    bits += 8;
+    while (bits >= 5) {
+      output += BASE32_ALPHABET[(value >>> (bits - 5)) & 31];
+      bits -= 5;
+    }
+  }
+  if (bits > 0) {
+    output += BASE32_ALPHABET[(value << (5 - bits)) & 31];
+  }
+  return output;
+}
+
+function base32Decode(encoded: string): Buffer {
+  const cleaned = encoded.replace(/=+$/, '').toUpperCase();
+  let bits = 0;
+  let value = 0;
+  const output: number[] = [];
+  for (const char of cleaned) {
+    const idx = BASE32_ALPHABET.indexOf(char);
+    if (idx === -1) continue;
+    value = (value << 5) | idx;
+    bits += 5;
+    if (bits >= 8) {
+      output.push((value >>> (bits - 8)) & 0xff);
+      bits -= 8;
+    }
+  }
+  return Buffer.from(output);
+}
+
+// ─── Helpers ────────────────────────────────
+function normalizePhone(phone: string): string {
+  return phone.replace(/[^\d+]/g, '').replace(/^8/, '+7');
+}
+
+function maskPhone(phone: string): string {
+  if (phone.length < 6) return '***';
+  return phone.slice(0, 4) + '****' + phone.slice(-2);
+}
+
+function mapUser(row: any) {
+  return {
+    id: row.id,
+    username: row.username,
+    displayName: row.display_name,
+    phone: row.phone,
+    email: row.email,
+    avatarUrl: row.avatar_url,
+    bio: row.bio,
+    isOnline: row.is_online,
+    isPremium: row.is_premium,
+    isVerified: row.is_verified,
+    language: row.language,
+    publicKey: row.public_key,
+    signingPublicKey: row.signing_public_key,
+    createdAt: row.created_at,
+  };
+}

@@ -1,0 +1,32 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "commonjs",
+    "lib": ["ES2022"],
+    "outDir": "dist",
+    "rootDir": ".",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "baseUrl": ".",
+    "paths": {
+      "@tepla/common": ["./shared/common/src/index.ts"],
+      "@tepla/common/*": ["./shared/common/src/*"],
+      "@tepla/types": ["./shared/types/src/index.ts"],
+      "@tepla/types/*": ["./shared/types/src/*"],
+      "@tepla/security": ["./shared/security/src/index.ts"],
+      "@tepla/security/*": ["./shared/security/src/*"]
+    }
+  },
+  "include": [
+    "shared/**/*.ts",
+    "services/**/*.ts",
+    "gateway/**/*.ts"
+  ],
+  "exclude": ["node_modules", "dist", "client"]
+}

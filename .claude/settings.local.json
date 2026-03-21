@@ -1,0 +1,37 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(find /c/Users/user/Desktop/tepla/services -type f -not -path */node_modules/*)",
+      "Bash(where npx.cmd)",
+      "Bash(where npx:*)",
+      "mcp__Claude_Preview__preview_start",
+      "Bash(npm ls:*)",
+      "Bash(xargs wc:*)",
+      "Bash(npm install:*)",
+      "Bash(find /c/Users/user/Desktop/tepla/gateway -type f -name *.ts)",
+      "Bash(find /c/Users/user/Desktop/tepla/services -type f -name *.ts)",
+      "Bash(grep -r \"theme\\\\|accent\" /c/Users/user/Desktop/tepla/services --include=*.ts)",
+      "Bash(xargs grep:*)",
+      "Bash(npx tsc:*)",
+      "Bash(ln -sfn /c/Users/user/Desktop/tepla/shared/types /c/Users/user/Desktop/tepla/node_modules/@tepla/types)",
+      "Bash(ln -sfn /c/Users/user/Desktop/tepla/shared/common /c/Users/user/Desktop/tepla/node_modules/@tepla/common)",
+      "Bash(ln -sfn /c/Users/user/Desktop/tepla/shared/security /c/Users/user/Desktop/tepla/node_modules/@tepla/security)",
+      "Bash(node -e \"require\\(''@tepla/types''\\); console.log\\(''types OK''\\)\" --cwd /c/Users/user/Desktop/tepla)",
+      "Bash(node -e \"require\\(''@tepla/common''\\); console.log\\(''common OK''\\)\" --cwd /c/Users/user/Desktop/tepla)",
+      "Bash(node -e \"require\\(''@tepla/security''\\); console.log\\(''security OK''\\)\" --cwd /c/Users/user/Desktop/tepla)",
+      "Bash(node -e \"require\\(''@tepla/types''\\); console.log\\(''types OK''\\)\")",
+      "Bash(node -e \"require\\(''@tepla/common''\\); console.log\\(''common OK''\\)\")",
+      "Bash(node -e \"require\\(''@tepla/security''\\); console.log\\(''security OK''\\)\")",
+      "Bash(docker compose:*)",
+      "Bash(docker info:*)",
+      "Bash(docker ps:*)",
+      "Bash(docker exec:*)",
+      "Bash(DATABASE_URL=\"postgresql://tepla:tepla_secret@localhost:5432/tepla\" JWT_SECRET=\"tepla-jwt-secret-dev\" REDIS_URL=\"redis://localhost:6379\" npx tsx src/index.ts)",
+      "Bash(pnpm install:*)",
+      "Bash(curl -s --max-time 10 -X POST http://localhost:3000/api/v2/auth/register/email -H \"Content-Type: application/json\" -d \"{\"\"email\"\":\"\"test7@test.com\"\",\"\"username\"\":\"\"testuser7\"\",\"\"password\"\":\"\"Test1234\"\",\"\"displayName\"\":\"\"Test7\"\"}\")",
+      "Bash(curl -s --max-time 10 -X POST http://localhost:3000/api/v2/auth/login -H \"Content-Type: application/json\" -d \"{\"\"email\"\":\"\"test9@test.com\"\",\"\"password\"\":\"\"Test1234\"\"}\")",
+      "Bash(curl -s --max-time 10 -X POST http://localhost:3001/api/auth/login -H \"Content-Type: application/json\" -d \"{\"\"email\"\":\"\"test9@test.com\"\",\"\"password\"\":\"\"Test1234\"\"}\")",
+      "Bash(curl -s http://localhost:3003/health)"
+    ]
+  }
+}

@@ -1,0 +1,539 @@
+##############################################
+# Tepla Messenger — Production Docker Compose
+# Microservice Architecture v2.0
+##############################################
+
+version: '3.9'
+
+x-service-defaults: &service-defaults
+  restart: unless-stopped
+  networks:
+    - tepla-network
+  environment: &common-env
+    NODE_ENV: production
+    REDIS_URL: redis://redis:6379
+    KAFKA_BROKERS: kafka:9092
+    DATABASE_URL: postgresql://tepla:tepla_secret@postgres:5432/tepla
+    JWT_SECRET: ${JWT_SECRET:-tepla-jwt-secret-change-in-production}
+    CORS_ORIGIN: ${CORS_ORIGIN:-*}
+
+services:
+  # ═══════════════════════════════════════════
+  # Infrastructure
+  # ═══════════════════════════════════════════
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: tepla-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: tepla
+      POSTGRES_USER: tepla
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-tepla_secret}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./docker/init.sql:/docker-entrypoint-initdb.d/01-init.sql
+    ports:
+      - "5432:5432"
+    networks:
+      - tepla-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tepla"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: tepla-redis
+    restart: unless-stopped
+    command: redis-server --maxmemory 512mb --maxmemory-policy allkeys-lru --appendonly yes
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    networks:
+      - tepla-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.6.0
+    container_name: tepla-zookeeper
+    restart: unless-stopped
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    volumes:
+      - zookeeper_data:/var/lib/zookeeper/data
+    networks:
+      - tepla-network
+
+  kafka:
+    image: confluentinc/cp-kafka:7.6.0
+    container_name: tepla-kafka
+    restart: unless-stopped
+    depends_on:
+      - zookeeper
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENERS: INTERNAL://0.0.0.0:29092,EXTERNAL://0.0.0.0:9092
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:29092,EXTERNAL://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'true'
+      KAFKA_LOG_RETENTION_HOURS: 168
+      KAFKA_NUM_PARTITIONS: 6
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+    ports:
+      - "9092:9092"
+    networks:
+      - tepla-network
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-broker-api-versions --bootstrap-server localhost:9092"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  elasticsearch:
+    image: elasticsearch:8.12.0
+    container_name: tepla-elasticsearch
+    restart: unless-stopped
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+    ports:
+      - "9200:9200"
+    networks:
+      - tepla-network
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s http://localhost:9200/_cluster/health | grep -q '\"status\":\"green\"\\|\"status\":\"yellow\"'"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  minio:
+    image: minio/minio:latest
+    container_name: tepla-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY:-tepla_minio}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY:-tepla_minio_secret}
+    volumes:
+      - minio_data:/data
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    networks:
+      - tepla-network
+
+  # ═══════════════════════════════════════════
+  # Gateways
+  # ═══════════════════════════════════════════
+
+  api-gateway:
+    build:
+      context: ../gateway/api-gateway
+      dockerfile: Dockerfile
+    container_name: tepla-api-gateway
+    <<: *service-defaults
+    ports:
+      - "3000:3000"
+    environment:
+      <<: *common-env
+      PORT: 3000
+      AUTH_SERVICE_URL: http://auth-service:3001
+      USER_SERVICE_URL: http://user-service:3002
+      CHAT_SERVICE_URL: http://chat-service:3003
+      MESSAGE_SERVICE_URL: http://message-service:3004
+      PRESENCE_SERVICE_URL: http://presence-service:3005
+      NOTIFICATION_SERVICE_URL: http://notification-service:3006
+      MEDIA_SERVICE_URL: http://media-service:3007
+      SEARCH_SERVICE_URL: http://search-service:3008
+      PREMIUM_SERVICE_URL: http://premium-service:3009
+      MODERATION_SERVICE_URL: http://moderation-service:3010
+      ANALYTICS_SERVICE_URL: http://analytics-service:3011
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  websocket-gateway:
+    build:
+      context: ../gateway/websocket-gateway
+      dockerfile: Dockerfile
+    container_name: tepla-ws-gateway
+    <<: *service-defaults
+    ports:
+      - "3100:3100"
+    environment:
+      <<: *common-env
+      PORT: 3100
+    depends_on:
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+
+  # ═══════════════════════════════════════════
+  # Core Services
+  # ═══════════════════════════════════════════
+
+  auth-service:
+    build:
+      context: ../services/auth-service
+      dockerfile: Dockerfile
+    container_name: tepla-auth
+    <<: *service-defaults
+    environment:
+      <<: *common-env
+      PORT: 3001
+      TWILIO_ACCOUNT_SID: ${TWILIO_ACCOUNT_SID:-}
+      TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN:-}
+      TWILIO_FROM_NUMBER: ${TWILIO_FROM_NUMBER:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+
+  user-service:
+    build:
+      context: ../services/user-service
+      dockerfile: Dockerfile
+    container_name: tepla-user
+    <<: *service-defaults
+    environment:
+      <<: *common-env
+      PORT: 3002
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+
+  chat-service:
+    build:
+      context: ../services/chat-service
+      dockerfile: Dockerfile
+    container_name: tepla-chat
+    <<: *service-defaults
+    environment:
+      <<: *common-env
+      PORT: 3003
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+
+  message-service:
+    build:
+      context: ../services/message-service
+      dockerfile: Dockerfile
+    container_name: tepla-message
+    <<: *service-defaults
+    environment:
+      <<: *common-env
+      PORT: 3004
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+
+  presence-service:
+    build:
+      context: ../services/presence-service
+      dockerfile: Dockerfile
+    container_name: tepla-presence
+    <<: *service-defaults
+    environment:
+      <<: *common-env
+      PORT: 3005
+    depends_on:
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+
+  # ═══════════════════════════════════════════
+  # Supporting Services
+  # ═══════════════════════════════════════════
+
+  notification-service:
+    build:
+      context: ../services/notification-service
+      dockerfile: Dockerfile
+    container_name: tepla-notification
+    <<: *service-defaults
+    environment:
+      <<: *common-env
+      PORT: 3006
+      VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
+      VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
+      VAPID_SUBJECT: ${VAPID_SUBJECT:-mailto:admin@tepla.app}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+
+  media-service:
+    build:
+      context: ../services/media-service
+      dockerfile: Dockerfile
+    container_name: tepla-media
+    <<: *service-defaults
+    environment:
+      <<: *common-env
+      PORT: 3007
+      S3_ENDPOINT: http://minio:9000
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:-tepla_minio}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:-tepla_minio_secret}
+      S3_BUCKET: tepla-media
+      S3_REGION: us-east-1
+    depends_on:
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_started
+
+  search-service:
+    build:
+      context: ../services/search-service
+      dockerfile: Dockerfile
+    container_name: tepla-search
+    <<: *service-defaults
+    environment:
+      <<: *common-env
+      PORT: 3008
+      ELASTICSEARCH_URL: http://elasticsearch:9200
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+
+  premium-service:
+    build:
+      context: ../services/premium-service
+      dockerfile: Dockerfile
+    container_name: tepla-premium
+    <<: *service-defaults
+    environment:
+      <<: *common-env
+      PORT: 3009
+      PADDLE_API_KEY: ${PADDLE_API_KEY:-}
+      PADDLE_WEBHOOK_SECRET: ${PADDLE_WEBHOOK_SECRET:-}
+      PADDLE_PRICE_ID_MONTHLY: ${PADDLE_PRICE_ID_MONTHLY:-}
+      PADDLE_PRICE_ID_YEARLY: ${PADDLE_PRICE_ID_YEARLY:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+
+  moderation-service:
+    build:
+      context: ../services/moderation-service
+      dockerfile: Dockerfile
+    container_name: tepla-moderation
+    <<: *service-defaults
+    environment:
+      <<: *common-env
+      PORT: 3010
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+
+  analytics-service:
+    build:
+      context: ../services/analytics-service
+      dockerfile: Dockerfile
+    container_name: tepla-analytics
+    <<: *service-defaults
+    environment:
+      <<: *common-env
+      PORT: 3011
+    depends_on:
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+
+  # ═══════════════════════════════════════════
+  # New Feature Services v2.1
+  # ═══════════════════════════════════════════
+
+  calls-service:
+    build:
+      context: ../services/calls-service
+      dockerfile: Dockerfile
+    container_name: tepla-calls
+    <<: *service-defaults
+    environment:
+      <<: *common-env
+      PORT: 3012
+      LIVEKIT_API_URL: http://livekit:7880
+      LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:-devkey}
+      LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:-devsecret}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+
+  bot-service:
+    build:
+      context: ../services/bot-service
+      dockerfile: Dockerfile
+    container_name: tepla-bot
+    <<: *service-defaults
+    environment:
+      <<: *common-env
+      PORT: 3013
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+
+  stories-service:
+    build:
+      context: ../services/stories-service
+      dockerfile: Dockerfile
+    container_name: tepla-stories
+    <<: *service-defaults
+    environment:
+      <<: *common-env
+      PORT: 3014
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+
+  sticker-service:
+    build:
+      context: ../services/sticker-service
+      dockerfile: Dockerfile
+    container_name: tepla-sticker
+    <<: *service-defaults
+    environment:
+      <<: *common-env
+      PORT: 3015
+      GIPHY_API_KEY: ${GIPHY_API_KEY:-}
+      TENOR_API_KEY: ${TENOR_API_KEY:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  translation-service:
+    build:
+      context: ../services/translation-service
+      dockerfile: Dockerfile
+    container_name: tepla-translation
+    <<: *service-defaults
+    environment:
+      <<: *common-env
+      PORT: 3016
+      TRANSLATION_PROVIDER: libretranslate
+      LIBRETRANSLATE_URL: http://libretranslate:5000
+      DEEPL_API_KEY: ${DEEPL_API_KEY:-}
+      GOOGLE_TRANSLATE_API_KEY: ${GOOGLE_TRANSLATE_API_KEY:-}
+    depends_on:
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      libretranslate:
+        condition: service_started
+
+  webapp-service:
+    build:
+      context: ../services/webapp-service
+      dockerfile: Dockerfile
+    container_name: tepla-webapp
+    <<: *service-defaults
+    environment:
+      <<: *common-env
+      PORT: 3017
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  # ═══════════════════════════════════════════
+  # Additional Infrastructure
+  # ═══════════════════════════════════════════
+
+  libretranslate:
+    image: libretranslate/libretranslate:latest
+    container_name: tepla-libretranslate
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    environment:
+      LT_LOAD_ONLY: "en,ru,uk,es,fr,de,it,pt,zh,ja,ko,ar,hi,tr,pl"
+    networks:
+      - tepla-network
+
+  livekit:
+    image: livekit/livekit-server:latest
+    container_name: tepla-livekit
+    restart: unless-stopped
+    ports:
+      - "7880:7880"
+      - "7881:7881"
+      - "7882:7882/udp"
+    environment:
+      LIVEKIT_KEYS: "devkey: devsecret"
+    networks:
+      - tepla-network
+
+# ═══════════════════════════════════════════
+# Volumes & Networks
+# ═══════════════════════════════════════════
+
+volumes:
+  postgres_data:
+  redis_data:
+  zookeeper_data:
+  kafka_data:
+  elasticsearch_data:
+  minio_data:
+
+networks:
+  tepla-network:
+    driver: bridge
