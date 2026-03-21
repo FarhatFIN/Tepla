@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect } from "react";
+import React, { useState, useEffect } from "react";
 import Modal from "@/components/ui/Modal";
 import api from "@/lib/api";
 import { useChatStore } from "@/stores/chat-store";
@@ -120,7 +120,7 @@ export default function NewChatModal({ open, onClose, initialTab = "contact" }: 
     onClose();
   }
 
-  const tabs: { id: Tab; label: string; icon: JSX.Element }[] = [
+  const tabs: { id: Tab; label: string; icon: React.ReactNode }[] = [
     {
       id: "contact",
       label: "New Chat",
