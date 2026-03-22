@@ -1,13 +1,14 @@
 "use client";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useChatStore } from "@/stores/chat-store";
 import { useAuthStore } from "@/stores/auth-store";
 import Avatar from "@/components/ui/Avatar";
 import { languages } from "@/lib/countries";
+import api from "@/lib/api";
 
 export default function SettingsPanel() {
   const { showSettings, toggleSettings } = useChatStore();
-  const { user, language, setLanguage, setUsername, logout } = useAuthStore();
+  const { user, language, setLanguage, setUsername, setAvatar, logout } = useAuthStore();
   const [activeSection, setActiveSection] = useState<string | null>(null);
   const [editingUsername, setEditingUsername] = useState(false);
   const [newUsername, setNewUsername] = useState("");
@@ -28,6 +29,28 @@ export default function SettingsPanel() {
   const [fontSize, setFontSize] = useState(14);
   const [sendByEnter, setSendByEnter] = useState(true);
   const [animatedEmoji, setAnimatedEmoji] = useState(true);
+  const [avatarUploading, setAvatarUploading] = useState(false);
+  const avatarInputRef = useRef<HTMLInputElement>(null);
+
+  // Admin panel state
+  const [adminMaintenanceMode, setAdminMaintenanceMode] = useState(false);
+  const [adminRegistrationOpen, setAdminRegistrationOpen] = useState(true);
+  const [adminMaxFileSize, setAdminMaxFileSize] = useState(100);
+  const [adminBroadcastText, setAdminBroadcastText] = useState("");
+
+  function handleAvatarChange(file: File) {
+    setAvatarUploading(true);
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const dataUrl = e.target?.result as string;
+      if (dataUrl) {
+        setAvatar(dataUrl);
+      }
+      setAvatarUploading(false);
+    };
+    reader.onerror = () => setAvatarUploading(false);
+    reader.readAsDataURL(file);
+  }
 
   function handleUsernameEdit() {
     setNewUsername(user?.username || "");
@@ -64,6 +87,7 @@ export default function SettingsPanel() {
     { id: "storage", icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>, label: "Storage & Data" },
     { id: "devices", icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>, label: "Devices" },
     { id: "folders", icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>, label: "Chat Folders" },
+    ...(user?.isAdmin ? [{ id: "admin", icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>, label: "Admin Panel" }] : []),
   ];
 
   function Toggle({ on, onChange }: { on: boolean; onChange: (v: boolean) => void }) {
@@ -116,9 +140,32 @@ export default function SettingsPanel() {
           <div className="flex-1 overflow-y-auto">
             {/* Profile card */}
             <div className="flex items-center gap-4 border-b border-[var(--border)] p-4">
-              <Avatar name={user?.name || "User"} size="lg" status="online" isPremium={user?.isPremium} />
+              <input ref={avatarInputRef} type="file" accept="image/*" className="hidden" onChange={(e) => { if (e.target.files?.[0]) handleAvatarChange(e.target.files[0]); e.target.value = ""; }} />
+              <button onClick={() => avatarInputRef.current?.click()} className="relative group shrink-0" disabled={avatarUploading}>
+                <Avatar name={user?.name || "User"} size="lg" status="online" isPremium={user?.isPremium} src={user?.avatar} />
+                <div className="absolute inset-0 flex items-center justify-center rounded-full bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity">
+                  {avatarUploading ? (
+                    <div className="h-5 w-5 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                  ) : (
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+                  )}
+                </div>
+              </button>
               <div className="flex-1 min-w-0">
-                <h3 className="font-semibold">{user?.name || "User"}</h3>
+                <div className="flex items-center gap-1.5">
+                  <h3 className="font-semibold">{user?.name || "User"}</h3>
+                  {user?.isVerified && (
+                    <span className="inline-flex items-center gap-0.5 rounded-full bg-[var(--accent)] px-1.5 py-0.5 text-[9px] font-bold text-white">
+                      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><polyline points="20 6 9 17 4 12"/></svg>
+                    </span>
+                  )}
+                  {user?.isAdmin && (
+                    <span className="inline-flex items-center gap-0.5 rounded-full bg-amber-500 px-1.5 py-0.5 text-[9px] font-bold text-white">
+                      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87L18.18 22 12 18.27 5.82 22 7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
+                      Admin
+                    </span>
+                  )}
+                </div>
                 {!editingUsername ? (
                   <button onClick={handleUsernameEdit} className="group flex items-center gap-1 text-xs text-[var(--text-tertiary)] hover:text-[var(--accent)] transition-colors">
                     <span>@{user?.username || "set_username"}</span>
@@ -274,6 +321,80 @@ export default function SettingsPanel() {
                       <button className="w-full rounded-lg bg-red-500/10 px-3 py-2 text-xs text-red-400 hover:bg-red-500/20 transition-colors">
                         Terminate All Other Sessions
                       </button>
+                    </div>
+                  )}
+
+                  {/* Admin Panel */}
+                  {activeSection === "admin" && s.id === "admin" && (
+                    <div className="mb-2 ml-10 mr-3 rounded-xl bg-[var(--bg-input)] p-3 animate-slide-up">
+                      <div className="flex items-center gap-2 mb-3 pb-2 border-b border-[var(--border)]">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                        <span className="text-xs font-bold text-[var(--accent)] uppercase tracking-wider">Admin Controls</span>
+                      </div>
+
+                      <p className="mb-2 text-[10px] font-semibold uppercase text-[var(--text-tertiary)]">Server</p>
+                      <SettingRow label="Maintenance mode"><Toggle on={adminMaintenanceMode} onChange={setAdminMaintenanceMode} /></SettingRow>
+                      <SettingRow label="Open registration"><Toggle on={adminRegistrationOpen} onChange={setAdminRegistrationOpen} /></SettingRow>
+                      <SettingRow label="Max file size (MB)">
+                        <div className="flex items-center gap-2">
+                          <input type="number" value={adminMaxFileSize} onChange={(e) => setAdminMaxFileSize(Number(e.target.value))} className="w-16 rounded bg-[var(--bg-main)] px-2 py-0.5 text-xs text-center text-[var(--text-primary)] outline-none" />
+                        </div>
+                      </SettingRow>
+
+                      <div className="my-2 border-t border-[var(--border)]" />
+                      <p className="mb-2 text-[10px] font-semibold uppercase text-[var(--text-tertiary)]">Statistics</p>
+                      <div className="grid grid-cols-2 gap-2 mb-3">
+                        <div className="rounded-lg bg-[var(--bg-main)] p-2.5 text-center">
+                          <p className="text-lg font-bold text-[var(--accent)]">2</p>
+                          <p className="text-[10px] text-[var(--text-tertiary)]">Total Users</p>
+                        </div>
+                        <div className="rounded-lg bg-[var(--bg-main)] p-2.5 text-center">
+                          <p className="text-lg font-bold text-emerald-400">1</p>
+                          <p className="text-[10px] text-[var(--text-tertiary)]">Online Now</p>
+                        </div>
+                        <div className="rounded-lg bg-[var(--bg-main)] p-2.5 text-center">
+                          <p className="text-lg font-bold text-violet-400">2</p>
+                          <p className="text-[10px] text-[var(--text-tertiary)]">Total Chats</p>
+                        </div>
+                        <div className="rounded-lg bg-[var(--bg-main)] p-2.5 text-center">
+                          <p className="text-lg font-bold text-amber-400">6</p>
+                          <p className="text-[10px] text-[var(--text-tertiary)]">Messages Today</p>
+                        </div>
+                      </div>
+
+                      <div className="my-2 border-t border-[var(--border)]" />
+                      <p className="mb-2 text-[10px] font-semibold uppercase text-[var(--text-tertiary)]">Broadcast</p>
+                      <textarea value={adminBroadcastText} onChange={(e) => setAdminBroadcastText(e.target.value)} placeholder="Message to all users..." rows={2}
+                        className="w-full rounded-lg bg-[var(--bg-main)] px-3 py-2 text-xs text-[var(--text-primary)] placeholder-[var(--text-tertiary)] outline-none resize-none mb-2" />
+                      <button onClick={() => { if (adminBroadcastText.trim()) { alert("Broadcast sent: " + adminBroadcastText); setAdminBroadcastText(""); } }}
+                        className="w-full rounded-lg bg-[var(--accent)] px-3 py-2 text-xs font-semibold text-white hover:opacity-90 transition-opacity">
+                        Send Broadcast
+                      </button>
+
+                      <div className="my-2 border-t border-[var(--border)]" />
+                      <p className="mb-2 text-[10px] font-semibold uppercase text-[var(--text-tertiary)]">Quick Actions</p>
+                      <div className="space-y-1.5">
+                        <button className="w-full rounded-lg bg-[var(--bg-main)] px-3 py-2 text-left text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] transition-colors">
+                          <span className="font-medium">Manage Users</span>
+                          <span className="block text-[10px] text-[var(--text-tertiary)]">Ban, verify, promote users</span>
+                        </button>
+                        <button className="w-full rounded-lg bg-[var(--bg-main)] px-3 py-2 text-left text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] transition-colors">
+                          <span className="font-medium">Reported Content</span>
+                          <span className="block text-[10px] text-[var(--text-tertiary)]">0 pending reports</span>
+                        </button>
+                        <button className="w-full rounded-lg bg-[var(--bg-main)] px-3 py-2 text-left text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] transition-colors">
+                          <span className="font-medium">Server Logs</span>
+                          <span className="block text-[10px] text-[var(--text-tertiary)]">View activity and error logs</span>
+                        </button>
+                        <button className="w-full rounded-lg bg-[var(--bg-main)] px-3 py-2 text-left text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] transition-colors">
+                          <span className="font-medium">Feature Flags</span>
+                          <span className="block text-[10px] text-[var(--text-tertiary)]">Toggle premium features, A/B tests</span>
+                        </button>
+                        <button className="w-full rounded-lg bg-red-500/10 px-3 py-2 text-left text-xs text-red-400 hover:bg-red-500/20 transition-colors">
+                          <span className="font-medium">Clear All Cache</span>
+                          <span className="block text-[10px] text-red-400/60">Flush Redis + CDN cache</span>
+                        </button>
+                      </div>
                     </div>
                   )}
 

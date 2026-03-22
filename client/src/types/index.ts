@@ -19,6 +19,8 @@ export interface User {
   status: PresenceStatus;
   lastSeen?: string;
   isPremium?: boolean;
+  isVerified?: boolean;
+  isAdmin?: boolean;
   language?: string;
 }
 

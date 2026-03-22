@@ -36,7 +36,7 @@ interface ChatState {
   toggleSettings: () => void;
   togglePremium: () => void;
   toggleThread: () => void;
-  sendMessage: (chatId: string, text: string, type?: string) => void;
+  sendMessage: (chatId: string, text: string, type?: string, attachments?: any[]) => void;
   forwardMessage: (messageId: string, toChatId: string) => void;
   addReaction: (chatId: string, messageId: string, emoji: string) => void;
   markAsRead: (chatId: string) => void;
@@ -363,8 +363,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
   togglePremium: () => set((s) => ({ showPremium: !s.showPremium })),
   toggleThread: () => set((s) => ({ showThread: !s.showThread })),
 
-  // ─── Send message via API ──────────────────────
-  sendMessage: (chatId, text, type = "text") => {
+  // ─── Send message with optional attachments via API ──────────────────────
+  sendMessage: (chatId, text, type = "text", attachments?: any[]) => {
     const now = new Date();
     const tempId = `tmp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const replyingTo = get().replyingTo;
@@ -382,6 +382,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       timestamp: now.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" }),
       date: now.toISOString().split("T")[0],
       status: "sending",
+      attachments: attachments || undefined,
       replyTo: replyingTo ? {
         id: replyingTo.id,
         senderId: replyingTo.senderId,
@@ -409,6 +410,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         content: text,
         type,
         replyToId: replyingTo?.id || undefined,
+        attachments: attachments || undefined,
       })
       .then((res) => {
         const real = res.data;

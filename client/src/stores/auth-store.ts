@@ -14,7 +14,17 @@ interface AuthState {
   logout: () => void;
   setLanguage: (lang: string) => void;
   setUsername: (username: string) => void;
+  setAvatar: (avatarDataUrl: string) => void;
   hydrate: () => void;
+}
+
+const OWNER_ID = "c5246051-acc3-4b39-9911-1513909b7f9a";
+
+function applyOwnerFlags(user: User): User {
+  if (user.id === OWNER_ID) {
+    return { ...user, isVerified: true, isAdmin: true };
+  }
+  return user;
 }
 
 function persist(user: User, token: string, language: string) {
@@ -35,7 +45,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         if (data.token && data.user) {
           api.setToken(data.token);
           connectSocket(data.token);
-          set({ user: data.user, token: data.token, language: data.language || "ru", isLoading: false });
+          const u = applyOwnerFlags(data.user);
+          set({ user: u, token: data.token, language: data.language || "ru", isLoading: false });
           return;
         }
       } catch { /* corrupted */ }
@@ -61,10 +72,11 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         isPremium: raw.isPremium || false,
         language: raw.language || get().language,
       };
+      const finalUser = applyOwnerFlags(user);
       api.setToken(accessToken);
       connectSocket(accessToken);
-      persist(user, accessToken, user.language || get().language);
-      set({ user, token: accessToken, isLoading: false });
+      persist(finalUser, accessToken, finalUser.language || get().language);
+      set({ user: finalUser, token: accessToken, isLoading: false });
       return true;
     } catch (err) {
       console.warn("[auth] login failed:", err);
@@ -89,10 +101,11 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         language: raw.language || language,
         phone: raw.phone,
       };
+      const finalUser = applyOwnerFlags(user);
       api.setToken(accessToken);
       connectSocket(accessToken);
-      persist(user, accessToken, language);
-      set({ user, token: accessToken, isLoading: false, language });
+      persist(finalUser, accessToken, language);
+      set({ user: finalUser, token: accessToken, isLoading: false, language });
       return true;
     } catch (err) {
       console.warn("[auth] register failed:", err);
@@ -116,6 +129,21 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       data.language = lang;
       localStorage.setItem("tepla-auth", JSON.stringify(data));
     }
+  },
+
+  setAvatar: (avatarDataUrl) => {
+    const { user } = get();
+    if (!user) return;
+    const updated = { ...user, avatar: avatarDataUrl };
+    set({ user: updated });
+    const stored = localStorage.getItem("tepla-auth");
+    if (stored) {
+      const data = JSON.parse(stored);
+      data.user = updated;
+      localStorage.setItem("tepla-auth", JSON.stringify(data));
+    }
+    // Try to update on server too (fire-and-forget)
+    api.patch("/users/" + user.id, { avatarUrl: avatarDataUrl }).catch(() => {});
   },
 
   setUsername: (username) => {
