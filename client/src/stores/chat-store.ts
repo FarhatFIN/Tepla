@@ -5,6 +5,7 @@ import { mockFolders, mockStories } from "@/lib/mock-data";
 import api from "@/lib/api";
 import { getSocket } from "@/lib/socket";
 import { useAuthStore } from "@/stores/auth-store";
+import { translateText } from "@/lib/translate";
 
 interface ChatState {
   chats: Chat[];
@@ -20,6 +21,7 @@ interface ChatState {
   showProfile: boolean;
   showStickers: boolean;
   showCalls: boolean;
+  callType: "voice" | "video";
   showSettings: boolean;
   showPremium: boolean;
   showThread: boolean;
@@ -32,7 +34,7 @@ interface ChatState {
   setEditingMessage: (msg: Message | null) => void;
   toggleProfile: () => void;
   toggleStickers: () => void;
-  toggleCalls: () => void;
+  toggleCalls: (type?: "voice" | "video") => void;
   toggleSettings: () => void;
   togglePremium: () => void;
   toggleThread: () => void;
@@ -155,6 +157,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   showProfile: false,
   showStickers: false,
   showCalls: false,
+  callType: "voice" as const,
   showSettings: false,
   showPremium: false,
   showThread: false,
@@ -236,6 +239,24 @@ export const useChatStore = create<ChatState>((set, get) => ({
             : c
         ),
       }));
+
+      // Auto-translate if enabled for this chat
+      const chatObj = get().chats.find((c) => c.id === data.chatId);
+      if (chatObj?.autoTranslate && msg.type === "text" && msg.text.trim()) {
+        const lang = useAuthStore.getState().language || "ru";
+        translateText(msg.text, lang).then((translated) => {
+          if (translated && translated !== msg.text) {
+            set((s) => ({
+              messages: {
+                ...s.messages,
+                [data.chatId]: (s.messages[data.chatId] || []).map((m) =>
+                  m.id === msg.id ? { ...m, translatedText: translated, translatedLang: lang } : m
+                ),
+              },
+            }));
+          }
+        });
+      }
 
       // Join room if we aren't in it yet
       socket.emit("presence:join", data.chatId);
@@ -358,7 +379,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   setEditingMessage: (msg) => set({ editingMessage: msg, replyingTo: null }),
   toggleProfile: () => set((s) => ({ showProfile: !s.showProfile })),
   toggleStickers: () => set((s) => ({ showStickers: !s.showStickers })),
-  toggleCalls: () => set((s) => ({ showCalls: !s.showCalls })),
+  toggleCalls: (type) => set((s) => ({ showCalls: !s.showCalls, callType: type || s.callType })),
   toggleSettings: () => set((s) => ({ showSettings: !s.showSettings })),
   togglePremium: () => set((s) => ({ showPremium: !s.showPremium })),
   toggleThread: () => set((s) => ({ showThread: !s.showThread })),
@@ -499,9 +520,41 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   toggleTranslation: (chatId) => {
+    const chat = get().chats.find((c) => c.id === chatId);
+    const newState = !chat?.autoTranslate;
     set((s) => ({
-      chats: s.chats.map((c) => c.id === chatId ? { ...c, autoTranslate: !c.autoTranslate } : c),
+      chats: s.chats.map((c) => c.id === chatId ? { ...c, autoTranslate: newState } : c),
     }));
+
+    if (newState) {
+      const lang = useAuthStore.getState().language || "ru";
+      const msgs = get().messages[chatId] || [];
+      const myId = useAuthStore.getState().user?.id;
+      // Translate non-own messages that don't already have a translation
+      msgs.forEach(async (msg) => {
+        if (msg.senderId === myId || msg.translatedText || !msg.text.trim()) return;
+        if (msg.type !== "text") return;
+        const translated = await translateText(msg.text, lang);
+        if (translated && translated !== msg.text) {
+          set((s) => ({
+            messages: {
+              ...s.messages,
+              [chatId]: (s.messages[chatId] || []).map((m) =>
+                m.id === msg.id ? { ...m, translatedText: translated, translatedLang: lang } : m
+              ),
+            },
+          }));
+        }
+      });
+    } else {
+      // Clear translations
+      set((s) => ({
+        messages: {
+          ...s.messages,
+          [chatId]: (s.messages[chatId] || []).map((m) => ({ ...m, translatedText: undefined, translatedLang: undefined })),
+        },
+      }));
+    }
   },
 
   viewStory: (storyId) => {

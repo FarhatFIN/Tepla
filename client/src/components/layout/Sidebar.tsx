@@ -133,55 +133,70 @@ export default function Sidebar() {
             </div>
           </div>
         )}
-        {filteredChats.map((chat) => (
-          <button key={chat.id} onClick={() => setActiveChat(chat.id)} className={`flex w-full items-center gap-3 px-3 py-2.5 text-left transition-colors hover:bg-[var(--bg-hover)] ${activeChatId === chat.id ? "bg-[var(--bg-active)]" : ""}`}>
-            <Avatar
-              name={chat.name}
-              src={chat.avatar}
-              status={chat.user?.status}
-              size="md"
-              isPremium={chat.user?.isPremium}
-              showStatus={chat.type === "direct"}
-            />
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-1.5">
-                  <span className="truncate text-sm font-semibold text-[var(--text-primary)]">{chat.name}</span>
-                  {/* Verified badge */}
-                  {(chat.type === "channel" || chat.type === "bot") && (
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="var(--accent)" stroke="none" className="shrink-0">
-                      <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17z"/>
-                      <circle cx="12" cy="12" r="11" fill="var(--accent)" opacity="0.2"/>
-                      <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17z" fill="var(--accent)"/>
-                    </svg>
-                  )}
+        {filteredChats.map((chat) => {
+          // For direct chats, show the other user's info
+          const displayName = chat.type === "direct" && chat.user?.name ? chat.user.name : chat.name;
+          const displayAvatar = chat.type === "direct" && chat.user?.avatar ? chat.user.avatar : chat.avatar;
+          const displayUsername = chat.type === "direct" && chat.user?.username ? chat.user.username : undefined;
+
+          return (
+            <button key={chat.id} onClick={() => setActiveChat(chat.id)} className={`flex w-full items-center gap-3 px-3 py-2.5 text-left transition-colors hover:bg-[var(--bg-hover)] ${activeChatId === chat.id ? "bg-[var(--bg-active)]" : ""}`}>
+              <Avatar
+                name={displayName}
+                src={displayAvatar}
+                status={chat.user?.status}
+                size="md"
+                isPremium={chat.user?.isPremium}
+                showStatus={chat.type === "direct"}
+              />
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1.5">
+                    <span className="truncate text-sm font-semibold text-[var(--text-primary)]">{displayName}</span>
+                    {/* Verified badge for user */}
+                    {chat.type === "direct" && chat.user?.isVerified && (
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="var(--accent)" stroke="white" strokeWidth="2.5" className="shrink-0">
+                        <circle cx="12" cy="12" r="10"/><polyline points="16 8 10 16 7 13" fill="none"/>
+                      </svg>
+                    )}
+                    {/* Verified badge for channels/bots */}
+                    {(chat.type === "channel" || chat.type === "bot") && (
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="var(--accent)" stroke="none" className="shrink-0">
+                        <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17z"/>
+                        <circle cx="12" cy="12" r="11" fill="var(--accent)" opacity="0.2"/>
+                        <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17z" fill="var(--accent)"/>
+                      </svg>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    {chat.isPinned && (
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--text-tertiary)" strokeWidth="2" className="shrink-0">
+                        <path d="M12 2L12 22M12 2L8 6M12 2L16 6"/>
+                      </svg>
+                    )}
+                    <span className="text-[10px] text-[var(--text-tertiary)]">{chat.lastMessage?.timestamp}</span>
+                  </div>
                 </div>
-                <div className="flex items-center gap-1.5">
-                  {chat.isPinned && (
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--text-tertiary)" strokeWidth="2" className="shrink-0">
-                      <path d="M12 2L12 22M12 2L8 6M12 2L16 6"/>
-                    </svg>
-                  )}
-                  <span className="text-[10px] text-[var(--text-tertiary)]">{chat.lastMessage?.timestamp}</span>
-                </div>
-              </div>
-              {/* @handle */}
-              <p className="truncate text-[11px] font-medium text-[var(--accent)] opacity-80">
-                @{chat.user?.username || chat.name.toUpperCase().replace(/\s+/g, "")}
-              </p>
-              <div className="flex items-center justify-between mt-0.5">
-                <p className="truncate text-xs text-[var(--text-secondary)]">
-                  {chat.lastMessage?.text || "No messages yet"}
-                </p>
-                {chat.unreadCount > 0 && (
-                  <span className={`ml-2 flex h-[18px] min-w-[18px] shrink-0 items-center justify-center rounded-full px-1 text-[10px] font-bold text-white ${chat.isMuted ? "bg-[var(--text-tertiary)]" : "bg-[var(--accent)]"}`}>
-                    {chat.unreadCount}
-                  </span>
+                {/* @handle — show actual username */}
+                {displayUsername && (
+                  <p className="truncate text-[11px] font-medium text-[var(--accent)] opacity-80">
+                    @{displayUsername}
+                  </p>
                 )}
+                <div className="flex items-center justify-between mt-0.5">
+                  <p className="truncate text-xs text-[var(--text-secondary)]">
+                    {chat.lastMessage?.text || "No messages yet"}
+                  </p>
+                  {chat.unreadCount > 0 && (
+                    <span className={`ml-2 flex h-[18px] min-w-[18px] shrink-0 items-center justify-center rounded-full px-1 text-[10px] font-bold text-white ${chat.isMuted ? "bg-[var(--text-tertiary)]" : "bg-[var(--accent)]"}`}>
+                      {chat.unreadCount}
+                    </span>
+                  )}
+                </div>
               </div>
-            </div>
-          </button>
-        ))}
+            </button>
+          );
+        })}
       </nav>
       <NewChatModal open={showNewChat} onClose={() => setShowNewChat(false)} initialTab={newChatTab} />
     </aside>

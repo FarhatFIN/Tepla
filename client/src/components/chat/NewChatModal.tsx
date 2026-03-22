@@ -187,14 +187,21 @@ export default function NewChatModal({ open, onClose, initialTab = "contact" }: 
                 disabled={creating}
                 className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-colors hover:bg-[var(--bg-hover)] disabled:opacity-50"
               >
-                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[var(--accent)] text-sm font-bold text-white">
-                  {(u.display_name || u.username || "?")[0].toUpperCase()}
-                </div>
+                {u.avatar_url ? (
+                  <img src={u.avatar_url} alt="" className="h-10 w-10 rounded-full object-cover" />
+                ) : (
+                  <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[var(--accent)] text-sm font-bold text-white">
+                    {(u.display_name || u.username || "?")[0].toUpperCase()}
+                  </div>
+                )}
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-medium">{u.display_name || u.username}</p>
                   {u.username && <p className="truncate text-xs text-[var(--text-tertiary)]">@{u.username}</p>}
                 </div>
-                {u.is_online && <div className="h-2 w-2 rounded-full bg-emerald-400" />}
+                <div className="flex items-center gap-2">
+                  {u.is_online && <div className="h-2 w-2 rounded-full bg-emerald-400" />}
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" className="shrink-0"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                </div>
               </button>
             ))}
           </div>
