@@ -4,14 +4,23 @@ import { User } from "@/types";
 import api from "@/lib/api";
 import { connectSocket, disconnectSocket } from "@/lib/socket";
 
+interface SavedAccount {
+  user: User;
+  token: string;
+  language: string;
+}
+
 interface AuthState {
   user: User | null;
   token: string | null;
   isLoading: boolean;
   language: string;
+  savedAccounts: SavedAccount[];
   login: (email: string, password: string) => Promise<boolean>;
   register: (name: string, email: string, password: string, language: string, username: string) => Promise<boolean>;
   logout: () => void;
+  switchAccount: (accountId: string) => void;
+  removeSavedAccount: (accountId: string) => void;
   setLanguage: (lang: string) => void;
   setUsername: (username: string) => void;
   setAvatar: (avatarDataUrl: string) => void;
@@ -31,13 +40,39 @@ function persist(user: User, token: string, language: string) {
   localStorage.setItem("tepla-auth", JSON.stringify({ user, token, language }));
 }
 
+function getSavedAccounts(): SavedAccount[] {
+  try {
+    const raw = localStorage.getItem("tepla-accounts");
+    return raw ? JSON.parse(raw) : [];
+  } catch { return []; }
+}
+
+function saveAccountToList(user: User, token: string, language: string) {
+  const accounts = getSavedAccounts();
+  const idx = accounts.findIndex((a) => a.user.id === user.id);
+  const entry: SavedAccount = { user, token, language };
+  if (idx >= 0) {
+    accounts[idx] = entry;
+  } else {
+    accounts.push(entry);
+  }
+  localStorage.setItem("tepla-accounts", JSON.stringify(accounts));
+}
+
+function removeAccountFromList(userId: string) {
+  const accounts = getSavedAccounts().filter((a) => a.user.id !== userId);
+  localStorage.setItem("tepla-accounts", JSON.stringify(accounts));
+}
+
 export const useAuthStore = create<AuthState>((set, get) => ({
   user: null,
   token: null,
   isLoading: true,
   language: "ru",
+  savedAccounts: [],
 
   hydrate: () => {
+    const accounts = getSavedAccounts();
     const stored = localStorage.getItem("tepla-auth");
     if (stored) {
       try {
@@ -46,12 +81,12 @@ export const useAuthStore = create<AuthState>((set, get) => ({
           api.setToken(data.token);
           connectSocket(data.token);
           const u = applyOwnerFlags(data.user);
-          set({ user: u, token: data.token, language: data.language || "ru", isLoading: false });
+          set({ user: u, token: data.token, language: data.language || "ru", isLoading: false, savedAccounts: accounts });
           return;
         }
       } catch { /* corrupted */ }
     }
-    set({ isLoading: false });
+    set({ isLoading: false, savedAccounts: accounts });
   },
 
   login: async (email, password) => {
@@ -76,7 +111,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       api.setToken(accessToken);
       connectSocket(accessToken);
       persist(finalUser, accessToken, finalUser.language || get().language);
-      set({ user: finalUser, token: accessToken, isLoading: false });
+      saveAccountToList(finalUser, accessToken, finalUser.language || get().language);
+      set({ user: finalUser, token: accessToken, isLoading: false, savedAccounts: getSavedAccounts() });
       return true;
     } catch (err) {
       console.warn("[auth] login failed:", err);
@@ -105,7 +141,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       api.setToken(accessToken);
       connectSocket(accessToken);
       persist(finalUser, accessToken, language);
-      set({ user: finalUser, token: accessToken, isLoading: false, language });
+      saveAccountToList(finalUser, accessToken, language);
+      set({ user: finalUser, token: accessToken, isLoading: false, language, savedAccounts: getSavedAccounts() });
       return true;
     } catch (err) {
       console.warn("[auth] register failed:", err);
@@ -118,7 +155,24 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     api.setToken(null);
     disconnectSocket();
     localStorage.removeItem("tepla-auth");
-    set({ user: null, token: null });
+    set({ user: null, token: null, savedAccounts: getSavedAccounts() });
+  },
+
+  switchAccount: (accountId) => {
+    const accounts = getSavedAccounts();
+    const target = accounts.find((a) => a.user.id === accountId);
+    if (!target) return;
+    disconnectSocket();
+    const u = applyOwnerFlags(target.user);
+    api.setToken(target.token);
+    connectSocket(target.token);
+    persist(u, target.token, target.language);
+    set({ user: u, token: target.token, language: target.language, savedAccounts: accounts });
+  },
+
+  removeSavedAccount: (accountId) => {
+    removeAccountFromList(accountId);
+    set({ savedAccounts: getSavedAccounts() });
   },
 
   setLanguage: (lang) => {
@@ -142,14 +196,14 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       data.user = updated;
       localStorage.setItem("tepla-auth", JSON.stringify(data));
     }
-    // Try to update on server too (fire-and-forget)
+    saveAccountToList(updated, get().token!, get().language);
+    set({ savedAccounts: getSavedAccounts() });
     api.patch("/users/" + user.id, { avatarUrl: avatarDataUrl }).catch(() => {});
   },
 
   setUsername: (username) => {
-    const { user, token } = get();
+    const { user } = get();
     if (!user) return;
-    // Fire-and-forget API call to update username on server
     api.patch("/users/" + user.id, { username }).catch((err) =>
       console.warn("[auth] username update failed:", err)
     );
@@ -161,5 +215,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       data.user = updated;
       localStorage.setItem("tepla-auth", JSON.stringify(data));
     }
+    saveAccountToList(updated, get().token!, get().language);
+    set({ savedAccounts: getSavedAccounts() });
   },
 }));

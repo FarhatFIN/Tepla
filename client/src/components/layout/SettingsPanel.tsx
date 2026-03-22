@@ -8,7 +8,7 @@ import api from "@/lib/api";
 
 export default function SettingsPanel() {
   const { showSettings, toggleSettings } = useChatStore();
-  const { user, language, setLanguage, setUsername, setAvatar, logout } = useAuthStore();
+  const { user, language, setLanguage, setUsername, setAvatar, logout, savedAccounts, switchAccount } = useAuthStore();
   const [activeSection, setActiveSection] = useState<string | null>(null);
   const [editingUsername, setEditingUsername] = useState(false);
   const [newUsername, setNewUsername] = useState("");
@@ -423,6 +423,29 @@ export default function SettingsPanel() {
                 </div>
               ))}
             </div>
+
+            {/* Account switcher */}
+            {savedAccounts.length > 1 && (
+              <div className="border-t border-[var(--border)] p-2">
+                <p className="px-3 py-1.5 text-[10px] font-semibold uppercase text-[var(--text-tertiary)] tracking-wider">Switch Account</p>
+                {savedAccounts.filter((a) => a.user.id !== user?.id).map((acc) => (
+                  <button key={acc.user.id} onClick={() => { switchAccount(acc.user.id); toggleSettings(); window.location.reload(); }} className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-colors hover:bg-[var(--bg-hover)]">
+                    {acc.user.avatar ? (
+                      <img src={acc.user.avatar} alt="" className="h-8 w-8 rounded-full object-cover" />
+                    ) : (
+                      <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[var(--accent)] text-xs font-bold text-white">
+                        {acc.user.name.charAt(0).toUpperCase()}
+                      </div>
+                    )}
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium">{acc.user.name}</p>
+                      <p className="truncate text-[10px] text-[var(--text-tertiary)]">@{acc.user.username}</p>
+                    </div>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2"><polyline points="9 18 15 12 9 6"/></svg>
+                  </button>
+                ))}
+              </div>
+            )}
 
             {/* Logout */}
             <div className="border-t border-[var(--border)] p-2">
