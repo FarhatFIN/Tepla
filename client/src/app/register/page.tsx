@@ -6,6 +6,7 @@ import { useAuthStore } from "@/stores/auth-store";
 import Input from "@/components/ui/Input";
 import { languages } from "@/lib/countries";
 import { useTheme } from "@/hooks/useTheme";
+import { useTranslation } from "@/hooks/useTranslation";
 
 export default function RegisterPage() {
   const [name, setName] = useState("");
@@ -21,6 +22,7 @@ export default function RegisterPage() {
   const { register } = useAuthStore();
   const router = useRouter();
   const { theme, toggleTheme } = useTheme();
+  const t = useTranslation();
 
   function validateUsername(val: string) {
     const clean = val.toLowerCase().replace(/[^a-z0-9_]/g, "");
@@ -35,13 +37,13 @@ export default function RegisterPage() {
 
   function validate() {
     const e: Record<string, string> = {};
-    if (!name || name.length < 2) e.name = "Min 2 characters";
-    if (!username || username.length < 4) e.username = "Min 4 characters";
-    if (!/^[a-z0-9_]+$/.test(username)) e.username = "Only a-z, 0-9 and _";
-    if (usernameStatus === "taken") e.username = "Username is already taken";
-    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) e.email = "Enter a valid email";
-    if (!password || password.length < 6) e.password = "Min 6 characters";
-    if (confirm !== password) e.confirm = "Passwords don't match";
+    if (!name || name.length < 2) e.name = t("min_2_chars");
+    if (!username || username.length < 4) e.username = t("min_4_chars");
+    if (!/^[a-z0-9_]+$/.test(username)) e.username = t("only_az_09");
+    if (usernameStatus === "taken") e.username = t("username_taken");
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) e.email = t("enter_valid_email");
+    if (!password || password.length < 6) e.password = t("password_min_6");
+    if (confirm !== password) e.confirm = t("passwords_dont_match");
     return e;
   }
 
@@ -57,7 +59,7 @@ export default function RegisterPage() {
     if (ok) {
       router.push("/");
     } else {
-      setGlobalError("Registration failed. Email or username may already be taken.");
+      setGlobalError(t("registration_failed"));
     }
   }
 
@@ -71,25 +73,25 @@ export default function RegisterPage() {
 
       <div className="mb-8 text-center">
         <h1 className="text-4xl font-bold gradient-text">Tepla</h1>
-        <p className="mt-2 text-sm text-[var(--text-tertiary)]">Create your account</p>
+        <p className="mt-2 text-sm text-[var(--text-tertiary)]">{t("create_your_account")}</p>
       </div>
 
       <div className="w-full max-w-sm rounded-2xl bg-[var(--bg-sidebar)] p-6 shadow-lg">
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-          <h2 className="text-center text-xl font-semibold">Register</h2>
+          <h2 className="text-center text-xl font-semibold">{t("register")}</h2>
 
           {globalError && <p className="rounded-lg bg-red-500/10 px-3 py-2 text-center text-sm text-red-400">{globalError}</p>}
 
-          <Input label="Name" placeholder="Your name" value={name} onChange={(e) => setName(e.target.value)} error={errors.name} autoComplete="name" />
+          <Input label={t("name")} placeholder={t("your_name")} value={name} onChange={(e) => setName(e.target.value)} error={errors.name} autoComplete="name" />
 
           {/* Username field */}
           <div className="flex flex-col gap-1.5">
-            <label className="text-sm font-medium text-[var(--text-secondary)]">Username</label>
+            <label className="text-sm font-medium text-[var(--text-secondary)]">{t("username")}</label>
             <div className="relative">
               <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-[var(--text-tertiary)]">@</span>
               <input
                 type="text"
-                placeholder="your_username"
+                placeholder={t("your_username")}
                 value={username}
                 onChange={(e) => validateUsername(e.target.value)}
                 maxLength={32}
@@ -106,16 +108,16 @@ export default function RegisterPage() {
               )}
             </div>
             {errors.username && <p className="text-xs text-red-400">{errors.username}</p>}
-            {usernameStatus === "available" && <p className="text-[10px] text-emerald-400">Username is available!</p>}
-            {usernameStatus === "taken" && <p className="text-[10px] text-red-400">Username is already taken</p>}
-            <p className="text-[10px] text-[var(--text-tertiary)]">Others can find you by @{username || "username"}. Only a-z, 0-9, _</p>
+            {usernameStatus === "available" && <p className="text-[10px] text-emerald-400">{t("username_available")}</p>}
+            {usernameStatus === "taken" && <p className="text-[10px] text-red-400">{t("username_taken")}</p>}
+            <p className="text-[10px] text-[var(--text-tertiary)]">{t("username_hint", { username: username || "username" })}</p>
           </div>
 
-          <Input label="Email" type="email" placeholder="your@email.com" value={email} onChange={(e) => setEmail(e.target.value)} error={errors.email} autoComplete="email" />
+          <Input label={t("email")} type="email" placeholder={t("your_email")} value={email} onChange={(e) => setEmail(e.target.value)} error={errors.email} autoComplete="email" />
 
           {/* Language selector */}
           <div className="flex flex-col gap-1.5">
-            <label className="text-sm font-medium text-[var(--text-secondary)]">Auto-translate language</label>
+            <label className="text-sm font-medium text-[var(--text-secondary)]">{t("auto_translate_lang")}</label>
             <div className="grid grid-cols-3 gap-1.5">
               {languages.slice(0, 9).map((lang) => (
                 <button key={lang.code} type="button" onClick={() => setLanguage(lang.code)}
@@ -125,17 +127,17 @@ export default function RegisterPage() {
                 </button>
               ))}
             </div>
-            <p className="text-[10px] text-[var(--text-tertiary)]">Messages in other languages will be auto-translated to your selected language</p>
+            <p className="text-[10px] text-[var(--text-tertiary)]">{t("auto_translate_hint")}</p>
           </div>
 
-          <Input label="Password" isPassword placeholder="Min 6 characters" value={password} onChange={(e) => setPassword(e.target.value)} error={errors.password} autoComplete="new-password" />
-          <Input label="Confirm password" isPassword placeholder="Repeat password" value={confirm} onChange={(e) => setConfirm(e.target.value)} error={errors.confirm} autoComplete="new-password" />
+          <Input label={t("password")} isPassword placeholder={t("min_6_chars")} value={password} onChange={(e) => setPassword(e.target.value)} error={errors.password} autoComplete="new-password" />
+          <Input label={t("confirm_password")} isPassword placeholder={t("repeat_password")} value={confirm} onChange={(e) => setConfirm(e.target.value)} error={errors.confirm} autoComplete="new-password" />
 
           <button type="submit" disabled={loading} className="mt-2 flex items-center justify-center rounded-xl bg-[var(--accent)] px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-[var(--accent-hover)] disabled:opacity-60">
-            {loading ? <div className="h-5 w-5 animate-spin rounded-full border-2 border-white border-t-transparent" /> : "Create Account"}
+            {loading ? <div className="h-5 w-5 animate-spin rounded-full border-2 border-white border-t-transparent" /> : t("create_account")}
           </button>
           <p className="text-center text-sm text-[var(--text-tertiary)]">
-            Already have an account? <Link href="/login" className="text-[var(--accent)] hover:underline">Sign In</Link>
+            {t("already_have_account")} <Link href="/login" className="text-[var(--accent)] hover:underline">{t("sign_in")}</Link>
           </p>
         </form>
       </div>

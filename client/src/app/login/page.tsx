@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useAuthStore } from "@/stores/auth-store";
 import Input from "@/components/ui/Input";
 import { useTheme } from "@/hooks/useTheme";
+import { useTranslation } from "@/hooks/useTranslation";
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
@@ -15,6 +16,7 @@ export default function LoginPage() {
   const { login, switchAccount, removeSavedAccount, savedAccounts, hydrate } = useAuthStore();
   const router = useRouter();
   const { theme, toggleTheme } = useTheme();
+  const t = useTranslation();
 
   useEffect(() => { hydrate(); }, [hydrate]);
 
@@ -23,13 +25,13 @@ export default function LoginPage() {
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setError("");
-    if (!email || !email.includes("@")) { setError("Enter a valid email"); return; }
-    if (!password || password.length < 6) { setError("Password must be at least 6 characters"); return; }
+    if (!email || !email.includes("@")) { setError(t("enter_valid_email")); return; }
+    if (!password || password.length < 6) { setError(t("password_min_6")); return; }
     setLoading(true);
     const ok = await login(email, password);
     setLoading(false);
     if (ok) router.push("/");
-    else setError("Invalid credentials");
+    else setError(t("invalid_credentials"));
   }
 
   function handleSwitch(accountId: string) {
@@ -47,13 +49,13 @@ export default function LoginPage() {
 
       <div className="mb-8 text-center">
         <h1 className="text-4xl font-bold gradient-text">Tepla</h1>
-        <p className="mt-2 text-sm text-[var(--text-tertiary)]">Encrypted messenger for everyone</p>
+        <p className="mt-2 text-sm text-[var(--text-tertiary)]">{t("encrypted_messenger")}</p>
       </div>
 
       {/* Saved accounts */}
       {hasAccounts && !showForm && (
         <div className="w-full max-w-sm mb-4">
-          <p className="mb-3 text-center text-xs font-semibold uppercase tracking-wider text-[var(--text-tertiary)]">Your accounts</p>
+          <p className="mb-3 text-center text-xs font-semibold uppercase tracking-wider text-[var(--text-tertiary)]">{t("your_accounts")}</p>
           <div className="flex flex-col gap-2">
             {savedAccounts.map((acc) => (
               <div key={acc.user.id} className="flex items-center gap-3 rounded-2xl bg-[var(--bg-sidebar)] p-3 shadow-lg">
@@ -79,7 +81,7 @@ export default function LoginPage() {
                   </div>
                   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2"><polyline points="9 18 15 12 9 6"/></svg>
                 </button>
-                <button onClick={() => removeSavedAccount(acc.user.id)} className="shrink-0 rounded-lg p-1.5 text-[var(--text-tertiary)] hover:bg-red-500/10 hover:text-red-400 transition-colors" title="Remove account">
+                <button onClick={() => removeSavedAccount(acc.user.id)} className="shrink-0 rounded-lg p-1.5 text-[var(--text-tertiary)] hover:bg-red-500/10 hover:text-red-400 transition-colors" title={t("remove_account")}>
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
                 </button>
               </div>
@@ -87,7 +89,7 @@ export default function LoginPage() {
           </div>
           <button onClick={() => setShowForm(true)} className="mt-3 flex w-full items-center justify-center gap-2 rounded-2xl border border-dashed border-[var(--border)] py-3 text-sm text-[var(--accent)] hover:bg-[var(--bg-hover)] transition-colors">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-            Add another account
+            {t("add_another_account")}
           </button>
         </div>
       )}
@@ -96,19 +98,19 @@ export default function LoginPage() {
       {(!hasAccounts || showForm) && (
         <div className="w-full max-w-sm rounded-2xl bg-[var(--bg-sidebar)] p-6 shadow-lg">
           <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-            <h2 className="text-center text-xl font-semibold">Sign In</h2>
+            <h2 className="text-center text-xl font-semibold">{t("sign_in")}</h2>
             {error && <p className="rounded-lg bg-red-500/10 px-3 py-2 text-center text-sm text-red-400">{error}</p>}
-            <Input label="Email" type="email" placeholder="your@email.com" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email" />
-            <Input label="Password" isPassword placeholder="Min 6 characters" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" />
+            <Input label={t("email")} type="email" placeholder={t("your_email")} value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email" />
+            <Input label={t("password")} isPassword placeholder={t("min_6_chars")} value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" />
             <button type="submit" disabled={loading} className="mt-2 flex items-center justify-center rounded-xl bg-[var(--accent)] px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-[var(--accent-hover)] disabled:opacity-60">
-              {loading ? <div className="h-5 w-5 animate-spin rounded-full border-2 border-white border-t-transparent" /> : "Sign In"}
+              {loading ? <div className="h-5 w-5 animate-spin rounded-full border-2 border-white border-t-transparent" /> : t("sign_in")}
             </button>
             <p className="text-center text-sm text-[var(--text-tertiary)]">
-              No account? <Link href="/register" className="text-[var(--accent)] hover:underline">Register</Link>
+              {t("no_account")} <Link href="/register" className="text-[var(--accent)] hover:underline">{t("register")}</Link>
             </p>
             {hasAccounts && (
               <button type="button" onClick={() => setShowForm(false)} className="text-center text-xs text-[var(--text-tertiary)] hover:text-[var(--accent)] transition-colors">
-                Back to saved accounts
+                {t("back_to_saved")}
               </button>
             )}
           </form>

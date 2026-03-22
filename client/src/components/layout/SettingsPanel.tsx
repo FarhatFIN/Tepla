@@ -5,6 +5,7 @@ import { useAuthStore } from "@/stores/auth-store";
 import Avatar from "@/components/ui/Avatar";
 import { languages } from "@/lib/countries";
 import api from "@/lib/api";
+import { useTranslation } from "@/hooks/useTranslation";
 
 export default function SettingsPanel() {
   const { showSettings, toggleSettings } = useChatStore();
@@ -31,6 +32,7 @@ export default function SettingsPanel() {
   const [animatedEmoji, setAnimatedEmoji] = useState(true);
   const [avatarUploading, setAvatarUploading] = useState(false);
   const avatarInputRef = useRef<HTMLInputElement>(null);
+  const t = useTranslation();
 
   // Admin panel state
   const [adminMaintenanceMode, setAdminMaintenanceMode] = useState(false);
@@ -80,14 +82,14 @@ export default function SettingsPanel() {
   if (!showSettings) return null;
 
   const sections = [
-    { id: "general", icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1.08-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>, label: "General" },
-    { id: "notifications", icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>, label: "Notifications" },
-    { id: "privacy", icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>, label: "Privacy & Security" },
-    { id: "language", icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>, label: "Language & Translation" },
-    { id: "storage", icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>, label: "Storage & Data" },
-    { id: "devices", icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>, label: "Devices" },
-    { id: "folders", icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>, label: "Chat Folders" },
-    ...(user?.isAdmin ? [{ id: "admin", icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>, label: "Admin Panel" }] : []),
+    { id: "general", icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1.08-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>, label: t("general") },
+    { id: "notifications", icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>, label: t("notifications") },
+    { id: "privacy", icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>, label: t("privacy_security") },
+    { id: "language", icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>, label: t("language_translation") },
+    { id: "storage", icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>, label: t("storage_data") },
+    { id: "devices", icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>, label: t("devices") },
+    { id: "folders", icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>, label: t("chat_folders") },
+    ...(user?.isAdmin ? [{ id: "admin", icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>, label: t("admin_panel") }] : []),
   ];
 
   function Toggle({ on, onChange }: { on: boolean; onChange: (v: boolean) => void }) {
@@ -120,9 +122,9 @@ export default function SettingsPanel() {
   }
 
   const privacyOptions = [
-    { value: "everyone", label: "Everyone" },
-    { value: "contacts", label: "Contacts" },
-    { value: "nobody", label: "Nobody" },
+    { value: "everyone", label: t("everyone") },
+    { value: "contacts", label: t("contacts") },
+    { value: "nobody", label: t("nobody") },
   ];
 
   return (
@@ -134,7 +136,7 @@ export default function SettingsPanel() {
             <button onClick={toggleSettings} className="rounded-lg p-1 text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)]">
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
             </button>
-            <h2 className="text-lg font-semibold">Settings</h2>
+            <h2 className="text-lg font-semibold">{t("settings")}</h2>
           </header>
 
           <div className="flex-1 overflow-y-auto">
@@ -207,52 +209,52 @@ export default function SettingsPanel() {
                   {/* General */}
                   {activeSection === "general" && s.id === "general" && (
                     <div className="mb-2 ml-10 mr-3 rounded-xl bg-[var(--bg-input)] p-3 animate-slide-up">
-                      <SettingRow label="Font size">
+                      <SettingRow label={t("font_size")}>
                         <div className="flex items-center gap-2">
                           <button onClick={() => setFontSize(Math.max(12, fontSize - 1))} className="rounded bg-[var(--bg-main)] px-2 py-0.5 text-xs hover:bg-[var(--bg-hover)]">-</button>
                           <span className="text-xs w-6 text-center">{fontSize}</span>
                           <button onClick={() => setFontSize(Math.min(20, fontSize + 1))} className="rounded bg-[var(--bg-main)] px-2 py-0.5 text-xs hover:bg-[var(--bg-hover)]">+</button>
                         </div>
                       </SettingRow>
-                      <SettingRow label="Send by Enter"><Toggle on={sendByEnter} onChange={setSendByEnter} /></SettingRow>
-                      <SettingRow label="Animated emoji"><Toggle on={animatedEmoji} onChange={setAnimatedEmoji} /></SettingRow>
+                      <SettingRow label={t("send_by_enter")}><Toggle on={sendByEnter} onChange={setSendByEnter} /></SettingRow>
+                      <SettingRow label={t("animated_emoji")}><Toggle on={animatedEmoji} onChange={setAnimatedEmoji} /></SettingRow>
                     </div>
                   )}
 
                   {/* Notifications */}
                   {activeSection === "notifications" && s.id === "notifications" && (
                     <div className="mb-2 ml-10 mr-3 rounded-xl bg-[var(--bg-input)] p-3 animate-slide-up">
-                      <p className="mb-2 text-[10px] font-semibold uppercase text-[var(--text-tertiary)]">Private Chats</p>
-                      <SettingRow label="Sound"><Toggle on={notifSound} onChange={setNotifSound} /></SettingRow>
-                      <SettingRow label="Message preview"><Toggle on={notifPreview} onChange={setNotifPreview} /></SettingRow>
-                      <SettingRow label="Push notifications"><Toggle on={notifPush} onChange={setNotifPush} /></SettingRow>
+                      <p className="mb-2 text-[10px] font-semibold uppercase text-[var(--text-tertiary)]">{t("private_chats")}</p>
+                      <SettingRow label={t("sound")}><Toggle on={notifSound} onChange={setNotifSound} /></SettingRow>
+                      <SettingRow label={t("message_preview")}><Toggle on={notifPreview} onChange={setNotifPreview} /></SettingRow>
+                      <SettingRow label={t("push_notifications")}><Toggle on={notifPush} onChange={setNotifPush} /></SettingRow>
                       <div className="my-2 border-t border-[var(--border)]" />
-                      <p className="mb-2 text-[10px] font-semibold uppercase text-[var(--text-tertiary)]">Groups & Channels</p>
-                      <SettingRow label="Sound"><Toggle on={notifGroupSound} onChange={setNotifGroupSound} /></SettingRow>
+                      <p className="mb-2 text-[10px] font-semibold uppercase text-[var(--text-tertiary)]">{t("groups_channels")}</p>
+                      <SettingRow label={t("sound")}><Toggle on={notifGroupSound} onChange={setNotifGroupSound} /></SettingRow>
                     </div>
                   )}
 
                   {/* Privacy & Security */}
                   {activeSection === "privacy" && s.id === "privacy" && (
                     <div className="mb-2 ml-10 mr-3 rounded-xl bg-[var(--bg-input)] p-3 animate-slide-up">
-                      <p className="mb-2 text-[10px] font-semibold uppercase text-[var(--text-tertiary)]">Who can see</p>
-                      <SettingRow label="Last seen"><RadioGroup value={privacyLastSeen} options={privacyOptions} onChange={setPrivacyLastSeen} /></SettingRow>
-                      <SettingRow label="Phone number"><RadioGroup value={privacyPhone} options={privacyOptions} onChange={setPrivacyPhone} /></SettingRow>
-                      <SettingRow label="Profile photo"><RadioGroup value={privacyPhoto} options={privacyOptions} onChange={setPrivacyPhoto} /></SettingRow>
-                      <SettingRow label="Forwarded messages"><RadioGroup value={privacyForwards} options={privacyOptions} onChange={setPrivacyForwards} /></SettingRow>
+                      <p className="mb-2 text-[10px] font-semibold uppercase text-[var(--text-tertiary)]">{t("who_can_see")}</p>
+                      <SettingRow label={t("last_seen_label")}><RadioGroup value={privacyLastSeen} options={privacyOptions} onChange={setPrivacyLastSeen} /></SettingRow>
+                      <SettingRow label={t("phone_number")}><RadioGroup value={privacyPhone} options={privacyOptions} onChange={setPrivacyPhone} /></SettingRow>
+                      <SettingRow label={t("profile_photo")}><RadioGroup value={privacyPhoto} options={privacyOptions} onChange={setPrivacyPhoto} /></SettingRow>
+                      <SettingRow label={t("forwarded_messages")}><RadioGroup value={privacyForwards} options={privacyOptions} onChange={setPrivacyForwards} /></SettingRow>
                       <div className="my-2 border-t border-[var(--border)]" />
-                      <p className="mb-2 text-[10px] font-semibold uppercase text-[var(--text-tertiary)]">Security</p>
+                      <p className="mb-2 text-[10px] font-semibold uppercase text-[var(--text-tertiary)]">{t("security")}</p>
                       <button className="w-full rounded-lg bg-[var(--bg-main)] px-3 py-2 text-left text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] transition-colors mb-1.5">
-                        Two-Factor Authentication
-                        <span className="block text-[10px] text-[var(--text-tertiary)]">Add an extra layer of security</span>
+                        {t("two_factor_auth")}
+                        <span className="block text-[10px] text-[var(--text-tertiary)]">{t("extra_security")}</span>
                       </button>
                       <button className="w-full rounded-lg bg-[var(--bg-main)] px-3 py-2 text-left text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] transition-colors mb-1.5">
-                        Active Sessions
-                        <span className="block text-[10px] text-[var(--text-tertiary)]">Manage logged-in devices</span>
+                        {t("active_sessions")}
+                        <span className="block text-[10px] text-[var(--text-tertiary)]">{t("manage_devices")}</span>
                       </button>
                       <button className="w-full rounded-lg bg-[var(--bg-main)] px-3 py-2 text-left text-xs text-red-400 hover:bg-red-500/10 transition-colors">
-                        Delete Account
-                        <span className="block text-[10px] text-red-400/60">Permanently delete your account and data</span>
+                        {t("delete_account")}
+                        <span className="block text-[10px] text-red-400/60">{t("delete_account_desc")}</span>
                       </button>
                     </div>
                   )}
@@ -260,7 +262,7 @@ export default function SettingsPanel() {
                   {/* Language */}
                   {activeSection === "language" && s.id === "language" && (
                     <div className="mb-2 ml-10 mr-3 rounded-xl bg-[var(--bg-input)] p-3 animate-slide-up">
-                      <p className="mb-2 text-xs text-[var(--text-tertiary)]">Auto-translate messages to:</p>
+                      <p className="mb-2 text-xs text-[var(--text-tertiary)]">{t("auto_translate_to")}</p>
                       <div className="grid grid-cols-2 gap-1.5">
                         {languages.map((l) => (
                           <button key={l.code} onClick={() => setLanguage(l.code)} className={`flex items-center gap-2 rounded-lg px-2.5 py-2 text-xs transition-colors ${language === l.code ? "bg-[var(--accent)] text-white" : "hover:bg-[var(--bg-hover)]"}`}>
@@ -274,32 +276,32 @@ export default function SettingsPanel() {
                   {/* Storage & Data */}
                   {activeSection === "storage" && s.id === "storage" && (
                     <div className="mb-2 ml-10 mr-3 rounded-xl bg-[var(--bg-input)] p-3 animate-slide-up">
-                      <p className="mb-2 text-[10px] font-semibold uppercase text-[var(--text-tertiary)]">Auto-download</p>
-                      <SettingRow label="Photos"><Toggle on={autoDownloadPhotos} onChange={setAutoDownloadPhotos} /></SettingRow>
-                      <SettingRow label="Videos"><Toggle on={autoDownloadVideos} onChange={setAutoDownloadVideos} /></SettingRow>
-                      <SettingRow label="Files"><Toggle on={autoDownloadFiles} onChange={setAutoDownloadFiles} /></SettingRow>
+                      <p className="mb-2 text-[10px] font-semibold uppercase text-[var(--text-tertiary)]">{t("auto_download")}</p>
+                      <SettingRow label={t("photos")}><Toggle on={autoDownloadPhotos} onChange={setAutoDownloadPhotos} /></SettingRow>
+                      <SettingRow label={t("videos")}><Toggle on={autoDownloadVideos} onChange={setAutoDownloadVideos} /></SettingRow>
+                      <SettingRow label={t("files")}><Toggle on={autoDownloadFiles} onChange={setAutoDownloadFiles} /></SettingRow>
                       <div className="my-2 border-t border-[var(--border)]" />
-                      <p className="mb-2 text-[10px] font-semibold uppercase text-[var(--text-tertiary)]">Storage usage</p>
+                      <p className="mb-2 text-[10px] font-semibold uppercase text-[var(--text-tertiary)]">{t("storage_usage")}</p>
                       <div className="space-y-1.5">
                         <div className="flex justify-between text-xs">
-                          <span className="text-[var(--text-secondary)]">Photos</span>
+                          <span className="text-[var(--text-secondary)]">{t("photos")}</span>
                           <span className="text-[var(--text-tertiary)]">12.4 MB</span>
                         </div>
                         <div className="flex justify-between text-xs">
-                          <span className="text-[var(--text-secondary)]">Videos</span>
+                          <span className="text-[var(--text-secondary)]">{t("videos")}</span>
                           <span className="text-[var(--text-tertiary)]">0 B</span>
                         </div>
                         <div className="flex justify-between text-xs">
-                          <span className="text-[var(--text-secondary)]">Files</span>
+                          <span className="text-[var(--text-secondary)]">{t("files")}</span>
                           <span className="text-[var(--text-tertiary)]">2.1 MB</span>
                         </div>
                         <div className="flex justify-between text-xs font-medium pt-1 border-t border-[var(--border)]">
-                          <span className="text-[var(--text-primary)]">Total</span>
+                          <span className="text-[var(--text-primary)]">{t("total")}</span>
                           <span className="text-[var(--text-primary)]">14.5 MB</span>
                         </div>
                       </div>
                       <button className="mt-3 w-full rounded-lg bg-red-500/10 px-3 py-2 text-xs text-red-400 hover:bg-red-500/20 transition-colors">
-                        Clear Cache
+                        {t("clear_cache")}
                       </button>
                     </div>
                   )}
@@ -307,19 +309,19 @@ export default function SettingsPanel() {
                   {/* Devices */}
                   {activeSection === "devices" && s.id === "devices" && (
                     <div className="mb-2 ml-10 mr-3 rounded-xl bg-[var(--bg-input)] p-3 animate-slide-up">
-                      <p className="mb-2 text-[10px] font-semibold uppercase text-[var(--text-tertiary)]">Current device</p>
+                      <p className="mb-2 text-[10px] font-semibold uppercase text-[var(--text-tertiary)]">{t("current_device")}</p>
                       <div className="flex items-center gap-3 rounded-lg bg-[var(--bg-main)] p-2.5 mb-3">
                         <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-500/20 text-emerald-400">
                           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
                         </div>
                         <div>
-                          <p className="text-xs font-medium">This device</p>
+                          <p className="text-xs font-medium">{t("this_device")}</p>
                           <p className="text-[10px] text-[var(--text-tertiary)]">Windows - Chrome</p>
-                          <p className="text-[10px] text-emerald-400">Online now</p>
+                          <p className="text-[10px] text-emerald-400">{t("online_now")}</p>
                         </div>
                       </div>
                       <button className="w-full rounded-lg bg-red-500/10 px-3 py-2 text-xs text-red-400 hover:bg-red-500/20 transition-colors">
-                        Terminate All Other Sessions
+                        {t("terminate_sessions")}
                       </button>
                     </div>
                   )}
@@ -329,70 +331,70 @@ export default function SettingsPanel() {
                     <div className="mb-2 ml-10 mr-3 rounded-xl bg-[var(--bg-input)] p-3 animate-slide-up">
                       <div className="flex items-center gap-2 mb-3 pb-2 border-b border-[var(--border)]">
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-                        <span className="text-xs font-bold text-[var(--accent)] uppercase tracking-wider">Admin Controls</span>
+                        <span className="text-xs font-bold text-[var(--accent)] uppercase tracking-wider">{t("admin_controls")}</span>
                       </div>
 
-                      <p className="mb-2 text-[10px] font-semibold uppercase text-[var(--text-tertiary)]">Server</p>
-                      <SettingRow label="Maintenance mode"><Toggle on={adminMaintenanceMode} onChange={setAdminMaintenanceMode} /></SettingRow>
-                      <SettingRow label="Open registration"><Toggle on={adminRegistrationOpen} onChange={setAdminRegistrationOpen} /></SettingRow>
-                      <SettingRow label="Max file size (MB)">
+                      <p className="mb-2 text-[10px] font-semibold uppercase text-[var(--text-tertiary)]">{t("server")}</p>
+                      <SettingRow label={t("maintenance_mode")}><Toggle on={adminMaintenanceMode} onChange={setAdminMaintenanceMode} /></SettingRow>
+                      <SettingRow label={t("open_registration")}><Toggle on={adminRegistrationOpen} onChange={setAdminRegistrationOpen} /></SettingRow>
+                      <SettingRow label={t("max_file_size")}>
                         <div className="flex items-center gap-2">
                           <input type="number" value={adminMaxFileSize} onChange={(e) => setAdminMaxFileSize(Number(e.target.value))} className="w-16 rounded bg-[var(--bg-main)] px-2 py-0.5 text-xs text-center text-[var(--text-primary)] outline-none" />
                         </div>
                       </SettingRow>
 
                       <div className="my-2 border-t border-[var(--border)]" />
-                      <p className="mb-2 text-[10px] font-semibold uppercase text-[var(--text-tertiary)]">Statistics</p>
+                      <p className="mb-2 text-[10px] font-semibold uppercase text-[var(--text-tertiary)]">{t("statistics")}</p>
                       <div className="grid grid-cols-2 gap-2 mb-3">
                         <div className="rounded-lg bg-[var(--bg-main)] p-2.5 text-center">
                           <p className="text-lg font-bold text-[var(--accent)]">2</p>
-                          <p className="text-[10px] text-[var(--text-tertiary)]">Total Users</p>
+                          <p className="text-[10px] text-[var(--text-tertiary)]">{t("total_users")}</p>
                         </div>
                         <div className="rounded-lg bg-[var(--bg-main)] p-2.5 text-center">
                           <p className="text-lg font-bold text-emerald-400">1</p>
-                          <p className="text-[10px] text-[var(--text-tertiary)]">Online Now</p>
+                          <p className="text-[10px] text-[var(--text-tertiary)]">{t("online_now_stat")}</p>
                         </div>
                         <div className="rounded-lg bg-[var(--bg-main)] p-2.5 text-center">
                           <p className="text-lg font-bold text-violet-400">2</p>
-                          <p className="text-[10px] text-[var(--text-tertiary)]">Total Chats</p>
+                          <p className="text-[10px] text-[var(--text-tertiary)]">{t("total_chats")}</p>
                         </div>
                         <div className="rounded-lg bg-[var(--bg-main)] p-2.5 text-center">
                           <p className="text-lg font-bold text-amber-400">6</p>
-                          <p className="text-[10px] text-[var(--text-tertiary)]">Messages Today</p>
+                          <p className="text-[10px] text-[var(--text-tertiary)]">{t("messages_today")}</p>
                         </div>
                       </div>
 
                       <div className="my-2 border-t border-[var(--border)]" />
-                      <p className="mb-2 text-[10px] font-semibold uppercase text-[var(--text-tertiary)]">Broadcast</p>
-                      <textarea value={adminBroadcastText} onChange={(e) => setAdminBroadcastText(e.target.value)} placeholder="Message to all users..." rows={2}
+                      <p className="mb-2 text-[10px] font-semibold uppercase text-[var(--text-tertiary)]">{t("broadcast")}</p>
+                      <textarea value={adminBroadcastText} onChange={(e) => setAdminBroadcastText(e.target.value)} placeholder={t("message_to_all")} rows={2}
                         className="w-full rounded-lg bg-[var(--bg-main)] px-3 py-2 text-xs text-[var(--text-primary)] placeholder-[var(--text-tertiary)] outline-none resize-none mb-2" />
                       <button onClick={() => { if (adminBroadcastText.trim()) { alert("Broadcast sent: " + adminBroadcastText); setAdminBroadcastText(""); } }}
                         className="w-full rounded-lg bg-[var(--accent)] px-3 py-2 text-xs font-semibold text-white hover:opacity-90 transition-opacity">
-                        Send Broadcast
+                        {t("send_broadcast")}
                       </button>
 
                       <div className="my-2 border-t border-[var(--border)]" />
-                      <p className="mb-2 text-[10px] font-semibold uppercase text-[var(--text-tertiary)]">Quick Actions</p>
+                      <p className="mb-2 text-[10px] font-semibold uppercase text-[var(--text-tertiary)]">{t("quick_actions")}</p>
                       <div className="space-y-1.5">
                         <button className="w-full rounded-lg bg-[var(--bg-main)] px-3 py-2 text-left text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] transition-colors">
-                          <span className="font-medium">Manage Users</span>
-                          <span className="block text-[10px] text-[var(--text-tertiary)]">Ban, verify, promote users</span>
+                          <span className="font-medium">{t("manage_users")}</span>
+                          <span className="block text-[10px] text-[var(--text-tertiary)]">{t("manage_users_desc")}</span>
                         </button>
                         <button className="w-full rounded-lg bg-[var(--bg-main)] px-3 py-2 text-left text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] transition-colors">
-                          <span className="font-medium">Reported Content</span>
-                          <span className="block text-[10px] text-[var(--text-tertiary)]">0 pending reports</span>
+                          <span className="font-medium">{t("reported_content")}</span>
+                          <span className="block text-[10px] text-[var(--text-tertiary)]">{t("pending_reports", { count: 0 })}</span>
                         </button>
                         <button className="w-full rounded-lg bg-[var(--bg-main)] px-3 py-2 text-left text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] transition-colors">
-                          <span className="font-medium">Server Logs</span>
-                          <span className="block text-[10px] text-[var(--text-tertiary)]">View activity and error logs</span>
+                          <span className="font-medium">{t("server_logs")}</span>
+                          <span className="block text-[10px] text-[var(--text-tertiary)]">{t("server_logs_desc")}</span>
                         </button>
                         <button className="w-full rounded-lg bg-[var(--bg-main)] px-3 py-2 text-left text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] transition-colors">
-                          <span className="font-medium">Feature Flags</span>
-                          <span className="block text-[10px] text-[var(--text-tertiary)]">Toggle premium features, A/B tests</span>
+                          <span className="font-medium">{t("feature_flags")}</span>
+                          <span className="block text-[10px] text-[var(--text-tertiary)]">{t("feature_flags_desc")}</span>
                         </button>
                         <button className="w-full rounded-lg bg-red-500/10 px-3 py-2 text-left text-xs text-red-400 hover:bg-red-500/20 transition-colors">
-                          <span className="font-medium">Clear All Cache</span>
-                          <span className="block text-[10px] text-red-400/60">Flush Redis + CDN cache</span>
+                          <span className="font-medium">{t("clear_all_cache")}</span>
+                          <span className="block text-[10px] text-red-400/60">{t("clear_all_cache_desc")}</span>
                         </button>
                       </div>
                     </div>
@@ -401,7 +403,7 @@ export default function SettingsPanel() {
                   {/* Chat Folders */}
                   {activeSection === "folders" && s.id === "folders" && (
                     <div className="mb-2 ml-10 mr-3 rounded-xl bg-[var(--bg-input)] p-3 animate-slide-up">
-                      <p className="mb-2 text-[10px] font-semibold uppercase text-[var(--text-tertiary)]">Your folders</p>
+                      <p className="mb-2 text-[10px] font-semibold uppercase text-[var(--text-tertiary)]">{t("your_folders")}</p>
                       {[
                         { name: "Work", icon: "\ud83d\udcbc", count: 0 },
                         { name: "Channels", icon: "\ud83d\udce2", count: 0 },
@@ -412,11 +414,11 @@ export default function SettingsPanel() {
                             <span>{f.icon}</span>
                             <span className="text-xs font-medium">{f.name}</span>
                           </div>
-                          <span className="text-[10px] text-[var(--text-tertiary)]">{f.count} chats</span>
+                          <span className="text-[10px] text-[var(--text-tertiary)]">{t("chats_count", { count: f.count })}</span>
                         </div>
                       ))}
                       <button className="mt-2 w-full rounded-lg border border-dashed border-[var(--border)] px-3 py-2.5 text-xs text-[var(--accent)] hover:bg-[var(--bg-hover)] transition-colors">
-                        + Create New Folder
+                        {t("create_new_folder")}
                       </button>
                     </div>
                   )}
@@ -427,7 +429,7 @@ export default function SettingsPanel() {
             {/* Account switcher */}
             {savedAccounts.length > 1 && (
               <div className="border-t border-[var(--border)] p-2">
-                <p className="px-3 py-1.5 text-[10px] font-semibold uppercase text-[var(--text-tertiary)] tracking-wider">Switch Account</p>
+                <p className="px-3 py-1.5 text-[10px] font-semibold uppercase text-[var(--text-tertiary)] tracking-wider">{t("switch_account")}</p>
                 {savedAccounts.filter((a) => a.user.id !== user?.id).map((acc) => (
                   <button key={acc.user.id} onClick={() => { switchAccount(acc.user.id); toggleSettings(); window.location.reload(); }} className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-colors hover:bg-[var(--bg-hover)]">
                     {acc.user.avatar ? (
@@ -451,7 +453,7 @@ export default function SettingsPanel() {
             <div className="border-t border-[var(--border)] p-2">
               <button onClick={logout} className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-red-400 transition-colors hover:bg-red-500/10">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
-                <span className="text-sm">Log Out</span>
+                <span className="text-sm">{t("log_out")}</span>
               </button>
             </div>
           </div>

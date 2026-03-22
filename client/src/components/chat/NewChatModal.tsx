@@ -3,6 +3,7 @@ import React, { useState, useEffect } from "react";
 import Modal from "@/components/ui/Modal";
 import api from "@/lib/api";
 import { useChatStore } from "@/stores/chat-store";
+import { useTranslation } from "@/hooks/useTranslation";
 
 type Tab = "contact" | "group" | "channel";
 
@@ -13,6 +14,7 @@ interface Props {
 }
 
 export default function NewChatModal({ open, onClose, initialTab = "contact" }: Props) {
+  const t = useTranslation();
   const [tab, setTab] = useState<Tab>(initialTab);
   const [search, setSearch] = useState("");
   const [searchResults, setSearchResults] = useState<any[]>([]);
@@ -35,9 +37,9 @@ export default function NewChatModal({ open, onClose, initialTab = "contact" }: 
     try {
       const res = await api.get<{ success: boolean; data: any[] }>(`/users/search?q=${encodeURIComponent(search)}`);
       setSearchResults(res.data || []);
-      if (!res.data?.length) setError("No users found");
+      if (!res.data?.length) setError(t("no_users_found"));
     } catch {
-      setError("Search failed");
+      setError(t("search_failed"));
     }
     setSearching(false);
   }
@@ -54,14 +56,14 @@ export default function NewChatModal({ open, onClose, initialTab = "contact" }: 
       setActiveChat(res.data.id);
       onClose();
     } catch {
-      setError("Failed to create chat");
+      setError(t("failed_create_chat"));
     }
     setCreating(false);
   }
 
   async function createGroup() {
     if (!groupName.trim() || groupName.trim().length < 2) {
-      setError("Group name must be at least 2 characters");
+      setError(t("group_min_2"));
       return;
     }
     setCreating(true);
@@ -75,14 +77,14 @@ export default function NewChatModal({ open, onClose, initialTab = "contact" }: 
       setActiveChat(res.data.id);
       onClose();
     } catch {
-      setError("Failed to create group");
+      setError(t("failed_create_group"));
     }
     setCreating(false);
   }
 
   async function createChannel() {
     if (!channelName.trim() || channelName.trim().length < 2) {
-      setError("Channel name must be at least 2 characters");
+      setError(t("channel_min_2"));
       return;
     }
     setCreating(true);
@@ -99,7 +101,7 @@ export default function NewChatModal({ open, onClose, initialTab = "contact" }: 
       setActiveChat(res.data.id);
       onClose();
     } catch {
-      setError("Failed to create channel");
+      setError(t("failed_create_channel"));
     }
     setCreating(false);
   }
@@ -123,33 +125,33 @@ export default function NewChatModal({ open, onClose, initialTab = "contact" }: 
   const tabs: { id: Tab; label: string; icon: React.ReactNode }[] = [
     {
       id: "contact",
-      label: "New Chat",
+      label: t("new_chat"),
       icon: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>,
     },
     {
       id: "group",
-      label: "Group",
+      label: t("group"),
       icon: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>,
     },
     {
       id: "channel",
-      label: "Channel",
+      label: t("channel"),
       icon: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 2L11 13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>,
     },
   ];
 
   return (
-    <Modal open={open} onClose={handleClose} title="Create">
+    <Modal open={open} onClose={handleClose} title={t("create")}>
       {/* Tabs */}
       <div className="flex gap-1 rounded-xl bg-[var(--bg-input)] p-1 mb-4">
-        {tabs.map((t) => (
+        {tabs.map((tb) => (
           <button
-            key={t.id}
-            onClick={() => { setTab(t.id); setError(""); setSuccess(""); }}
-            className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg py-2 text-xs font-medium transition-colors ${tab === t.id ? "bg-[var(--accent)] text-white" : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"}`}
+            key={tb.id}
+            onClick={() => { setTab(tb.id); setError(""); setSuccess(""); }}
+            className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg py-2 text-xs font-medium transition-colors ${tab === tb.id ? "bg-[var(--accent)] text-white" : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"}`}
           >
-            {t.icon}
-            {t.label}
+            {tb.icon}
+            {tb.label}
           </button>
         ))}
       </div>
@@ -160,11 +162,11 @@ export default function NewChatModal({ open, onClose, initialTab = "contact" }: 
       {/* New Chat / Add Contact */}
       {tab === "contact" && (
         <div className="flex flex-col gap-3">
-          <p className="text-xs text-[var(--text-tertiary)]">Find user by username or name</p>
+          <p className="text-xs text-[var(--text-tertiary)]">{t("find_user")}</p>
           <div className="flex gap-2">
             <input
               type="text"
-              placeholder="@username or name..."
+              placeholder={t("username_or_name")}
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && searchUsers()}
@@ -175,7 +177,7 @@ export default function NewChatModal({ open, onClose, initialTab = "contact" }: 
               disabled={searching || search.length < 2}
               className="rounded-xl bg-[var(--accent)] px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-[var(--accent-hover)] disabled:opacity-50"
             >
-              {searching ? <div className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" /> : "Search"}
+              {searching ? <div className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" /> : t("search")}
             </button>
           </div>
           {/* Results */}
@@ -211,10 +213,10 @@ export default function NewChatModal({ open, onClose, initialTab = "contact" }: 
       {/* Create Group */}
       {tab === "group" && (
         <div className="flex flex-col gap-3">
-          <p className="text-xs text-[var(--text-tertiary)]">Create a group chat for your team or friends</p>
+          <p className="text-xs text-[var(--text-tertiary)]">{t("group_chat_desc")}</p>
           <input
             type="text"
-            placeholder="Group name..."
+            placeholder={t("group_name")}
             value={groupName}
             onChange={(e) => setGroupName(e.target.value)}
             className="rounded-xl bg-[var(--bg-input)] px-3 py-2.5 text-sm outline-none placeholder:text-[var(--text-tertiary)] focus:ring-2 focus:ring-[var(--accent)]"
@@ -224,7 +226,7 @@ export default function NewChatModal({ open, onClose, initialTab = "contact" }: 
             disabled={creating || !groupName.trim()}
             className="rounded-xl bg-[var(--accent)] px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-[var(--accent-hover)] disabled:opacity-50"
           >
-            {creating ? <div className="mx-auto h-5 w-5 animate-spin rounded-full border-2 border-white border-t-transparent" /> : "Create Group"}
+            {creating ? <div className="mx-auto h-5 w-5 animate-spin rounded-full border-2 border-white border-t-transparent" /> : t("create_group")}
           </button>
         </div>
       )}
@@ -232,10 +234,10 @@ export default function NewChatModal({ open, onClose, initialTab = "contact" }: 
       {/* Create Channel */}
       {tab === "channel" && (
         <div className="flex flex-col gap-3">
-          <p className="text-xs text-[var(--text-tertiary)]">Create a public channel to broadcast messages</p>
+          <p className="text-xs text-[var(--text-tertiary)]">{t("channel_desc_create")}</p>
           <input
             type="text"
-            placeholder="Channel name..."
+            placeholder={t("channel_name")}
             value={channelName}
             onChange={(e) => setChannelName(e.target.value)}
             className="rounded-xl bg-[var(--bg-input)] px-3 py-2.5 text-sm outline-none placeholder:text-[var(--text-tertiary)] focus:ring-2 focus:ring-[var(--accent)]"
@@ -244,14 +246,14 @@ export default function NewChatModal({ open, onClose, initialTab = "contact" }: 
             <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-[var(--text-tertiary)]">@</span>
             <input
               type="text"
-              placeholder="channel_link (optional)"
+              placeholder={t("channel_link")}
               value={channelUsername}
               onChange={(e) => setChannelUsername(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ""))}
               className="w-full rounded-xl bg-[var(--bg-input)] py-2.5 pl-8 pr-3 text-sm outline-none placeholder:text-[var(--text-tertiary)] focus:ring-2 focus:ring-[var(--accent)]"
             />
           </div>
           <textarea
-            placeholder="Description (optional)"
+            placeholder={t("description_optional")}
             value={channelDesc}
             onChange={(e) => setChannelDesc(e.target.value)}
             rows={2}
@@ -262,7 +264,7 @@ export default function NewChatModal({ open, onClose, initialTab = "contact" }: 
             disabled={creating || !channelName.trim()}
             className="rounded-xl bg-[var(--accent)] px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-[var(--accent-hover)] disabled:opacity-50"
           >
-            {creating ? <div className="mx-auto h-5 w-5 animate-spin rounded-full border-2 border-white border-t-transparent" /> : "Create Channel"}
+            {creating ? <div className="mx-auto h-5 w-5 animate-spin rounded-full border-2 border-white border-t-transparent" /> : t("create_channel")}
           </button>
         </div>
       )}

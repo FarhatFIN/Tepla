@@ -3,12 +3,14 @@ import { KeyboardEvent, useEffect, useRef, useState } from "react";
 import { useChatStore } from "@/stores/chat-store";
 import IconButton from "@/components/ui/IconButton";
 import api from "@/lib/api";
+import { useTranslation } from "@/hooks/useTranslation";
 
 interface MessageInputProps { chatId: string; }
 
 interface PreviewFile { file: File; url: string; type: "image" | "video"; }
 
 export default function MessageInput({ chatId }: MessageInputProps) {
+  const t = useTranslation();
   const [text, setText] = useState("");
   const [isRecording, setIsRecording] = useState(false);
   const [recordingTime, setRecordingTime] = useState(0);
@@ -279,11 +281,11 @@ export default function MessageInput({ chatId }: MessageInputProps) {
   const hasText = text.trim().length > 0;
 
   const attachOptions = [
-    { icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>, label: "Photo/Video", color: "text-violet-400", action: () => mediaInputRef.current?.click() },
-    { icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>, label: "File", color: "text-sky-400", action: () => fileInputRef.current?.click() },
-    { icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>, label: "Location", color: "text-emerald-400", action: () => setShowLocation(true) },
-    { icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 20V10"/><path d="M18 20V4"/><path d="M6 20v-4"/></svg>, label: "Poll", color: "text-pink-400", action: () => setShowPoll(true) },
-    { icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="2" width="20" height="20" rx="5"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/></svg>, label: "GIF", color: "text-amber-400", action: () => { setShowGif(true); searchGifs(); } },
+    { icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>, label: t("photo_video"), color: "text-violet-400", action: () => mediaInputRef.current?.click() },
+    { icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>, label: t("file"), color: "text-sky-400", action: () => fileInputRef.current?.click() },
+    { icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>, label: t("location"), color: "text-emerald-400", action: () => setShowLocation(true) },
+    { icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 20V10"/><path d="M18 20V4"/><path d="M6 20v-4"/></svg>, label: t("poll"), color: "text-pink-400", action: () => setShowPoll(true) },
+    { icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="2" width="20" height="20" rx="5"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/></svg>, label: t("gif"), color: "text-amber-400", action: () => { setShowGif(true); searchGifs(); } },
   ];
 
   // ── Video circle recording overlay ──
@@ -295,8 +297,8 @@ export default function MessageInput({ chatId }: MessageInputProps) {
         </div>
         <p className="mt-4 text-white text-lg font-semibold">{formatTime(circleTime)} / 1:00</p>
         <div className="mt-4 flex gap-4">
-          <button onClick={() => { circleRecorderRef.current?.stop(); circleRecorderRef.current?.stream.getTracks().forEach(t => t.stop()); setRecordingCircle(false); clearInterval(circleTimerRef.current); }} className="rounded-full bg-gray-600 px-6 py-2 text-white">Cancel</button>
-          <button onClick={stopCircle} className="rounded-full bg-red-500 px-6 py-2 text-white font-semibold">Send</button>
+          <button onClick={() => { circleRecorderRef.current?.stop(); circleRecorderRef.current?.stream.getTracks().forEach(tr => tr.stop()); setRecordingCircle(false); clearInterval(circleTimerRef.current); }} className="rounded-full bg-gray-600 px-6 py-2 text-white">{t("cancel")}</button>
+          <button onClick={stopCircle} className="rounded-full bg-red-500 px-6 py-2 text-white font-semibold">{t("send")}</button>
         </div>
       </div>
     );
@@ -325,11 +327,11 @@ export default function MessageInput({ chatId }: MessageInputProps) {
               </div>
             ))}
           </div>
-          <input type="text" value={caption} onChange={(e) => setCaption(e.target.value)} placeholder="Add a caption..." className="w-full rounded-lg bg-[var(--bg-input)] px-3 py-1.5 text-sm text-[var(--text-primary)] placeholder-[var(--text-tertiary)] outline-none mb-2" />
+          <input type="text" value={caption} onChange={(e) => setCaption(e.target.value)} placeholder={t("add_caption")} className="w-full rounded-lg bg-[var(--bg-input)] px-3 py-1.5 text-sm text-[var(--text-primary)] placeholder-[var(--text-tertiary)] outline-none mb-2" />
           <div className="flex gap-2">
-            <button onClick={() => { previews.forEach(p => URL.revokeObjectURL(p.url)); setPreviews([]); setCaption(""); }} className="flex-1 rounded-lg bg-[var(--bg-input)] py-1.5 text-sm text-[var(--text-secondary)]">Cancel</button>
+            <button onClick={() => { previews.forEach(p => URL.revokeObjectURL(p.url)); setPreviews([]); setCaption(""); }} className="flex-1 rounded-lg bg-[var(--bg-input)] py-1.5 text-sm text-[var(--text-secondary)]">{t("cancel")}</button>
             <button onClick={sendPreviews} disabled={uploading} className="flex-1 rounded-lg bg-[var(--accent)] py-1.5 text-sm font-semibold text-white disabled:opacity-50">
-              {uploading ? `Sending ${uploadProgress}...` : `Send ${previews.length} file${previews.length > 1 ? "s" : ""}`}
+              {uploading ? t("sending_progress", { progress: uploadProgress }) : t("send_files", { count: previews.length })}
             </button>
           </div>
         </div>
@@ -338,47 +340,47 @@ export default function MessageInput({ chatId }: MessageInputProps) {
       {/* Location picker */}
       {showLocation && (
         <div className="mb-2 rounded-xl bg-[var(--bg-card)] p-3 shadow-lg animate-scale-in">
-          <p className="text-sm font-semibold mb-2">Share Location</p>
+          <p className="text-sm font-semibold mb-2">{t("share_location")}</p>
           <div className="flex flex-col gap-2">
             <button onClick={() => sendLocation(false)} disabled={locating} className="rounded-lg bg-[var(--bg-input)] px-3 py-2 text-sm text-left hover:bg-[var(--bg-hover)] flex items-center gap-2">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
-              {locating ? "Getting location..." : "Send current location"}
+              {locating ? t("getting_location") : t("send_current_location")}
             </button>
             <button onClick={() => sendLocation(true, 900)} disabled={locating} className="rounded-lg bg-[var(--bg-input)] px-3 py-2 text-sm text-left hover:bg-[var(--bg-hover)] flex items-center gap-2">
-              <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />Live location (15 min)
+              <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />{t("live_location_15")}
             </button>
             <button onClick={() => sendLocation(true, 3600)} disabled={locating} className="rounded-lg bg-[var(--bg-input)] px-3 py-2 text-sm text-left hover:bg-[var(--bg-hover)] flex items-center gap-2">
-              <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />Live location (1 hour)
+              <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />{t("live_location_60")}
             </button>
           </div>
-          <button onClick={() => setShowLocation(false)} className="mt-2 text-xs text-[var(--text-tertiary)]">Cancel</button>
+          <button onClick={() => setShowLocation(false)} className="mt-2 text-xs text-[var(--text-tertiary)]">{t("cancel")}</button>
         </div>
       )}
 
       {/* Poll creator */}
       {showPoll && (
         <div className="mb-2 rounded-xl bg-[var(--bg-card)] p-3 shadow-lg animate-scale-in">
-          <p className="text-sm font-semibold mb-2">Create Poll</p>
-          <input type="text" value={pollQuestion} onChange={(e) => setPollQuestion(e.target.value)} placeholder="Ask a question..." className="w-full rounded-lg bg-[var(--bg-input)] px-3 py-2 text-sm text-[var(--text-primary)] placeholder-[var(--text-tertiary)] outline-none mb-2" />
+          <p className="text-sm font-semibold mb-2">{t("create_poll")}</p>
+          <input type="text" value={pollQuestion} onChange={(e) => setPollQuestion(e.target.value)} placeholder={t("ask_question")} className="w-full rounded-lg bg-[var(--bg-input)] px-3 py-2 text-sm text-[var(--text-primary)] placeholder-[var(--text-tertiary)] outline-none mb-2" />
           {pollOptions.map((opt, i) => (
             <div key={i} className="flex items-center gap-1 mb-1">
-              <input type="text" value={opt} onChange={(e) => setPollOptions(o => o.map((v, j) => j === i ? e.target.value : v))} placeholder={`Option ${i + 1}`} className="flex-1 rounded-lg bg-[var(--bg-input)] px-3 py-1.5 text-sm text-[var(--text-primary)] placeholder-[var(--text-tertiary)] outline-none" />
+              <input type="text" value={opt} onChange={(e) => setPollOptions(o => o.map((v, j) => j === i ? e.target.value : v))} placeholder={t("option_n", { n: i + 1 })} className="flex-1 rounded-lg bg-[var(--bg-input)] px-3 py-1.5 text-sm text-[var(--text-primary)] placeholder-[var(--text-tertiary)] outline-none" />
               {pollOptions.length > 2 && <button onClick={() => setPollOptions(o => o.filter((_, j) => j !== i))} className="text-red-400 p-1"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6L6 18M6 6l12 12"/></svg></button>}
             </div>
           ))}
-          {pollOptions.length < 10 && <button onClick={() => setPollOptions(o => [...o, ""])} className="text-xs text-[var(--accent)] mt-1">+ Add option</button>}
+          {pollOptions.length < 10 && <button onClick={() => setPollOptions(o => [...o, ""])} className="text-xs text-[var(--accent)] mt-1">{t("add_option")}</button>}
           <div className="flex gap-2 mt-2">
             <label className="flex items-center gap-1 text-xs text-[var(--text-secondary)]">
-              <input type="checkbox" checked={pollAnonymous} onChange={(e) => setPollAnonymous(e.target.checked)} className="rounded" /> Anonymous
+              <input type="checkbox" checked={pollAnonymous} onChange={(e) => setPollAnonymous(e.target.checked)} className="rounded" /> {t("anonymous")}
             </label>
             <select value={pollType} onChange={(e) => setPollType(e.target.value as "regular" | "quiz")} className="rounded bg-[var(--bg-input)] px-2 py-1 text-xs text-[var(--text-primary)]">
-              <option value="regular">Regular</option>
-              <option value="quiz">Quiz</option>
+              <option value="regular">{t("regular")}</option>
+              <option value="quiz">{t("quiz")}</option>
             </select>
           </div>
           <div className="flex gap-2 mt-2">
-            <button onClick={() => setShowPoll(false)} className="flex-1 rounded-lg bg-[var(--bg-input)] py-1.5 text-sm text-[var(--text-secondary)]">Cancel</button>
-            <button onClick={sendPoll} className="flex-1 rounded-lg bg-[var(--accent)] py-1.5 text-sm font-semibold text-white">Send Poll</button>
+            <button onClick={() => setShowPoll(false)} className="flex-1 rounded-lg bg-[var(--bg-input)] py-1.5 text-sm text-[var(--text-secondary)]">{t("cancel")}</button>
+            <button onClick={sendPoll} className="flex-1 rounded-lg bg-[var(--accent)] py-1.5 text-sm font-semibold text-white">{t("send_poll")}</button>
           </div>
         </div>
       )}
@@ -387,7 +389,7 @@ export default function MessageInput({ chatId }: MessageInputProps) {
       {showGif && (
         <div className="mb-2 rounded-xl bg-[var(--bg-card)] p-3 shadow-lg animate-scale-in max-h-[300px] overflow-y-auto">
           <div className="flex items-center gap-2 mb-2">
-            <input type="text" value={gifQuery} onChange={(e) => setGifQuery(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") searchGifs(); }} placeholder="Search GIFs..." className="flex-1 rounded-lg bg-[var(--bg-input)] px-3 py-1.5 text-sm text-[var(--text-primary)] placeholder-[var(--text-tertiary)] outline-none" />
+            <input type="text" value={gifQuery} onChange={(e) => setGifQuery(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") searchGifs(); }} placeholder={t("search_gifs")} className="flex-1 rounded-lg bg-[var(--bg-input)] px-3 py-1.5 text-sm text-[var(--text-primary)] placeholder-[var(--text-tertiary)] outline-none" />
             <button onClick={() => { setShowGif(false); setGifResults([]); }} className="text-[var(--text-tertiary)]"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
           </div>
           <div className="grid grid-cols-3 gap-1">
@@ -404,7 +406,7 @@ export default function MessageInput({ chatId }: MessageInputProps) {
       {uploading && !previews.length && (
         <div className="mb-2 flex items-center gap-2 rounded-xl bg-[var(--accent-soft)] px-3 py-2 animate-slide-up">
           <div className="h-4 w-4 animate-spin rounded-full border-2 border-[var(--accent)] border-t-transparent" />
-          <span className="text-xs text-[var(--accent)]">Uploading{uploadProgress ? ` ${uploadProgress}` : ""}...</span>
+          <span className="text-xs text-[var(--accent)]">{t("sending_progress", { progress: uploadProgress || "..." })}</span>
         </div>
       )}
 
@@ -413,7 +415,7 @@ export default function MessageInput({ chatId }: MessageInputProps) {
         <div className="mb-2 flex items-center gap-2 rounded-xl bg-[var(--accent-soft)] px-3 py-2 animate-slide-up">
           <div className="h-8 w-0.5 rounded-full bg-[var(--accent)]" />
           <div className="min-w-0 flex-1">
-            <p className="text-xs font-semibold text-[var(--accent)]">{editingMessage ? "Editing" : `Reply to ${replyingTo?.senderName}`}</p>
+            <p className="text-xs font-semibold text-[var(--accent)]">{editingMessage ? t("edited") : `${t("reply")} → ${replyingTo?.senderName}`}</p>
             <p className="truncate text-xs text-[var(--text-secondary)]">{editingMessage?.text || replyingTo?.text}</p>
           </div>
           <button onClick={() => { setReplyingTo(null); setEditingMessage(null); setText(""); }} className="rounded-lg p-1 text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)]">
@@ -428,14 +430,14 @@ export default function MessageInput({ chatId }: MessageInputProps) {
             <div className="h-3 w-3 animate-pulse rounded-full bg-red-500" />
             <span className="text-sm font-medium text-red-400">{formatTime(recordingTime)}</span>
             <div className="flex-1" />
-            <button onClick={cancelRecording} className="text-sm text-[var(--text-tertiary)] hover:text-[var(--text-primary)]">Cancel</button>
-            <button onClick={stopRecording} className="rounded-lg bg-red-500 px-3 py-1 text-sm font-medium text-white">Send</button>
+            <button onClick={cancelRecording} className="text-sm text-[var(--text-tertiary)] hover:text-[var(--text-primary)]">{t("cancel")}</button>
+            <button onClick={stopRecording} className="rounded-lg bg-red-500 px-3 py-1 text-sm font-medium text-white">{t("send")}</button>
           </div>
         ) : (
           <>
             {/* Attach */}
             <div className="relative">
-              <IconButton label="Attach" onClick={() => { setShowAttach(!showAttach); setShowLocation(false); setShowPoll(false); setShowGif(false); }} size="sm">
+              <IconButton label={t("attach")} onClick={() => { setShowAttach(!showAttach); setShowLocation(false); setShowPoll(false); setShowGif(false); }} size="sm">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
               </IconButton>
               {showAttach && (
@@ -452,10 +454,10 @@ export default function MessageInput({ chatId }: MessageInputProps) {
 
             {/* Text input */}
             <textarea ref={textareaRef} rows={1} value={text} onChange={(e) => { setText(e.target.value); setDraft(chatId, e.target.value); }} onKeyDown={handleKeyDown}
-              placeholder="Message..." className="max-h-[120px] min-h-[36px] flex-1 resize-none rounded-xl bg-[var(--bg-input)] px-4 py-2 text-sm text-[var(--text-primary)] placeholder-[var(--text-tertiary)] outline-none transition-colors" />
+              placeholder={t("message_placeholder")} className="max-h-[120px] min-h-[36px] flex-1 resize-none rounded-xl bg-[var(--bg-input)] px-4 py-2 text-sm text-[var(--text-primary)] placeholder-[var(--text-tertiary)] outline-none transition-colors" />
 
             {/* Stickers */}
-            <IconButton label="Stickers" onClick={toggleStickers} size="sm">
+            <IconButton label={t("stickers")} onClick={toggleStickers} size="sm">
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/></svg>
             </IconButton>
 
@@ -466,11 +468,11 @@ export default function MessageInput({ chatId }: MessageInputProps) {
 
             {/* Send / Voice */}
             {hasText || previews.length > 0 ? (
-              <IconButton label="Send" onClick={handleSend} variant="filled" size="sm">
+              <IconButton label={t("send")} onClick={handleSend} variant="filled" size="sm">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
               </IconButton>
             ) : (
-              <IconButton label="Voice message" onClick={startRecording} size="sm">
+              <IconButton label={t("voice_message")} onClick={startRecording} size="sm">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
               </IconButton>
             )}

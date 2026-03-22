@@ -2,6 +2,7 @@
 import { memo, useRef, useState } from "react";
 import { Message, MessageStatus, MessageAttachment } from "@/types";
 import { useChatStore } from "@/stores/chat-store";
+import { useTranslation } from "@/hooks/useTranslation";
 
 interface MessageBubbleProps {
   message: Message;
@@ -67,6 +68,7 @@ function VoicePlayer({ attachment, isOwn }: { attachment: MessageAttachment; isO
 
 // Image/video attachment renderer
 function MediaContent({ attachment, isOwn }: { attachment: MessageAttachment; isOwn: boolean }) {
+  const t = useTranslation();
   const [fullscreen, setFullscreen] = useState(false);
   const [spoiler, setSpoiler] = useState(false);
 
@@ -74,7 +76,7 @@ function MediaContent({ attachment, isOwn }: { attachment: MessageAttachment; is
     return (
       <>
         <div className="relative cursor-pointer overflow-hidden rounded-lg" onClick={() => setFullscreen(true)}>
-          {spoiler && <div className="absolute inset-0 z-10 flex items-center justify-center backdrop-blur-xl bg-black/30" onClick={(e) => { e.stopPropagation(); setSpoiler(false); }}><span className="text-white text-sm font-medium">Tap to reveal</span></div>}
+          {spoiler && <div className="absolute inset-0 z-10 flex items-center justify-center backdrop-blur-xl bg-black/30" onClick={(e) => { e.stopPropagation(); setSpoiler(false); }}><span className="text-white text-sm font-medium">{t("tap_to_reveal")}</span></div>}
           <img src={attachment.thumbnailUrl || attachment.url} alt={attachment.fileName || ""} className="max-h-[300px] max-w-full object-cover" loading="lazy" />
         </div>
         {fullscreen && (
@@ -150,6 +152,7 @@ function LocationContent({ message, isOwn }: { message: Message; isOwn: boolean 
 
 // Poll message
 function PollContent({ message, isOwn }: { message: Message; isOwn: boolean }) {
+  const t = useTranslation();
   const [voted, setVoted] = useState<number | null>(null);
   try {
     const poll = JSON.parse(message.text);
@@ -157,7 +160,7 @@ function PollContent({ message, isOwn }: { message: Message; isOwn: boolean }) {
     return (
       <div className="px-3 py-2 min-w-[220px]">
         <p className="text-sm font-semibold mb-2">{poll.question}</p>
-        {poll.type === "quiz" && voted !== null && <p className={`text-[10px] mb-1 ${voted === poll.correctOptionId ? "text-emerald-400" : "text-red-400"}`}>{voted === poll.correctOptionId ? "Correct!" : "Wrong"}</p>}
+        {poll.type === "quiz" && voted !== null && <p className={`text-[10px] mb-1 ${voted === poll.correctOptionId ? "text-emerald-400" : "text-red-400"}`}>{voted === poll.correctOptionId ? t("correct") : t("wrong")}</p>}
         <div className="flex flex-col gap-1.5">
           {(poll.options || []).map((opt: string, i: number) => {
             const votes = poll.votes?.[i] || 0;
@@ -172,7 +175,7 @@ function PollContent({ message, isOwn }: { message: Message; isOwn: boolean }) {
             );
           })}
         </div>
-        {!poll.isAnonymous && <p className={`mt-1.5 text-[10px] ${isOwn ? "text-white/40" : "text-[var(--text-tertiary)]"}`}>{totalVotes} votes</p>}
+        {!poll.isAnonymous && <p className={`mt-1.5 text-[10px] ${isOwn ? "text-white/40" : "text-[var(--text-tertiary)]"}`}>{t("votes", { count: totalVotes })}</p>}
       </div>
     );
   } catch {
@@ -181,6 +184,7 @@ function PollContent({ message, isOwn }: { message: Message; isOwn: boolean }) {
 }
 
 export default memo(function MessageBubble({ message, isOwn, isFirstInGroup, isLastInGroup }: MessageBubbleProps) {
+  const t = useTranslation();
   const [showActions, setShowActions] = useState(false);
   const [showReactions, setShowReactions] = useState(false);
   const { addReaction, setReplyingTo, pinMessage, deleteMessage } = useChatStore();
@@ -203,18 +207,18 @@ export default memo(function MessageBubble({ message, isOwn, isFirstInGroup, isL
       {/* Action buttons */}
       {showActions && (
         <div className={`absolute top-0 z-10 flex items-center gap-0.5 animate-fade-in ${isOwn ? "right-[calc(100%_-_70%)] -translate-x-2" : "left-[calc(75%)] translate-x-2"}`}>
-          <button onClick={() => setShowReactions(!showReactions)} className="rounded-lg bg-[var(--bg-card)] p-1.5 text-[var(--text-tertiary)] shadow-sm hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]" title="React">
+          <button onClick={() => setShowReactions(!showReactions)} className="rounded-lg bg-[var(--bg-card)] p-1.5 text-[var(--text-tertiary)] shadow-sm hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]" title={t("react")}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/></svg>
           </button>
-          <button onClick={() => setReplyingTo(message)} className="rounded-lg bg-[var(--bg-card)] p-1.5 text-[var(--text-tertiary)] shadow-sm hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]" title="Reply">
+          <button onClick={() => setReplyingTo(message)} className="rounded-lg bg-[var(--bg-card)] p-1.5 text-[var(--text-tertiary)] shadow-sm hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]" title={t("reply")}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="9 17 4 12 9 7"/><path d="M20 18v-2a4 4 0 0 0-4-4H4"/></svg>
           </button>
           {isOwn && (
-            <button onClick={() => deleteMessage(message.chatId, message.id)} className="rounded-lg bg-[var(--bg-card)] p-1.5 text-red-400 shadow-sm hover:bg-red-500/10" title="Delete">
+            <button onClick={() => deleteMessage(message.chatId, message.id)} className="rounded-lg bg-[var(--bg-card)] p-1.5 text-red-400 shadow-sm hover:bg-red-500/10" title={t("delete")}>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
             </button>
           )}
-          <button onClick={() => pinMessage(message.chatId, message.id)} className="rounded-lg bg-[var(--bg-card)] p-1.5 text-[var(--text-tertiary)] shadow-sm hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]" title="Pin">
+          <button onClick={() => pinMessage(message.chatId, message.id)} className="rounded-lg bg-[var(--bg-card)] p-1.5 text-[var(--text-tertiary)] shadow-sm hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]" title={t("pin")}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M16 3h-2V1h-4v2H8C7.45 3 7 3.45 7 4v2l2 2v4H5v2h6v6h2v-6h6v-2h-4V8l2-2V4c0-.55-.45-1-1-1z"/></svg>
           </button>
         </div>
@@ -247,7 +251,7 @@ export default memo(function MessageBubble({ message, isOwn, isFirstInGroup, isL
 
         {/* Forwarded */}
         {message.isForwarded && (
-          <p className={`px-3.5 pt-1.5 text-[10px] italic ${isOwn ? "text-white/50" : "text-[var(--text-tertiary)]"}`}>Forwarded{message.forwardedFrom ? ` from ${message.forwardedFrom}` : ""}</p>
+          <p className={`px-3.5 pt-1.5 text-[10px] italic ${isOwn ? "text-white/50" : "text-[var(--text-tertiary)]"}`}>{message.forwardedFrom ? t("forwarded_from", { name: message.forwardedFrom }) : t("forwarded")}</p>
         )}
 
         {/* Media attachments */}
@@ -287,14 +291,14 @@ export default memo(function MessageBubble({ message, isOwn, isFirstInGroup, isL
             {/* Translated text */}
             {message.translatedText && (
               <div className={`mt-1.5 border-t pt-1.5 ${isOwn ? "border-white/20" : "border-[var(--border)]"}`}>
-                <p className={`text-[10px] ${isOwn ? "text-white/50" : "text-[var(--text-tertiary)]"}`}>Translated</p>
+                <p className={`text-[10px] ${isOwn ? "text-white/50" : "text-[var(--text-tertiary)]"}`}>{t("translated")}</p>
                 <p className="text-sm leading-relaxed">{message.translatedText}</p>
               </div>
             )}
 
             {/* Meta */}
             <div className={`mt-0.5 flex items-center justify-end gap-1 ${isOwn ? "text-white/50" : "text-[var(--text-tertiary)]"}`}>
-              {message.isEdited && <span className="text-[10px]">edited</span>}
+              {message.isEdited && <span className="text-[10px]">{t("edited")}</span>}
               {message.isPinned && <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><path d="M16 3h-2V1h-4v2H8C7.45 3 7 3.45 7 4v2l2 2v4H5v2h6v6h2v-6h6v-2h-4V8l2-2V4c0-.55-.45-1-1-1z"/></svg>}
               <span className="text-[10px] leading-none">{message.timestamp}</span>
               {isOwn && <StatusIcon status={message.status} />}
@@ -326,7 +330,7 @@ export default memo(function MessageBubble({ message, isOwn, isFirstInGroup, isL
         {message.threadRepliesCount && message.threadRepliesCount > 0 && (
           <button className={`flex items-center gap-1 px-3 pb-2 text-xs ${isOwn ? "text-white/60 hover:text-white/80" : "text-[var(--accent)] hover:text-[var(--accent-hover)]"}`}>
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-            {message.threadRepliesCount} replies
+            {t("replies_count", { count: message.threadRepliesCount || 0 })}
           </button>
         )}
       </div>

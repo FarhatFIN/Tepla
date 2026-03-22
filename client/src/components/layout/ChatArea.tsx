@@ -5,6 +5,7 @@ import MessageList from "@/components/chat/MessageList";
 import MessageInput from "@/components/chat/MessageInput";
 import ProfilePanel from "@/components/profile/ProfilePanel";
 import { useChatStore } from "@/stores/chat-store";
+import { useTranslation } from "@/hooks/useTranslation";
 
 interface ChatAreaProps {
   chat: Chat;
@@ -15,12 +16,13 @@ interface ChatAreaProps {
 
 export default function ChatArea({ chat, messages, currentUserId, onBack }: ChatAreaProps) {
   const { showProfile, sendMessage } = useChatStore();
+  const t = useTranslation();
   const pinnedMessages = messages.filter((m) => m.isPinned);
 
   const quickActions = [
-    { label: "Launch update", icon: "🚀" },
-    { label: "Standup", icon: "📋" },
-    { label: "Patch note", icon: "🔧" },
+    { label: t("launch_update"), icon: "🚀" },
+    { label: t("standup"), icon: "📋" },
+    { label: t("patch_note"), icon: "🔧" },
   ];
 
   return (
@@ -33,7 +35,7 @@ export default function ChatArea({ chat, messages, currentUserId, onBack }: Chat
           <div className="border-b border-[var(--border)] bg-[var(--bg-sidebar)] px-4 py-2.5">
             <div className="flex items-center gap-2 mb-1.5">
               <svg width="12" height="12" viewBox="0 0 24 24" fill="var(--accent)" stroke="none"><path d="M16 3h-2V1h-4v2H8C7.45 3 7 3.45 7 4v2l2 2v4H5v2h6v6h2v-6h6v-2h-4V8l2-2V4c0-.55-.45-1-1-1z"/></svg>
-              <span className="text-[10px] font-bold uppercase tracking-wider text-[var(--accent)]">Pinned Messages</span>
+              <span className="text-[10px] font-bold uppercase tracking-wider text-[var(--accent)]">{t("pinned_messages")}</span>
             </div>
             <div className="rounded-lg bg-[var(--bg-input)] px-3 py-2">
               <p className="text-xs text-[var(--text-secondary)] line-clamp-2">

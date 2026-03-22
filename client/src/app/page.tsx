@@ -10,11 +10,13 @@ import SettingsPanel from "@/components/layout/SettingsPanel";
 import PremiumPanel from "@/components/layout/PremiumPanel";
 import CallOverlay from "@/components/calls/CallOverlay";
 import StickerPicker from "@/components/stickers/StickerPicker";
+import { useTranslation } from "@/hooks/useTranslation";
 
 export default function Home() {
   const { user, isLoading, hydrate } = useAuthStore();
   const { chats, activeChatId, setActiveChat, messages, loadChats, bindSocket } = useChatStore();
   const router = useRouter();
+  const t = useTranslation();
 
   useEffect(() => { hydrate(); }, [hydrate]);
 
@@ -35,7 +37,7 @@ export default function Home() {
       <div className="flex h-screen items-center justify-center bg-[var(--bg-main)]">
         <div className="flex flex-col items-center gap-4">
           <div className="h-10 w-10 animate-spin rounded-full border-3 border-[var(--accent)] border-t-transparent" />
-          <span className="text-sm text-[var(--text-tertiary)]">Loading Tepla...</span>
+          <span className="text-sm text-[var(--text-tertiary)]">{t("loading")}</span>
         </div>
       </div>
     );
