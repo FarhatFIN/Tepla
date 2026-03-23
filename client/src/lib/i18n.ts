@@ -240,6 +240,20 @@ const translations: Record<string, Record<string, string>> = {
     "launch_update": "Launch update",
     "standup": "Standup",
     "patch_note": "Patch note",
+
+    // OTP verification
+    "verify_email": "Verify Email",
+    "enter_verification_code": "Enter verification code",
+    "code_sent_to": "We sent a 6-digit code to",
+    "verify": "Verify",
+    "resend_code": "Resend code",
+    "resend_in": "Resend in {seconds}s",
+    "invalid_code": "Invalid code. Try again.",
+    "code_expired": "Code expired. Request a new one.",
+    "too_many_attempts": "Too many attempts. Request a new one.",
+    "check_email": "Check your email for the verification code",
+    "new_code_sent": "New code sent!",
+    "verifying": "Verifying...",
   },
 
   // ── Russian ──
@@ -467,6 +481,20 @@ const translations: Record<string, Record<string, string>> = {
     "launch_update": "Запуск обновления",
     "standup": "Стендап",
     "patch_note": "Патч нота",
+
+    // OTP верификация
+    "verify_email": "Подтверждение почты",
+    "enter_verification_code": "Введите код подтверждения",
+    "code_sent_to": "Мы отправили 6-значный код на",
+    "verify": "Подтвердить",
+    "resend_code": "Отправить код повторно",
+    "resend_in": "Повторно через {seconds}с",
+    "invalid_code": "Неверный код. Попробуйте ещё раз.",
+    "code_expired": "Код истёк. Запросите новый.",
+    "too_many_attempts": "Слишком много попыток. Запросите новый код.",
+    "check_email": "Проверьте почту — мы отправили код подтверждения",
+    "new_code_sent": "Новый код отправлен!",
+    "verifying": "Проверяем...",
   },
 
   // ── Kazakh ──

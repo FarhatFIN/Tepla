@@ -10,14 +10,23 @@ interface SavedAccount {
   language: string;
 }
 
+interface OtpPending {
+  email: string;
+  type: 'login' | 'register' | 'verify';
+}
+
 interface AuthState {
   user: User | null;
   token: string | null;
   isLoading: boolean;
   language: string;
   savedAccounts: SavedAccount[];
-  login: (email: string, password: string) => Promise<boolean>;
-  register: (name: string, email: string, password: string, language: string, username: string) => Promise<boolean>;
+  otpPending: OtpPending | null;
+  login: (email: string, password: string) => Promise<{ ok: boolean; needsOtp?: boolean; needsVerification?: boolean; email?: string }>;
+  register: (name: string, email: string, password: string, language: string, username: string) => Promise<{ ok: boolean; needsOtp?: boolean; email?: string }>;
+  verifyOtp: (email: string, code: string, type: 'login' | 'register' | 'verify') => Promise<boolean>;
+  resendCode: (email: string) => Promise<boolean>;
+  setOtpPending: (pending: OtpPending | null) => void;
   logout: () => void;
   switchAccount: (accountId: string) => void;
   removeSavedAccount: (accountId: string) => void;
@@ -70,6 +79,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   isLoading: true,
   language: "ru",
   savedAccounts: [],
+  otpPending: null,
 
   hydrate: () => {
     const accounts = getSavedAccounts();
@@ -89,12 +99,103 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     set({ isLoading: false, savedAccounts: accounts });
   },
 
+  setOtpPending: (pending) => set({ otpPending: pending }),
+
   login: async (email, password) => {
     set({ isLoading: true });
     try {
+      const res = await api.post<{ success: boolean; data: any }>("/auth/login", { email, password });
+      const data = res.data;
+
+      // Server sends OTP — needs verification step
+      if (data.needsOtp || data.needsVerification) {
+        const type = data.needsVerification ? 'verify' : 'login';
+        set({ isLoading: false, otpPending: { email: data.email, type } });
+        return { ok: false, needsOtp: !!data.needsOtp, needsVerification: !!data.needsVerification, email: data.email };
+      }
+
+      // Shouldn't happen with new flow, but handle direct token response for backwards compat
+      if (data.tokens) {
+        const { tokens: { accessToken }, user: raw } = data;
+        const user: User = {
+          id: raw.id,
+          name: raw.displayName || raw.username || email.split("@")[0],
+          username: raw.username,
+          avatar: raw.avatarUrl,
+          phone: raw.phone,
+          status: "online",
+          isPremium: raw.isPremium || false,
+          language: raw.language || get().language,
+        };
+        const finalUser = applyOwnerFlags(user);
+        api.setToken(accessToken);
+        connectSocket(accessToken);
+        persist(finalUser, accessToken, finalUser.language || get().language);
+        saveAccountToList(finalUser, accessToken, finalUser.language || get().language);
+        set({ user: finalUser, token: accessToken, isLoading: false, savedAccounts: getSavedAccounts() });
+        return { ok: true };
+      }
+
+      set({ isLoading: false });
+      return { ok: false, needsOtp: true, email };
+    } catch (err) {
+      console.warn("[auth] login failed:", err);
+      set({ isLoading: false });
+      throw err;
+    }
+  },
+
+  register: async (name, email, password, language, username) => {
+    set({ isLoading: true });
+    try {
+      const res = await api.post<{ success: boolean; data: any }>(
+        "/auth/register/email",
+        { email, password, username, displayName: name, language }
+      );
+      const data = res.data;
+
+      // New flow: server returns message + email, needs OTP
+      if (data.email && !data.tokens) {
+        set({ isLoading: false, otpPending: { email: data.email, type: 'register' } });
+        return { ok: false, needsOtp: true, email: data.email };
+      }
+
+      // Backwards compat: direct token
+      if (data.tokens) {
+        const { tokens: { accessToken }, user: raw } = data;
+        const user: User = {
+          id: raw.id,
+          name: raw.displayName || name,
+          username: raw.username || username,
+          status: "online",
+          language: raw.language || language,
+          phone: raw.phone,
+        };
+        const finalUser = applyOwnerFlags(user);
+        api.setToken(accessToken);
+        connectSocket(accessToken);
+        persist(finalUser, accessToken, language);
+        saveAccountToList(finalUser, accessToken, language);
+        set({ user: finalUser, token: accessToken, isLoading: false, language, savedAccounts: getSavedAccounts() });
+        return { ok: true };
+      }
+
+      set({ isLoading: false });
+      return { ok: false, needsOtp: true, email };
+    } catch (err) {
+      console.warn("[auth] register failed:", err);
+      set({ isLoading: false });
+      throw err;
+    }
+  },
+
+  verifyOtp: async (email, code, type) => {
+    set({ isLoading: true });
+    try {
+      const endpoint = type === 'login' ? '/auth/verify-login' : '/auth/verify-email';
       const res = await api.post<{ success: boolean; data: { user: any; tokens: { accessToken: string; refreshToken: string }; sessionId: string } }>(
-        "/auth/login",
-        { email, password }
+        endpoint,
+        { email, code }
       );
       const { tokens: { accessToken }, user: raw } = res.data;
       const user: User = {
@@ -112,42 +213,22 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       connectSocket(accessToken);
       persist(finalUser, accessToken, finalUser.language || get().language);
       saveAccountToList(finalUser, accessToken, finalUser.language || get().language);
-      set({ user: finalUser, token: accessToken, isLoading: false, savedAccounts: getSavedAccounts() });
+      set({ user: finalUser, token: accessToken, isLoading: false, otpPending: null, savedAccounts: getSavedAccounts() });
       return true;
     } catch (err) {
-      console.warn("[auth] login failed:", err);
+      console.warn("[auth] OTP verify failed:", err);
       set({ isLoading: false });
-      return false;
+      throw err;
     }
   },
 
-  register: async (name, email, password, language, username) => {
-    set({ isLoading: true });
+  resendCode: async (email) => {
     try {
-      const res = await api.post<{ success: boolean; data: { user: any; tokens: { accessToken: string; refreshToken: string }; sessionId: string } }>(
-        "/auth/register/email",
-        { email, password, username, displayName: name, language }
-      );
-      const { tokens: { accessToken }, user: raw } = res.data;
-      const user: User = {
-        id: raw.id,
-        name: raw.displayName || name,
-        username: raw.username || username,
-        status: "online",
-        language: raw.language || language,
-        phone: raw.phone,
-      };
-      const finalUser = applyOwnerFlags(user);
-      api.setToken(accessToken);
-      connectSocket(accessToken);
-      persist(finalUser, accessToken, language);
-      saveAccountToList(finalUser, accessToken, language);
-      set({ user: finalUser, token: accessToken, isLoading: false, language, savedAccounts: getSavedAccounts() });
+      await api.post("/auth/resend-code", { email });
       return true;
     } catch (err) {
-      console.warn("[auth] register failed:", err);
-      set({ isLoading: false });
-      return false;
+      console.warn("[auth] resend failed:", err);
+      throw err;
     }
   },
 

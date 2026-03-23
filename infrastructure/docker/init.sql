@@ -25,6 +25,7 @@ CREATE TABLE IF NOT EXISTS users (
   last_seen TIMESTAMPTZ,
   is_online BOOLEAN DEFAULT false,
   is_verified BOOLEAN DEFAULT false,
+  email_verified_at TIMESTAMPTZ,
   is_premium BOOLEAN DEFAULT false,
   public_key TEXT DEFAULT '',
   signing_public_key TEXT DEFAULT '',

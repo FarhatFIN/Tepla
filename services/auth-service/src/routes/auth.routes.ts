@@ -16,6 +16,7 @@ import {
 import { OtpService } from '../services/otp.service';
 import { TokenService } from '../services/token.service';
 import { UserRepository } from '../repositories/user.repository';
+import { sendOtpEmail } from '../services/email.service';
 
 const logger = createLogger('auth-routes');
 
@@ -33,6 +34,47 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
 
   // Set audit logger redis
   AuditLogger.setRedis(rawRedis);
+
+  // ─── Email OTP Helpers ─────────────────────
+  function generateEmailOtp(): string {
+    return Math.floor(100000 + Math.random() * 900000).toString();
+  }
+
+  async function storeAndSendEmailOtp(email: string): Promise<void> {
+    // Rate limit: 1 per 60s
+    const cooldownKey = `otp_cooldown:${email}`;
+    if (await redis.exists(cooldownKey)) {
+      throw new ValidationError('Please wait 60 seconds before requesting a new code');
+    }
+
+    const code = generateEmailOtp();
+    const otpData = JSON.stringify({ code, attempts: 0, createdAt: Date.now() });
+    await redis.set(`otp:${email}`, otpData, 600); // 10 min TTL
+    await redis.set(cooldownKey, '1', 60);
+
+    await sendOtpEmail(email, code);
+  }
+
+  async function verifyEmailOtp(email: string, code: string): Promise<boolean> {
+    const key = `otp:${email}`;
+    const raw = await redis.get(key);
+    if (!raw) return false;
+
+    const data = JSON.parse(raw);
+    if (data.attempts >= 5) {
+      throw new ValidationError('Too many attempts. Request a new code.');
+    }
+
+    if (data.code !== code) {
+      data.attempts++;
+      const ttl = await redis.ttl(key);
+      await redis.set(key, JSON.stringify(data), ttl > 0 ? ttl : 600);
+      return false;
+    }
+
+    await redis.del(key);
+    return true;
+  }
 
   // POST /api/auth/login/phone — request OTP
   router.post('/login/phone', async (req: Request, res: Response, next: NextFunction) => {
@@ -242,42 +284,83 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
     } catch (err) { next(err); }
   });
 
-  // POST /api/auth/login — email + password login
+  // POST /api/auth/login — email + password → send OTP
   router.post('/login', async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { email, password } = req.body;
       if (!email || !password) throw new ValidationError('Email and password are required');
 
-      await rateLimiter.checkAuth(email);
+      const normalizedEmail = email.toLowerCase().trim();
+      await rateLimiter.checkAuth(normalizedEmail);
 
-      const user = await userRepo.findByEmail(email.toLowerCase().trim());
+      const user = await userRepo.findByEmail(normalizedEmail);
       if (!user || !user.password_hash) {
-        await rateLimiter.recordAuthFailure(email);
+        await rateLimiter.recordAuthFailure(normalizedEmail);
         await SecurityMetrics.authFailure(rawRedis);
         throw new UnauthorizedError('Invalid email or password');
       }
 
       const valid = await bcrypt.compare(password, user.password_hash);
       if (!valid) {
-        await rateLimiter.recordAuthFailure(email);
+        await rateLimiter.recordAuthFailure(normalizedEmail);
         await SecurityMetrics.authFailure(rawRedis);
         throw new UnauthorizedError('Invalid email or password');
       }
 
-      await rateLimiter.clearAuthFailures(email);
+      await rateLimiter.clearAuthFailures(normalizedEmail);
       await SecurityMetrics.authSuccess(rawRedis);
+
+      // If email not verified, send OTP for verification
+      if (!user.is_verified) {
+        await storeAndSendEmailOtp(normalizedEmail);
+        return res.json({
+          success: true,
+          data: { message: 'Email not verified', email: normalizedEmail, needsVerification: true },
+        });
+      }
 
       // Check if 2FA is enabled — require second step
       const totpRow = await userRepo.getTotpSecret(user.id);
       if (totpRow?.is_verified) {
-        // Don't issue tokens yet — return a temporary 2FA challenge
         const challengeId = uuid();
-        await redis.set(`2fa:challenge:${challengeId}`, user.id, 300); // 5 min TTL
+        await redis.set(`2fa:challenge:${challengeId}`, user.id, 300);
         return res.json({
           success: true,
           data: { requires2FA: true, challengeId },
         });
       }
+
+      // Send OTP for login verification — do NOT return JWT yet
+      await storeAndSendEmailOtp(normalizedEmail);
+
+      await AuditLogger.log('login_otp_sent', { userId: user.id, ip: req.ip });
+
+      res.json({
+        success: true,
+        data: { message: 'Check your email for verification code', email: normalizedEmail, needsOtp: true },
+      });
+    } catch (err) { next(err); }
+  });
+
+  // POST /api/auth/verify-login — verify login OTP → return JWT
+  router.post('/verify-login', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { email, code } = req.body;
+      if (!email || !code) throw new ValidationError('Email and code are required');
+
+      const normalizedEmail = email.toLowerCase().trim();
+      const valid = await verifyEmailOtp(normalizedEmail, code);
+      if (!valid) {
+        await rateLimiter.recordAuthFailure(normalizedEmail);
+        await SecurityMetrics.authFailure(rawRedis);
+        throw new UnauthorizedError('Invalid verification code');
+      }
+
+      await rateLimiter.clearAuthFailures(normalizedEmail);
+      await SecurityMetrics.authSuccess(rawRedis);
+
+      const user = await userRepo.findByEmail(normalizedEmail);
+      if (!user) throw new UnauthorizedError('User not found');
 
       const tokens = tokenService.generateTokens({
         sub: user.id as UserId,
@@ -322,7 +405,34 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
     } catch (err) { next(err); }
   });
 
-  // POST /api/auth/register/email — register with email + password
+  // POST /api/auth/resend-code — resend OTP email
+  router.post('/resend-code', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { email } = req.body;
+      if (!email) throw new ValidationError('Email is required');
+
+      const normalizedEmail = email.toLowerCase().trim();
+
+      // Hourly rate limit: max 5 resends per hour
+      const hourlyKey = `otp_hourly:${normalizedEmail}`;
+      const hourlyCount = await redis.get(hourlyKey);
+      if (hourlyCount && parseInt(hourlyCount) >= 5) {
+        throw new ValidationError('Too many requests. Try again later.');
+      }
+
+      await storeAndSendEmailOtp(normalizedEmail);
+
+      // Increment hourly counter
+      const current = await redis.incr(hourlyKey);
+      if (current === 1) await redis.expire(hourlyKey, 3600);
+
+      await AuditLogger.log('otp_resent', { email: normalizedEmail.replace(/(.{2}).*(@.*)/, '$1***$2'), ip: req.ip });
+
+      res.json({ success: true, data: { message: 'New code sent' } });
+    } catch (err) { next(err); }
+  });
+
+  // POST /api/auth/register/email — register with email + password → send OTP
   router.post('/register/email', async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { username, displayName, email, password, language } = req.body;
@@ -339,7 +449,8 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
       const existingUsername = await userRepo.findByUsername(username);
       if (existingUsername) throw new ValidationError('Username already taken');
 
-      const existingEmail = await userRepo.findByEmail(email.toLowerCase().trim());
+      const normalizedEmail = email.toLowerCase().trim();
+      const existingEmail = await userRepo.findByEmail(normalizedEmail);
       if (existingEmail) throw new ValidationError('Email already registered');
 
       const passwordHash = await bcrypt.hash(password, 10);
@@ -348,7 +459,7 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
         username: username.toLowerCase(),
         display_name: displayName || null,
         phone: null,
-        email: email.toLowerCase().trim(),
+        email: normalizedEmail,
         password_hash: passwordHash,
         language: language || 'en',
         birth_date: null,
@@ -356,10 +467,56 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
         signing_public_key: '',
       });
 
+      await AuditLogger.log('user_registered_email', {
+        userId: user.id, username: user.username, ip: req.ip,
+      });
+
+      await kafka.publish<{ userId: string }>({
+        id: uuid(),
+        type: EventType.USER_CREATED,
+        topic: EventTopic.USER_EVENTS,
+        timestamp: new Date().toISOString(),
+        source: 'auth-service',
+        correlationId: req.correlationId || uuid(),
+        userId: user.id as UserId,
+        payload: { userId: user.id },
+      });
+
+      // Send OTP email — do NOT return JWT yet
+      await storeAndSendEmailOtp(normalizedEmail);
+
+      res.status(201).json({
+        success: true,
+        data: { message: 'Check your email for verification code', email: normalizedEmail },
+      });
+    } catch (err) { next(err); }
+  });
+
+  // POST /api/auth/verify-email — verify registration OTP → return JWT
+  router.post('/verify-email', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { email, code } = req.body;
+      if (!email || !code) throw new ValidationError('Email and code are required');
+
+      const normalizedEmail = email.toLowerCase().trim();
+      const valid = await verifyEmailOtp(normalizedEmail, code);
+      if (!valid) {
+        await rateLimiter.recordAuthFailure(normalizedEmail);
+        throw new UnauthorizedError('Invalid verification code');
+      }
+
+      await rateLimiter.clearAuthFailures(normalizedEmail);
+
+      const user = await userRepo.findByEmail(normalizedEmail);
+      if (!user) throw new UnauthorizedError('User not found');
+
+      // Mark email as verified
+      await userRepo.markEmailVerified(user.id);
+
       const tokens = tokenService.generateTokens({
         sub: user.id as UserId,
         username: user.username,
-        isPremium: false,
+        isPremium: user.is_premium,
       });
 
       const deviceFingerprint = DeviceSecurity.fingerprint(
@@ -378,23 +535,11 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
         ip: req.ip || 'unknown',
       });
       await deviceSecurity.trustDevice(user.id, deviceFingerprint);
+      await userRepo.updateLastSeen(user.id);
 
-      await AuditLogger.log('user_registered_email', {
-        userId: user.id, username: user.username, ip: req.ip,
-      });
+      await AuditLogger.log('email_verified', { userId: user.id, ip: req.ip });
 
-      await kafka.publish<{ userId: string }>({
-        id: uuid(),
-        type: EventType.USER_CREATED,
-        topic: EventTopic.USER_EVENTS,
-        timestamp: new Date().toISOString(),
-        source: 'auth-service',
-        correlationId: req.correlationId || uuid(),
-        userId: user.id as UserId,
-        payload: { userId: user.id },
-      });
-
-      res.status(201).json({
+      res.json({
         success: true,
         data: { user: mapUser(user), tokens, sessionId: session },
       });

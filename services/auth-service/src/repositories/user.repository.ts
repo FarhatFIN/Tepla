@@ -55,6 +55,13 @@ export class UserRepository extends BaseRepository {
     );
   }
 
+  async markEmailVerified(userId: string): Promise<void> {
+    await this.execute(
+      'UPDATE users SET is_verified = true, email_verified_at = NOW() WHERE id = $1',
+      [userId]
+    );
+  }
+
   // ─── 2FA / TOTP ─────────────────────────
   async getTotpSecret(userId: string): Promise<any | null> {
     return this.queryOne('SELECT * FROM totp_secrets WHERE user_id = $1', [userId]);
