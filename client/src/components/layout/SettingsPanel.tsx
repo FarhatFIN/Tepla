@@ -252,6 +252,28 @@ export default function SettingsPanel() {
                         {t("active_sessions")}
                         <span className="block text-[10px] text-[var(--text-tertiary)]">{t("manage_devices")}</span>
                       </button>
+                      <div className="my-2 border-t border-[var(--border)]" />
+                      <p className="mb-2 text-[10px] font-semibold uppercase text-[var(--text-tertiary)]">{t("passcode_lock")}</p>
+                      {localStorage.getItem("tepla-passcode") ? (
+                        <button onClick={() => { localStorage.removeItem("tepla-passcode"); localStorage.removeItem("tepla-passcode-length"); localStorage.removeItem("tepla-auto-lock"); }} className="w-full rounded-lg bg-red-500/10 px-3 py-2 text-left text-xs text-red-400 hover:bg-red-500/20 transition-colors mb-1.5">
+                          {t("remove_passcode")}
+                        </button>
+                      ) : (
+                        <button onClick={() => setActiveSection("passcode-setup")} className="w-full rounded-lg bg-[var(--bg-main)] px-3 py-2 text-left text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] transition-colors mb-1.5">
+                          {t("set_passcode")}
+                          <span className="block text-[10px] text-[var(--text-tertiary)]">{t("passcode_lock_desc")}</span>
+                        </button>
+                      )}
+                      <SettingRow label={t("auto_lock")}>
+                        <select value={localStorage.getItem("tepla-auto-lock") || "0"} onChange={(e) => localStorage.setItem("tepla-auto-lock", e.target.value)} className="rounded bg-[var(--bg-main)] px-2 py-1 text-[10px] text-[var(--text-primary)] outline-none">
+                          <option value="0">{t("disabled")}</option>
+                          <option value="60">{t("1_minute")}</option>
+                          <option value="300">{t("5_minutes")}</option>
+                          <option value="3600">{t("1_hour")}</option>
+                          <option value="18000">{t("5_hours")}</option>
+                        </select>
+                      </SettingRow>
+                      <div className="my-2 border-t border-[var(--border)]" />
                       <button className="w-full rounded-lg bg-[var(--bg-main)] px-3 py-2 text-left text-xs text-red-400 hover:bg-red-500/10 transition-colors">
                         {t("delete_account")}
                         <span className="block text-[10px] text-red-400/60">{t("delete_account_desc")}</span>

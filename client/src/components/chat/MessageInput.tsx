@@ -16,6 +16,9 @@ export default function MessageInput({ chatId }: MessageInputProps) {
   const [recordingTime, setRecordingTime] = useState(0);
   const [showAttach, setShowAttach] = useState(false);
   const [showSchedule, setShowSchedule] = useState(false);
+  const [showSendMenu, setShowSendMenu] = useState(false);
+  const [scheduleDate, setScheduleDate] = useState("");
+  const [scheduleTime, setScheduleTime] = useState("");
   const [showLocation, setShowLocation] = useState(false);
   const [showPoll, setShowPoll] = useState(false);
   const [showGif, setShowGif] = useState(false);
@@ -304,6 +307,20 @@ export default function MessageInput({ chatId }: MessageInputProps) {
     );
   }
 
+  const handleScheduleSend = async () => {
+    const trimmed = text.trim();
+    if (!trimmed || !scheduleDate || !scheduleTime) return;
+    const scheduledAt = new Date(`${scheduleDate}T${scheduleTime}`).toISOString();
+    try {
+      await api.post("/scheduled", { chatId, content: trimmed, scheduledAt });
+    } catch { /* fallback: just send normally */ }
+    setText("");
+    setDraft(chatId, "");
+    setShowSchedule(false);
+    setScheduleDate("");
+    setScheduleTime("");
+  };
+
   return (
     <footer className="border-t border-[var(--border)] bg-[var(--bg-sidebar)] px-4 py-2.5 transition-colors">
       {/* Hidden file inputs */}
@@ -402,6 +419,21 @@ export default function MessageInput({ chatId }: MessageInputProps) {
         </div>
       )}
 
+      {/* Schedule picker */}
+      {showSchedule && (
+        <div className="mb-2 rounded-xl bg-[var(--bg-card)] p-3 shadow-lg animate-scale-in">
+          <p className="text-sm font-semibold mb-2">{t("schedule_message") || "Schedule message"}</p>
+          <div className="flex gap-2 mb-2">
+            <input type="date" value={scheduleDate} onChange={(e) => setScheduleDate(e.target.value)} className="flex-1 rounded-lg bg-[var(--bg-input)] px-3 py-2 text-sm text-[var(--text-primary)] outline-none" />
+            <input type="time" value={scheduleTime} onChange={(e) => setScheduleTime(e.target.value)} className="flex-1 rounded-lg bg-[var(--bg-input)] px-3 py-2 text-sm text-[var(--text-primary)] outline-none" />
+          </div>
+          <div className="flex gap-2">
+            <button onClick={() => setShowSchedule(false)} className="flex-1 rounded-lg bg-[var(--bg-input)] py-1.5 text-sm text-[var(--text-secondary)]">{t("cancel")}</button>
+            <button onClick={handleScheduleSend} disabled={!scheduleDate || !scheduleTime || !text.trim()} className="flex-1 rounded-lg bg-[var(--accent)] py-1.5 text-sm font-semibold text-white disabled:opacity-50">{t("schedule") || "Schedule"}</button>
+          </div>
+        </div>
+      )}
+
       {/* Upload indicator */}
       {uploading && !previews.length && (
         <div className="mb-2 flex items-center gap-2 rounded-xl bg-[var(--accent-soft)] px-3 py-2 animate-slide-up">
@@ -468,9 +500,24 @@ export default function MessageInput({ chatId }: MessageInputProps) {
 
             {/* Send / Voice */}
             {hasText || previews.length > 0 ? (
-              <IconButton label={t("send")} onClick={handleSend} variant="filled" size="sm">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
-              </IconButton>
+              <div className="relative">
+                <IconButton label={t("send")} onClick={handleSend} variant="filled" size="sm"
+                  onContextMenu={(e: React.MouseEvent) => { e.preventDefault(); setShowSendMenu(!showSendMenu); }}>
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+                </IconButton>
+                {showSendMenu && (
+                  <div className="absolute bottom-12 right-0 z-20 w-52 rounded-xl bg-[var(--bg-card)] p-1.5 shadow-lg animate-scale-in">
+                    <button onClick={() => { const trimmed = text.trim(); if (!trimmed) return; sendMessage(chatId, trimmed, "text", undefined); setText(""); setDraft(chatId, ""); setShowSendMenu(false); }} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm hover:bg-[var(--bg-hover)]">
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 3a6 6 0 0 0-6 6v5.18l-.83.83A1 1 0 0 0 5.88 17h12.24a1 1 0 0 0 .71-1.71L18 14.18V9a6 6 0 0 0-6-6z" opacity="0.5"/><line x1="4" y1="4" x2="20" y2="20" strokeWidth="2"/></svg>
+                      <span>{t("send_without_sound") || "Send without sound"}</span>
+                    </button>
+                    <button onClick={() => { setShowSchedule(true); setShowSendMenu(false); }} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm hover:bg-[var(--bg-hover)]">
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                      <span>{t("schedule_message") || "Schedule message"}</span>
+                    </button>
+                  </div>
+                )}
+              </div>
             ) : (
               <IconButton label={t("voice_message")} onClick={startRecording} size="sm">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>

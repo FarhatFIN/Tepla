@@ -10,6 +10,7 @@ import SettingsPanel from "@/components/layout/SettingsPanel";
 import PremiumPanel from "@/components/layout/PremiumPanel";
 import CallOverlay from "@/components/calls/CallOverlay";
 import StickerPicker from "@/components/stickers/StickerPicker";
+import LockScreen, { useAutoLock } from "@/components/auth/LockScreen";
 import { useTranslation } from "@/hooks/useTranslation";
 
 export default function Home() {
@@ -17,6 +18,7 @@ export default function Home() {
   const { chats, activeChatId, setActiveChat, messages, loadChats, bindSocket } = useChatStore();
   const router = useRouter();
   const t = useTranslation();
+  const { locked, unlock } = useAutoLock();
 
   useEffect(() => { hydrate(); }, [hydrate]);
 
@@ -45,6 +47,8 @@ export default function Home() {
 
   const activeChat = chats.find((c) => c.id === activeChatId) ?? null;
   const activeMessages = activeChatId ? messages[activeChatId] ?? [] : [];
+
+  if (locked) return <LockScreen onUnlock={unlock} pinLength={parseInt(localStorage.getItem("tepla-passcode-length") || "4") as 4 | 6} />;
 
   return (
     <main className="flex h-screen overflow-hidden">

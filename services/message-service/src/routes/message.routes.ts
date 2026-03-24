@@ -57,6 +57,7 @@ export function messageRouter(redis: RedisClient, kafka: KafkaProducer): Router 
       const {
         chatId, content, type = 'text', replyToId,
         contentIv, encryptedKeys, attachments,
+        isSilent,
         // E2E encryption fields (new — Double Ratchet pipeline)
         e2e, sessionId, clientNonce,
       } = req.body;
@@ -68,6 +69,16 @@ export function messageRouter(redis: RedisClient, kafka: KafkaProducer): Router 
         const role = await msgRepo.getMemberRole(chatId, req.user!.sub);
         if (!role || !['owner', 'admin'].includes(role)) {
           throw new ForbiddenError('Only admins can post in channels');
+        }
+      }
+
+      // Slow mode check (skip for admins)
+      const slowKey = `slow:${chatId}:${req.user!.sub}`;
+      const slowTtl = await redis.ttl(slowKey);
+      if (slowTtl > 0) {
+        const role = await msgRepo.getMemberRole(chatId, req.user!.sub);
+        if (!role || !['owner', 'admin'].includes(role)) {
+          throw new ValidationError(`Slow mode: wait ${slowTtl} seconds`);
         }
       }
 
@@ -95,7 +106,14 @@ export function messageRouter(redis: RedisClient, kafka: KafkaProducer): Router 
         encrypted_keys: encryptedKeys || null,
         type,
         reply_to_id: replyToId || null,
+        is_silent: isSilent || false,
       });
+
+      // Set slow mode cooldown
+      const slowModeRow = await msgRepo.queryOne<{ slow_mode_seconds: number }>(`SELECT slow_mode_seconds FROM chats WHERE id = $1`, [chatId]);
+      if (slowModeRow?.slow_mode_seconds > 0) {
+        await redis.set(slowKey, '1', slowModeRow.slow_mode_seconds);
+      }
 
       // Save attachments if any
       if (attachments?.length) {
@@ -121,6 +139,7 @@ export function messageRouter(redis: RedisClient, kafka: KafkaProducer): Router 
           attachments: attachments || [],
           createdAt: message.created_at,
           e2e: !!e2e,
+          isSilent: isSilent || false,
         },
       });
 

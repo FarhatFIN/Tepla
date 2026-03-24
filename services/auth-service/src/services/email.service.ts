@@ -44,3 +44,36 @@ export async function sendOtpEmail(to: string, code: string): Promise<void> {
     throw new Error('Failed to send verification email');
   }
 }
+
+export async function sendLoginAlertEmail(to: string, device: string, ip: string, location?: string): Promise<void> {
+  const time = new Date().toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' });
+  const subject = 'New login to your Tepla account';
+  const html = `
+    <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 480px; margin: 0 auto; padding: 40px 20px; background: #0f0f0f; color: #ffffff; border-radius: 16px;">
+      <div style="text-align: center; margin-bottom: 32px;">
+        <h1 style="font-size: 32px; font-weight: 800; background: linear-gradient(135deg, #6366f1, #8b5cf6); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin: 0;">Tepla</h1>
+      </div>
+      <div style="background: #1a1a2e; border-radius: 12px; padding: 24px; margin-bottom: 24px;">
+        <p style="font-size: 18px; font-weight: 600; color: #fbbf24; margin: 0 0 16px;">⚠️ New login detected</p>
+        <table style="width: 100%; color: #a1a1aa; font-size: 14px;">
+          <tr><td style="padding: 4px 0;">Device:</td><td style="color: #fff;">${device}</td></tr>
+          <tr><td style="padding: 4px 0;">IP:</td><td style="color: #fff;">${ip}</td></tr>
+          <tr><td style="padding: 4px 0;">Time:</td><td style="color: #fff;">${time}</td></tr>
+          ${location ? `<tr><td style="padding: 4px 0;">Location:</td><td style="color: #fff;">${location}</td></tr>` : ''}
+        </table>
+      </div>
+      <p style="font-size: 13px; color: #71717a; text-align: center;">If this wasn't you, go to Settings → Sessions and terminate it.</p>
+    </div>
+  `;
+
+  if (!process.env.SMTP_USER) {
+    logger.info(`[DEV] Login alert for ${to}: ${device} / ${ip}`);
+    return;
+  }
+
+  try {
+    await transporter.sendMail({ from: FROM, to, subject, html });
+  } catch (err) {
+    logger.error('Failed to send login alert', { error: (err as Error).message });
+  }
+}

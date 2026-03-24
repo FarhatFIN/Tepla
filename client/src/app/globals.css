@@ -137,6 +137,7 @@ input, textarea, select, button {
 .animate-slide-up { animation: slideUp 0.3s ease-out; }
 .animate-slide-in-right { animation: slideInRight 0.3s ease-out; }
 .animate-scale-in { animation: scaleIn 0.2s ease-out; }
+.animate-shake { animation: shake 0.3s ease-in-out; }
 
 .glass {
   background: var(--bg-glass);

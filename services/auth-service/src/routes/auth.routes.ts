@@ -16,7 +16,7 @@ import {
 import { OtpService } from '../services/otp.service';
 import { TokenService } from '../services/token.service';
 import { UserRepository } from '../repositories/user.repository';
-import { sendOtpEmail } from '../services/email.service';
+import { sendOtpEmail, sendLoginAlertEmail } from '../services/email.service';
 
 const logger = createLogger('auth-routes');
 
@@ -386,6 +386,10 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
       });
 
       await AuditLogger.log('login_email_success', { userId: user.id, ip: req.ip });
+
+      // Send login alert email (non-blocking)
+      const alertDevice = req.headers['user-agent'] || 'Unknown device';
+      sendLoginAlertEmail(normalizedEmail, alertDevice, req.ip || 'unknown').catch(() => {});
 
       await kafka.publish({
         id: uuid(),

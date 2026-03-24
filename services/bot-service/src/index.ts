@@ -159,15 +159,120 @@ class BotService {
 
     // Listen for messages to route to bots
     this.consumer.on(EventType.MESSAGE_SENT, async (event) => {
-      const { message, chatId } = event.payload as any;
-      if (!message?.content) return;
+      const { chatId, content, senderId } = event.payload as any;
+      if (!content) return;
 
-      // Check if message starts with /command
-      if (message.content.startsWith('/')) {
-        const [command, ...args] = message.content.split(' ');
+      // ─── ElevenBot Handler ─────────────────────
+      const elevenBotState = await this.redis.getJson<any>(`elevenbot:state:${senderId}`) || {};
+
+      if (content.startsWith('/') || elevenBotState.waiting) {
+        const cmd = content.startsWith('/') ? content.split(' ')[0].replace(/@\w+/, '') : null;
+        let reply: string | null = null;
+        let newState: any = null;
+
+        if (cmd === '/start') {
+          reply = '🤖 Welcome to ElevenBot!\nI help you create and manage bots for Tepla.\n\nCommands:\n/newbot - Create a new bot\n/mybots - List your bots\n/setcommands - Set bot commands\n/setdescription - Set bot description\n/setwebhook - Set webhook URL\n/deletebot - Delete a bot\n/token - View/revoke bot token';
+        } else if (cmd === '/newbot') {
+          reply = "Let's create a new bot! What name would you like to give it?";
+          newState = { waiting: 'newbot_name' };
+        } else if (cmd === '/mybots') {
+          const bots = await this.repo.findByOwner(senderId);
+          if (bots.length === 0) { reply = 'You have no bots yet. Use /newbot to create one!'; }
+          else { reply = '🤖 Your bots:\n' + bots.map((b, i) => `${i + 1}. @${b.username} — ${b.displayName}`).join('\n'); }
+        } else if (cmd === '/token') {
+          const bots = await this.repo.findByOwner(senderId);
+          if (bots.length === 0) { reply = 'You have no bots. Use /newbot first.'; }
+          else {
+            reply = 'Select a bot:\n' + bots.map((b, i) => `${i + 1}. @${b.username}`).join('\n') + '\n\nReply with the number.';
+            newState = { waiting: 'token_select', bots: bots.map(b => ({ id: b.id, username: b.username, token: b.apiToken })) };
+          }
+        } else if (cmd === '/deletebot') {
+          const bots = await this.repo.findByOwner(senderId);
+          if (bots.length === 0) { reply = 'You have no bots.'; }
+          else {
+            reply = 'Select bot to delete:\n' + bots.map((b, i) => `${i + 1}. @${b.username}`).join('\n') + '\n\nReply with the number.';
+            newState = { waiting: 'delete_select', bots: bots.map(b => ({ id: b.id, username: b.username })) };
+          }
+        } else if (cmd === '/setwebhook') {
+          const bots = await this.repo.findByOwner(senderId);
+          if (bots.length === 0) { reply = 'You have no bots.'; }
+          else if (bots.length === 1) {
+            reply = `Setting webhook for @${bots[0].username}. Send the webhook URL (must start with https):`;
+            newState = { waiting: 'webhook_url', botId: bots[0].id };
+          } else {
+            reply = 'Select bot:\n' + bots.map((b, i) => `${i + 1}. @${b.username}`).join('\n');
+            newState = { waiting: 'webhook_select', bots: bots.map(b => ({ id: b.id, username: b.username })) };
+          }
+        } else if (elevenBotState.waiting === 'newbot_name') {
+          newState = { waiting: 'newbot_username', name: content.trim() };
+          reply = `Great! "${content.trim()}" it is. Now choose a username for your bot (must end with "bot"):`;
+        } else if (elevenBotState.waiting === 'newbot_username') {
+          const username = content.trim().toLowerCase().replace(/^@/, '');
+          if (!username.endsWith('bot')) { reply = 'Username must end with "bot". Try again:'; newState = elevenBotState; }
+          else {
+            const existing = await this.repo.findByUsername(username);
+            if (existing) { reply = 'This username is taken. Try another:'; newState = elevenBotState; }
+            else {
+              const botId = crypto.randomUUID() as BotId;
+              const apiToken = `tepla_${(senderId as string).slice(0,8)}_${crypto.randomBytes(16).toString('hex')}`;
+              await this.repo.create({ id: botId, ownerId: senderId, username, displayName: elevenBotState.name, avatarUrl: null, description: null, aboutText: null, webhookUrl: null, webhookSecret: crypto.randomBytes(32).toString('hex'), apiToken, isInline: false, isPublic: false, commands: [], menuButton: null, isEnabled: true, createdAt: new Date().toISOString() });
+              reply = `✅ Done! Your bot @${username} is created.\n\n🔑 Token: \`${apiToken}\`\n\nKeep this token secret! Use /token to view it later.`;
+              newState = null;
+            }
+          }
+        } else if (elevenBotState.waiting === 'token_select') {
+          const idx = parseInt(content) - 1;
+          const bot = elevenBotState.bots?.[idx];
+          if (!bot) { reply = 'Invalid selection.'; }
+          else { reply = `🔑 Token for @${bot.username}:\n\`${bot.token}\``; }
+          newState = null;
+        } else if (elevenBotState.waiting === 'delete_select') {
+          const idx = parseInt(content) - 1;
+          const bot = elevenBotState.bots?.[idx];
+          if (!bot) { reply = 'Invalid selection.'; }
+          else {
+            await this.repo.delete(bot.id);
+            reply = `🗑 Bot @${bot.username} has been deleted.`;
+          }
+          newState = null;
+        } else if (elevenBotState.waiting === 'webhook_select') {
+          const idx = parseInt(content) - 1;
+          const bot = elevenBotState.bots?.[idx];
+          if (!bot) { reply = 'Invalid selection.'; newState = null; }
+          else { reply = `Send webhook URL for @${bot.username} (must start with https):`; newState = { waiting: 'webhook_url', botId: bot.id }; }
+        } else if (elevenBotState.waiting === 'webhook_url') {
+          if (!content.startsWith('https://')) { reply = 'URL must start with https://. Try again:'; newState = elevenBotState; }
+          else {
+            await this.repo.update(elevenBotState.botId, { webhookUrl: content.trim() } as any);
+            reply = `✅ Webhook set to ${content.trim()}`;
+            newState = null;
+          }
+        }
+
+        // Update ElevenBot state
+        if (newState) await this.redis.setJson(`elevenbot:state:${senderId}`, newState, 300);
+        else await this.redis.del(`elevenbot:state:${senderId}`);
+
+        // Send reply if ElevenBot generated one
+        if (reply) {
+          await this.kafka.send(EventTopic.MESSAGE_EVENTS, {
+            id: crypto.randomUUID(),
+            type: EventType.MESSAGE_SENT,
+            topic: EventTopic.MESSAGE_EVENTS,
+            timestamp: new Date().toISOString(),
+            source: 'bot-service',
+            correlationId: crypto.randomUUID(),
+            userId: 'elevenbot' as any,
+            payload: { chatId, content: reply, type: 'text', isBot: true, senderName: 'ElevenBot 🤖' },
+          });
+          return;
+        }
+      }
+
+      // ─── Route to user bots ────────────────────
+      if (content.startsWith('/')) {
+        const [command] = content.split(' ');
         const botUsername = command.includes('@') ? command.split('@')[1] : null;
-
-        // Find bot in chat or by username
         if (botUsername) {
           const bot = await this.repo.findByUsername(botUsername);
           if (bot && bot.isEnabled) {
@@ -176,12 +281,11 @@ class BotService {
               type: 'command',
               chatId,
               userId: event.userId!,
-              messageId: message.id,
+              messageId: senderId,
               data: command.split('@')[0],
-              message,
+              message: { content },
             };
             await dispatchWebhook(bot, update);
-            // Store in update queue for long-polling bots
             await this.redis.lpush(`bot:${bot.id}:updates`, JSON.stringify(update));
             await this.redis.ltrim(`bot:${bot.id}:updates`, 0, 999);
           }

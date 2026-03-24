@@ -3,6 +3,8 @@ import { memo, useRef, useState } from "react";
 import { Message, MessageStatus, MessageAttachment } from "@/types";
 import { useChatStore } from "@/stores/chat-store";
 import { useTranslation } from "@/hooks/useTranslation";
+import { getSocket } from "@/lib/socket";
+import RichText from "./RichText";
 
 interface MessageBubbleProps {
   message: Message;
@@ -197,6 +199,8 @@ export default memo(function MessageBubble({ message, isOwn, isFirstInGroup, isL
   const isLocation = message.type === "location";
   const isPoll = message.type === "poll";
   const hasAttachments = message.attachments && message.attachments.length > 0;
+  const isSilent = (message as any).isSilent;
+  const keyboard = (message as any).keyboard;
 
   return (
     <div
@@ -285,7 +289,7 @@ export default memo(function MessageBubble({ message, isOwn, isFirstInGroup, isL
         {!isLocation && !isPoll && !(message.type === "gif" && message.text.startsWith("http")) && (
           <div className="px-3.5 py-1.5">
             {!(isVoice && !hasAttachments) && !(isMedia && hasAttachments && !message.text) && (
-              <p className="whitespace-pre-wrap text-sm leading-relaxed break-words">{message.text}</p>
+              <div className="text-sm leading-relaxed"><RichText text={message.text} isOwn={isOwn} /></div>
             )}
 
             {/* Translated text */}
@@ -298,6 +302,7 @@ export default memo(function MessageBubble({ message, isOwn, isFirstInGroup, isL
 
             {/* Meta */}
             <div className={`mt-0.5 flex items-center justify-end gap-1 ${isOwn ? "text-white/50" : "text-[var(--text-tertiary)]"}`}>
+              {isSilent && <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><path d="M12 3a6 6 0 0 0-6 6v5.18l-.83.83A1 1 0 0 0 5.88 17h12.24a1 1 0 0 0 .71-1.71L18 14.18V9a6 6 0 0 0-6-6z" opacity="0.5"/></svg>}
               {message.isEdited && <span className="text-[10px]">{t("edited")}</span>}
               {message.isPinned && <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><path d="M16 3h-2V1h-4v2H8C7.45 3 7 3.45 7 4v2l2 2v4H5v2h6v6h2v-6h6v-2h-4V8l2-2V4c0-.55-.45-1-1-1z"/></svg>}
               <span className="text-[10px] leading-none">{message.timestamp}</span>
@@ -332,6 +337,21 @@ export default memo(function MessageBubble({ message, isOwn, isFirstInGroup, isL
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
             {t("replies_count", { count: message.threadRepliesCount || 0 })}
           </button>
+        )}
+
+        {/* Inline keyboard (bot buttons) */}
+        {keyboard?.inline && (
+          <div className="px-2 pb-2 flex flex-col gap-1">
+            {keyboard.inline.map((row: any[], ri: number) => (
+              <div key={ri} className="flex gap-1">
+                {row.map((btn: any, bi: number) => (
+                  <button key={bi} onClick={() => { const s = getSocket(); if (s) s.emit("callback_query", { messageId: message.id, data: btn.callbackData }); }} className={`flex-1 rounded-lg py-1.5 text-xs font-medium transition-colors ${isOwn ? "bg-white/20 hover:bg-white/30 text-white" : "bg-[var(--accent-soft)] hover:bg-[var(--accent)]/20 text-[var(--accent)]"}`}>
+                    {btn.text}
+                  </button>
+                ))}
+              </div>
+            ))}
+          </div>
         )}
       </div>
     </div>

@@ -546,3 +546,74 @@ CREATE TABLE IF NOT EXISTS store_items (
   is_active BOOLEAN DEFAULT true,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- ═══════════════════════════════════════════
+-- NEW FEATURES v2.2
+-- ═══════════════════════════════════════════
+
+-- ─── Admin Logs ─────────────────────────────
+CREATE TABLE IF NOT EXISTS admin_logs (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  chat_id UUID REFERENCES chats(id) ON DELETE CASCADE,
+  admin_id UUID REFERENCES users(id),
+  action VARCHAR(50) NOT NULL,
+  target_user_id UUID REFERENCES users(id),
+  details JSONB,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX idx_admin_logs_chat ON admin_logs(chat_id, created_at DESC);
+
+-- ─── Join Requests ──────────────────────────
+CREATE TABLE IF NOT EXISTS join_requests (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  chat_id UUID REFERENCES chats(id) ON DELETE CASCADE,
+  user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+  status VARCHAR(20) DEFAULT 'pending',
+  reviewed_by UUID REFERENCES users(id),
+  reviewed_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(chat_id, user_id)
+);
+
+CREATE INDEX idx_join_requests_chat ON join_requests(chat_id, status);
+
+-- ─── Invite Links ───────────────────────────
+CREATE TABLE IF NOT EXISTS invite_links (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  chat_id UUID REFERENCES chats(id) ON DELETE CASCADE,
+  created_by UUID REFERENCES users(id),
+  code VARCHAR(32) UNIQUE NOT NULL,
+  uses_count INT DEFAULT 0,
+  max_uses INT,
+  expires_at TIMESTAMPTZ,
+  requires_approval BOOLEAN DEFAULT false,
+  is_revoked BOOLEAN DEFAULT false,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX idx_invite_links_code ON invite_links(code) WHERE is_revoked = false;
+
+-- ─── Additional columns ─────────────────────
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS is_silent BOOLEAN DEFAULT false;
+ALTER TABLE chats ADD COLUMN IF NOT EXISTS requires_approval BOOLEAN DEFAULT false;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS is_bot BOOLEAN DEFAULT false;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS bot_description TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS bot_commands JSONB;
+
+-- ─── User Settings ──────────────────────────
+CREATE TABLE IF NOT EXISTS user_settings (
+  user_id UUID PRIMARY KEY REFERENCES users(id),
+  settings JSONB DEFAULT '{}',
+  passcode_hash TEXT,
+  passcode_attempts INT DEFAULT 0,
+  passcode_locked_until TIMESTAMPTZ,
+  auto_lock_seconds INT DEFAULT 0,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- ─── ElevenBot System Bot ───────────────────
+INSERT INTO users (username, display_name, is_verified, is_bot)
+VALUES ('ElevenBot', 'ElevenBot', true, true)
+ON CONFLICT (username) DO NOTHING;
