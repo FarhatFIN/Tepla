@@ -821,6 +821,11 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS pin_hash TEXT;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS failed_attempts INT DEFAULT 0;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS blocked_until TIMESTAMPTZ;
 
+-- ─── Phone Region Support ─────────────────────
+ALTER TABLE users ADD COLUMN IF NOT EXISTS phone_region VARCHAR(10);
+ALTER TABLE users ADD COLUMN IF NOT EXISTS phone_country_code VARCHAR(5);
+CREATE INDEX IF NOT EXISTS idx_users_phone_region ON users(phone_region);
+
 -- ─── ElevenBot System Bot ───────────────────
 INSERT INTO users (username, display_name, is_verified, is_bot)
 VALUES ('ElevenBot', 'ElevenBot', true, true)
