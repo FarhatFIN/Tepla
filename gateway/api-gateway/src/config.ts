@@ -22,6 +22,8 @@ export const config = {
     sticker: process.env.STICKER_SERVICE_URL || 'http://localhost:3015',
     translation: process.env.TRANSLATION_SERVICE_URL || 'http://localhost:3016',
     webapp: process.env.WEBAPP_SERVICE_URL || 'http://localhost:3017',
+    wallet: process.env.WALLET_SERVICE_URL || 'http://localhost:3018',
+    wbit: process.env.WBIT_SERVICE_URL || 'http://localhost:3019',
   },
 
   rateLimits: {

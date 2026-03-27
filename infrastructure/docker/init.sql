@@ -613,6 +613,214 @@ CREATE TABLE IF NOT EXISTS user_settings (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- ═══════════════════════════════════════════
+-- NEW FEATURES v2.3 — Wallet + KYC
+-- ═══════════════════════════════════════════
+
+-- ─── Wallet Profiles ──────────────────────────
+CREATE TABLE IF NOT EXISTS wallet_profiles (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+  currency TEXT NOT NULL DEFAULT 'USD',
+  balance NUMERIC(20,8) NOT NULL DEFAULT 0 CHECK (balance >= 0),
+  frozen_balance NUMERIC(20,8) NOT NULL DEFAULT 0 CHECK (frozen_balance >= 0),
+  kyc_status TEXT NOT NULL DEFAULT 'none' CHECK (kyc_status IN ('none','pending','approved','rejected')),
+  kyc_provider TEXT DEFAULT 'sumsub',
+  kyc_external_id TEXT,
+  kyc_verified_at TIMESTAMPTZ,
+  daily_limit NUMERIC(20,2) NOT NULL DEFAULT 500.00,
+  monthly_limit NUMERIC(20,2) NOT NULL DEFAULT 5000.00,
+  is_blocked BOOLEAN DEFAULT false,
+  blocked_reason TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX idx_wallet_profiles_user ON wallet_profiles(user_id);
+CREATE INDEX idx_wallet_profiles_kyc ON wallet_profiles(kyc_status);
+
+-- ─── Wallet Transactions ──────────────────────
+CREATE TABLE IF NOT EXISTS wallet_transactions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  from_wallet_id UUID REFERENCES wallet_profiles(id),
+  to_wallet_id UUID REFERENCES wallet_profiles(id),
+  from_user_id UUID REFERENCES users(id),
+  to_user_id UUID REFERENCES users(id),
+  type TEXT NOT NULL CHECK (type IN ('deposit','withdrawal','transfer','payment','refund','fee','bonus')),
+  amount NUMERIC(20,8) NOT NULL CHECK (amount > 0),
+  currency TEXT NOT NULL DEFAULT 'USD',
+  fee NUMERIC(20,8) DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','completed','failed','cancelled','reversed')),
+  description TEXT,
+  reference TEXT,
+  idempotency_key TEXT UNIQUE,
+  metadata JSONB DEFAULT '{}',
+  completed_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX idx_wallet_tx_from ON wallet_transactions(from_user_id, created_at DESC);
+CREATE INDEX idx_wallet_tx_to ON wallet_transactions(to_user_id, created_at DESC);
+CREATE INDEX idx_wallet_tx_status ON wallet_transactions(status);
+CREATE INDEX idx_wallet_tx_idempotency ON wallet_transactions(idempotency_key) WHERE idempotency_key IS NOT NULL;
+
+-- ─── KYC Documents ────────────────────────────
+CREATE TABLE IF NOT EXISTS kyc_documents (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  wallet_id UUID NOT NULL REFERENCES wallet_profiles(id) ON DELETE CASCADE,
+  document_type TEXT NOT NULL CHECK (document_type IN ('passport','id_card','driver_license','selfie','proof_of_address')),
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','approved','rejected')),
+  external_id TEXT,
+  rejection_reason TEXT,
+  submitted_at TIMESTAMPTZ DEFAULT NOW(),
+  reviewed_at TIMESTAMPTZ
+);
+
+CREATE INDEX idx_kyc_docs_user ON kyc_documents(user_id);
+CREATE INDEX idx_kyc_docs_wallet ON kyc_documents(wallet_id);
+
+-- ═══════════════════════════════════════════
+-- NEW FEATURES v2.4 — WBIT Token (TON Jetton)
+-- ═══════════════════════════════════════════
+
+-- ─── TON Wallets ──────────────────────────────
+CREATE TABLE IF NOT EXISTS ton_wallets (
+  user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  ton_address TEXT UNIQUE NOT NULL,
+  encrypted_mnemonic TEXT NOT NULL,
+  wbit_wallet_address TEXT,
+  wbit_balance BIGINT DEFAULT 0,
+  last_synced_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX idx_ton_wallets_address ON ton_wallets(ton_address);
+
+-- ─── WBIT Transactions ───────────────────────
+CREATE TABLE IF NOT EXISTS wbit_transactions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID REFERENCES users(id),
+  type TEXT NOT NULL CHECK (type IN ('transfer','deposit','withdrawal','premium','reward','burn','airdrop')),
+  amount BIGINT NOT NULL CHECK (amount > 0),
+  ton_tx_hash TEXT,
+  from_address TEXT,
+  to_address TEXT,
+  status TEXT DEFAULT 'pending' CHECK (status IN ('pending','completed','failed','cancelled')),
+  description TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX idx_wbit_tx_user ON wbit_transactions(user_id, created_at DESC);
+CREATE INDEX idx_wbit_tx_hash ON wbit_transactions(ton_tx_hash) WHERE ton_tx_hash IS NOT NULL;
+
+-- ═══════════════════════════════════════════
+-- NEW FEATURES v2.5 — Advanced Auth System
+-- ═══════════════════════════════════════════
+
+-- ─── Devices ──────────────────────────────────
+CREATE TABLE IF NOT EXISTS devices (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+  device_id TEXT NOT NULL,
+  fingerprint TEXT NOT NULL,
+  name TEXT,
+  type TEXT,
+  os TEXT,
+  browser TEXT,
+  biometric_public_key TEXT,
+  is_trusted BOOLEAN DEFAULT false,
+  trust_expires_at TIMESTAMPTZ,
+  last_ip TEXT,
+  last_country TEXT,
+  last_active TIMESTAMPTZ DEFAULT NOW(),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(user_id, device_id)
+);
+
+CREATE INDEX idx_devices_user ON devices(user_id);
+
+-- ─── Sessions (v2) ───────────────────────────
+CREATE TABLE IF NOT EXISTS sessions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+  device_id UUID REFERENCES devices(id) ON DELETE CASCADE,
+  token_hash TEXT UNIQUE NOT NULL,
+  refresh_token_hash TEXT UNIQUE,
+  ip_address TEXT,
+  country TEXT,
+  risk_score INT DEFAULT 0,
+  is_active BOOLEAN DEFAULT true,
+  expires_at TIMESTAMPTZ NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX idx_sessions_user_active ON sessions(user_id, is_active);
+CREATE INDEX idx_sessions_token ON sessions(token_hash);
+CREATE INDEX idx_sessions_refresh ON sessions(refresh_token_hash);
+
+-- ─── Auth Challenges ─────────────────────────
+CREATE TABLE IF NOT EXISTS auth_challenges (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+  type TEXT NOT NULL,
+  code_hash TEXT,
+  challenge_numbers INT[],
+  correct_number INT,
+  ip_address TEXT,
+  device_fingerprint TEXT,
+  pending_data JSONB,
+  attempts INT DEFAULT 0,
+  max_attempts INT DEFAULT 5,
+  is_used BOOLEAN DEFAULT false,
+  expires_at TIMESTAMPTZ NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX idx_auth_challenges_user ON auth_challenges(user_id, is_used);
+
+-- ─── Risk Events ─────────────────────────────
+CREATE TABLE IF NOT EXISTS risk_events (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID REFERENCES users(id),
+  event_type TEXT NOT NULL,
+  ip_address TEXT,
+  country TEXT,
+  risk_score INT,
+  details JSONB,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX idx_risk_events_user ON risk_events(user_id, created_at DESC);
+
+-- ─── Auth Audit Log ──────────────────────────
+CREATE TABLE IF NOT EXISTS auth_audit (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID REFERENCES users(id),
+  event TEXT NOT NULL,
+  ip_address TEXT,
+  country TEXT,
+  device_id TEXT,
+  success BOOLEAN,
+  details JSONB,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX idx_auth_audit_user ON auth_audit(user_id, created_at DESC);
+
+-- ─── Blocked IPs ─────────────────────────────
+CREATE TABLE IF NOT EXISTS blocked_ips (
+  ip TEXT PRIMARY KEY,
+  reason TEXT,
+  blocked_until TIMESTAMPTZ NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Add pin_hash to users if not exists
+ALTER TABLE users ADD COLUMN IF NOT EXISTS pin_hash TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS failed_attempts INT DEFAULT 0;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS blocked_until TIMESTAMPTZ;
+
 -- ─── ElevenBot System Bot ───────────────────
 INSERT INTO users (username, display_name, is_verified, is_bot)
 VALUES ('ElevenBot', 'ElevenBot', true, true)

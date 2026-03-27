@@ -8,6 +8,8 @@ import ChatArea from "@/components/layout/ChatArea";
 import EmptyChat from "@/components/chat/EmptyChat";
 import SettingsPanel from "@/components/layout/SettingsPanel";
 import PremiumPanel from "@/components/layout/PremiumPanel";
+import WalletPanel from "@/components/layout/WalletPanel";
+import WBITPanel from "@/components/layout/WBITPanel";
 import CallOverlay from "@/components/calls/CallOverlay";
 import StickerPicker from "@/components/stickers/StickerPicker";
 import LockScreen, { useAutoLock } from "@/components/auth/LockScreen";
@@ -36,10 +38,14 @@ export default function Home() {
 
   if (isLoading || !user) {
     return (
-      <div className="flex h-screen items-center justify-center bg-[var(--bg-main)]">
-        <div className="flex flex-col items-center gap-4">
-          <div className="h-10 w-10 animate-spin rounded-full border-3 border-[var(--accent)] border-t-transparent" />
-          <span className="text-sm text-[var(--text-tertiary)]">{t("loading")}</span>
+      <div className="flex h-screen items-center justify-center bg-[#130D24]" style={{ backgroundImage: "url('/wallpaper/tepla-pattern.svg')", backgroundSize: "400px 400px" }}>
+        <div className="absolute inset-0 bg-[rgba(10,6,18,0.88)]" />
+        <div className="relative z-10 flex flex-col items-center gap-4">
+          <div className="flex h-14 w-14 items-center justify-center rounded-full" style={{ background: "linear-gradient(135deg, #5B21B6, #6C3DE8)", boxShadow: "0 0 24px rgba(108,61,232,0.4)" }}>
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="white"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+          </div>
+          <h1 className="text-xl font-bold text-white">Tepla</h1>
+          <div className="h-8 w-8 animate-spin rounded-full border-2 border-[#8B5CF6] border-t-transparent" />
         </div>
       </div>
     );
@@ -72,6 +78,8 @@ export default function Home() {
       {/* Overlays */}
       <SettingsPanel />
       <PremiumPanel />
+      <WalletPanel />
+      <WBITPanel />
       <CallOverlay />
     </main>
   );

@@ -16,7 +16,7 @@ export default function Header({ chat, onBack }: HeaderProps) {
     : t("members_count", { count: chat.membersCount || 0 });
 
   return (
-    <header className="flex items-center gap-3 border-b border-[var(--border)] bg-[var(--bg-sidebar)] px-4 py-2.5 transition-colors">
+    <header className="flex items-center gap-3 border-b border-[var(--border)] bg-[var(--bg-sidebar)] px-4 py-2.5 transition-colors" style={{ backdropFilter: "blur(12px)" }}>
       <IconButton label={t("back")} onClick={onBack} className="md:hidden" size="sm">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="15 18 9 12 15 6"/></svg>
       </IconButton>
@@ -33,7 +33,7 @@ export default function Header({ chat, onBack }: HeaderProps) {
               </span>
             )}
           </div>
-          <p className={`text-xs ${user?.status === "online" ? "text-emerald-400" : "text-[var(--text-tertiary)]"}`}>
+          <p className={`text-xs ${user?.status === "online" ? "text-[#00D46A]" : "text-[var(--text-tertiary)]"}`}>
             {chat.typing && chat.typing.length > 0 ? (
               <span className="text-[var(--accent)]">{t("typing", { names: chat.typing.join(", ") })}</span>
             ) : statusText}

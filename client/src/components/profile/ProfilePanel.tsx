@@ -45,7 +45,7 @@ export default function ProfilePanel({ chat }: ProfilePanelProps) {
           <Avatar name={chat.name} src={chat.avatar} status={user?.status} size="xl" isPremium={user?.isPremium} />
           <div className="text-center">
             <h2 className="text-lg font-semibold">{chat.name}</h2>
-            <p className={`text-xs ${user?.status === "online" ? "text-emerald-400" : "text-[var(--text-tertiary)]"}`}>
+            <p className={`text-xs ${user?.status === "online" ? "text-[#00D46A]" : "text-[var(--text-tertiary)]"}`}>
               {user?.status === "online" ? "online" : user?.lastSeen ? `last seen ${user.lastSeen}` : `${chat.membersCount || 0} members`}
             </p>
           </div>
@@ -61,7 +61,7 @@ export default function ProfilePanel({ chat }: ProfilePanelProps) {
                 <p className="text-sm text-[var(--text-primary)]">{item.value}</p>
                 <p className="text-[10px] text-[var(--text-tertiary)]">{item.label}</p>
               </div>
-              {copiedField === item.label && <span className="text-[10px] text-emerald-400 shrink-0">Copied!</span>}
+              {copiedField === item.label && <span className="text-[10px] text-[#00D46A] shrink-0">Copied!</span>}
             </button>
           ))}
         </div>

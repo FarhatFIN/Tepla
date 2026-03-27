@@ -56,8 +56,8 @@ function CodeBlock({ code, language, isOwn }: { code: string; language: string; 
   }, [code]);
 
   return (
-    <div className="my-1 rounded-lg overflow-hidden bg-[#1e1e2e] text-[#cdd6f4]">
-      <div className="flex items-center justify-between px-3 py-1 bg-[#181825] text-xs">
+    <div className="my-1 rounded-lg overflow-hidden bg-[#130D24] text-[#cdd6f4]">
+      <div className="flex items-center justify-between px-3 py-1 bg-[#0D0818] text-xs">
         <span className="text-[#a6adc8]">{lang || "code"}</span>
         <button onClick={copy} className="text-[#a6adc8] hover:text-white transition-colors">
           {copied ? "Copied!" : "Copy"}
@@ -69,7 +69,7 @@ function CodeBlock({ code, language, isOwn }: { code: string; language: string; 
 }
 
 function InlineCode({ text }: { text: string }) {
-  return <code className="rounded bg-[#1e1e2e] text-[#cdd6f4] px-1.5 py-0.5 text-[13px] font-mono">{text}</code>;
+  return <code className="rounded bg-[#130D24] text-[#cdd6f4] px-1.5 py-0.5 text-[13px] font-mono">{text}</code>;
 }
 
 interface RichTextProps {

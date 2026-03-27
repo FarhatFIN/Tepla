@@ -163,6 +163,14 @@ services:
       PREMIUM_SERVICE_URL: http://premium-service:3009
       MODERATION_SERVICE_URL: http://moderation-service:3010
       ANALYTICS_SERVICE_URL: http://analytics-service:3011
+      CALLS_SERVICE_URL: http://calls-service:3012
+      BOT_SERVICE_URL: http://bot-service:3013
+      STORIES_SERVICE_URL: http://stories-service:3014
+      STICKER_SERVICE_URL: http://sticker-service:3015
+      TRANSLATION_SERVICE_URL: http://translation-service:3016
+      WEBAPP_SERVICE_URL: http://webapp-service:3017
+      WALLET_SERVICE_URL: http://wallet-service:3018
+      WBIT_SERVICE_URL: http://wbit-service:3019
     depends_on:
       redis:
         condition: service_healthy
@@ -200,6 +208,13 @@ services:
       TWILIO_ACCOUNT_SID: ${TWILIO_ACCOUNT_SID:-}
       TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN:-}
       TWILIO_FROM_NUMBER: ${TWILIO_FROM_NUMBER:-}
+      SMTP_HOST: ${SMTP_HOST:-smtp.gmail.com}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      SMTP_FROM: ${SMTP_FROM:-noreply@tepla.app}
+      JWT_PRIVATE_KEY: ${JWT_PRIVATE_KEY:-}
+      JWT_PUBLIC_KEY: ${JWT_PUBLIC_KEY:-}
     depends_on:
       postgres:
         condition: service_healthy
@@ -488,6 +503,45 @@ services:
     environment:
       <<: *common-env
       PORT: 3017
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  wallet-service:
+    build:
+      context: ../services/wallet-service
+      dockerfile: Dockerfile
+    container_name: tepla-wallet
+    <<: *service-defaults
+    environment:
+      <<: *common-env
+      PORT: 3018
+      SUMSUB_APP_TOKEN: ${SUMSUB_APP_TOKEN:-}
+      SUMSUB_SECRET_KEY: ${SUMSUB_SECRET_KEY:-}
+      SUMSUB_WEBHOOK_SECRET: ${SUMSUB_WEBHOOK_SECRET:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  wbit-service:
+    build:
+      context: ../services/wbit-service
+      dockerfile: Dockerfile
+    container_name: tepla-wbit
+    <<: *service-defaults
+    environment:
+      <<: *common-env
+      PORT: 3019
+      TON_ENDPOINT: ${TON_ENDPOINT:-https://testnet.toncenter.com/api/v2/jsonRPC}
+      TON_API_KEY: ${TON_API_KEY:-}
+      NETWORK: ${NETWORK:-testnet}
+      WBIT_MINTER_ADDRESS: ${WBIT_MINTER_ADDRESS:-}
+      TEPLA_TREASURY_ADDRESS: ${TEPLA_TREASURY_ADDRESS:-}
+      WALLET_ENCRYPTION_KEY: ${WALLET_ENCRYPTION_KEY:-tepla-wbit-encryption-key-change-me-32}
     depends_on:
       postgres:
         condition: service_healthy

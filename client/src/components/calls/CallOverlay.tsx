@@ -212,12 +212,12 @@ export default function CallOverlay() {
   const totalParticipants = participants.length + 1; // +1 for self
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 animate-fade-in">
-      <div className="flex w-full max-w-2xl flex-col items-center gap-4 rounded-3xl bg-[var(--bg-card)] p-6 shadow-2xl animate-scale-in">
+    <div className="fixed inset-0 z-50 flex items-center justify-center animate-fade-in" style={{ background: "radial-gradient(ellipse at center, rgba(108,61,232,0.15) 0%, rgba(10,6,18,0.95) 70%)" }}>
+      <div className="flex w-full max-w-2xl flex-col items-center gap-4 rounded-3xl p-6 shadow-2xl animate-scale-in glass" style={{ background: "rgba(19,13,36,0.92)", border: "1px solid rgba(108,61,232,0.25)" }}>
         {/* Header */}
         <div className="flex w-full items-center justify-between">
           <div className="flex items-center gap-2">
-            <div className={`h-2 w-2 rounded-full ${callState === "active" ? "bg-emerald-400 animate-pulse" : callState === "ringing" ? "bg-amber-400 animate-pulse" : "bg-red-400"}`} />
+            <div className={`h-2 w-2 rounded-full ${callState === "active" ? "bg-[#00D46A] animate-pulse" : callState === "ringing" ? "bg-[#8B5CF6] animate-pulse" : "bg-red-400"}`} />
             <span className="text-xs font-medium text-[var(--text-tertiary)]">
               {callState === "connecting" ? t("connecting") : callState === "ringing" ? t("ringing") : callState === "active" ? formatDuration(callDuration) : t("call_ended")}
             </span>
@@ -276,7 +276,7 @@ export default function CallOverlay() {
           <div className="flex w-full flex-wrap gap-2 rounded-xl bg-[var(--bg-input)] p-3">
             {participants.map((p) => (
               <div key={String(p.uid)} className="flex items-center gap-2 rounded-lg bg-[var(--bg-main)] px-2.5 py-1.5">
-                <div className={`h-2 w-2 rounded-full ${p.hasAudio ? "bg-emerald-400" : "bg-red-400"}`} />
+                <div className={`h-2 w-2 rounded-full ${p.hasAudio ? "bg-[#00D46A]" : "bg-red-400"}`} />
                 <span className="text-xs">{p.name || String(p.uid).slice(0, 6)}</span>
                 {p.hasVideo && <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>}
               </div>
@@ -298,7 +298,7 @@ export default function CallOverlay() {
               : <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="1" y1="1" x2="23" y2="23"/><path d="M21 7l-5 3.5V7a2 2 0 0 0-2-2H5"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>}
           </button>
 
-          <button onClick={toggleScreenShare} className={`flex h-14 w-14 items-center justify-center rounded-full transition-colors ${isScreenSharing ? "bg-blue-500 text-white" : "bg-[var(--bg-input)] text-[var(--text-primary)]"}`} title={isScreenSharing ? t("stop_sharing") : t("share_screen")}>
+          <button onClick={toggleScreenShare} className={`flex h-14 w-14 items-center justify-center rounded-full transition-colors ${isScreenSharing ? "bg-[#6C3DE8] text-white" : "bg-[var(--bg-input)] text-[var(--text-primary)]"}`} title={isScreenSharing ? t("stop_sharing") : t("share_screen")}>
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
           </button>
 

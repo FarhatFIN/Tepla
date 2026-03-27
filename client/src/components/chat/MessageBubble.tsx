@@ -19,7 +19,7 @@ function StatusIcon({ status }: { status: MessageStatus }) {
   if (status === "sending") return <div className="h-3 w-3 animate-spin rounded-full border border-current border-t-transparent" />;
   if (status === "failed") return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="red" strokeWidth="2.5"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>;
   if (status === "sent") return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="20 6 9 17 4 12"/></svg>;
-  const color = status === "read" ? "text-sky-300" : "";
+  const color = status === "read" ? "text-[#00D46A]" : "";
   return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className={color}><polyline points="18 6 7 17 2 12"/><polyline points="22 6 11 17"/></svg>;
 }
 
@@ -141,7 +141,7 @@ function LocationContent({ message, isOwn }: { message: Message; isOwn: boolean 
             <div className="text-center">
               <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="mx-auto mb-1"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
               <p className="text-xs">{loc.address || `${loc.lat.toFixed(4)}, ${loc.lng.toFixed(4)}`}</p>
-              {loc.isLive && <span className="mt-1 inline-flex items-center gap-1 text-[10px] text-emerald-400"><span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />Live</span>}
+              {loc.isLive && <span className="mt-1 inline-flex items-center gap-1 text-[10px] text-[#00D46A]"><span className="h-1.5 w-1.5 rounded-full bg-[#00D46A] animate-pulse" />Live</span>}
             </div>
           </div>
         </div>
@@ -162,7 +162,7 @@ function PollContent({ message, isOwn }: { message: Message; isOwn: boolean }) {
     return (
       <div className="px-3 py-2 min-w-[220px]">
         <p className="text-sm font-semibold mb-2">{poll.question}</p>
-        {poll.type === "quiz" && voted !== null && <p className={`text-[10px] mb-1 ${voted === poll.correctOptionId ? "text-emerald-400" : "text-red-400"}`}>{voted === poll.correctOptionId ? t("correct") : t("wrong")}</p>}
+        {poll.type === "quiz" && voted !== null && <p className={`text-[10px] mb-1 ${voted === poll.correctOptionId ? "text-[#00D46A]" : "text-red-400"}`}>{voted === poll.correctOptionId ? t("correct") : t("wrong")}</p>}
         <div className="flex flex-col gap-1.5">
           {(poll.options || []).map((opt: string, i: number) => {
             const votes = poll.votes?.[i] || 0;
@@ -239,7 +239,7 @@ export default memo(function MessageBubble({ message, isOwn, isFirstInGroup, isL
         </div>
       )}
 
-      <div className={`max-w-[75%] ${isOwn ? `${radiusOwn} bg-[var(--bg-bubble-own)] text-white` : `${radiusOther} bg-[var(--bg-bubble-other)] text-[var(--text-primary)]`}`}>
+      <div className={`max-w-[75%] ${isOwn ? `${radiusOwn} text-white` : `${radiusOther} bg-[var(--bg-bubble-other)] text-[var(--text-primary)]`}`} style={isOwn ? { background: "linear-gradient(135deg, #5B21B6, #6C3DE8)" } : undefined}>
         {/* Sender name for groups */}
         {!isOwn && isFirstInGroup && message.senderName && (
           <p className="px-3.5 pt-1.5 text-xs font-semibold text-[var(--accent)]">{message.senderName}</p>

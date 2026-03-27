@@ -76,7 +76,7 @@ export default function StoriesBar({ stories }: StoriesBarProps) {
             </div>
             <div
               className="flex h-[400px] w-full items-center justify-center rounded-xl text-xl font-bold text-white cursor-pointer"
-              style={{ background: viewingStory.stories[storyIndex].backgroundColor || "#0ea5e9" }}
+              style={{ background: viewingStory.stories[storyIndex].backgroundColor || "linear-gradient(135deg, #5B21B6, #6C3DE8)" }}
               onClick={nextStory}
             >
               {viewingStory.stories[storyIndex].text}

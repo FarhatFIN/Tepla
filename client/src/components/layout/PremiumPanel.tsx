@@ -29,8 +29,8 @@ export default function PremiumPanel() {
 
   return (
     <div className="fixed inset-0 z-40 flex items-center justify-center animate-fade-in" onClick={togglePremium}>
-      <div className="absolute inset-0 bg-[var(--bg-overlay)]" />
-      <div className="relative w-full max-w-lg rounded-3xl bg-[var(--bg-card)] p-8 shadow-2xl animate-scale-in" onClick={(e) => e.stopPropagation()}>
+      <div className="absolute inset-0" style={{ background: "radial-gradient(ellipse at center, rgba(108,61,232,0.1) 0%, rgba(10,6,18,0.92) 70%)" }} />
+      <div className="relative w-full max-w-lg rounded-3xl p-8 shadow-2xl animate-scale-in" style={{ background: "rgba(19,13,36,0.95)", border: "1px solid rgba(108,61,232,0.25)" }} onClick={(e) => e.stopPropagation()}>
         <button onClick={togglePremium} className="absolute top-4 right-4 rounded-lg p-1 text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)]">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
         </button>
@@ -65,7 +65,7 @@ export default function PremiumPanel() {
               <p className="text-xs text-[var(--text-tertiary)]">{p.name}</p>
               <p className="mt-1 text-lg font-bold">{p.price}</p>
               <p className="text-[10px] text-[var(--text-tertiary)]">{p.period}</p>
-              {p.savings && <p className="mt-1 text-[10px] font-semibold text-emerald-400">{p.savings}</p>}
+              {p.savings && <p className="mt-1 text-[10px] font-semibold text-[#00D46A]">{p.savings}</p>}
             </div>
           ))}
         </div>

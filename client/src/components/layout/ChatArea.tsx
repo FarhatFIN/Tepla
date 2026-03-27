@@ -26,7 +26,7 @@ export default function ChatArea({ chat, messages, currentUserId, onBack }: Chat
   ];
 
   return (
-    <section className="flex h-full bg-[var(--bg-main)] transition-colors">
+    <section className="flex h-full bg-[#130D24] transition-colors">
       <div className="flex min-w-0 flex-1 flex-col">
         <Header chat={chat} onBack={onBack} />
 

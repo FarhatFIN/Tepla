@@ -143,6 +143,15 @@ app.use('/api/v2/roles', ...protectedMiddleware, proxy(config.services.chat, { '
 app.use('/api/v2/reactions', ...protectedMiddleware, proxy(config.services.message, { '^/': '/api/reactions/' }));
 app.use('/api/v2/sparks', auth, securityMiddleware.auditSensitive('sparks'), proxy(config.services.message, { '^/': '/api/sparks/' }));
 
+// ─── Wallet & KYC Routes v2.3 ─────────────────────────────────────
+app.use('/api/v2/wallet', auth, securityMiddleware.userRateLimit(100), securityMiddleware.auditSensitive('wallet'), proxy(config.services.wallet, { '^/': '/api/wallet/' }));
+app.use('/api/v2/wallet/kyc/webhook', express.json({ limit: '1mb' }), proxy(config.services.wallet, { '^/': '/api/wallet/kyc/webhook' })); // No auth — Sumsub webhook
+
+// ─── WBIT Token Routes v2.4 ───────────────────────────────────────
+app.use('/api/v2/wbit/price', proxy(config.services.wbit, { '^/': '/api/wbit/price' })); // Public
+app.use('/api/v2/wbit/info', proxy(config.services.wbit, { '^/': '/api/wbit/info' }));   // Public
+app.use('/api/v2/wbit', auth, securityMiddleware.userRateLimit(100), securityMiddleware.auditSensitive('wbit'), proxy(config.services.wbit, { '^/': '/api/wbit/' }));
+
 // ─── Error Handler ──────────────────────────
 app.use(errorHandler);
 

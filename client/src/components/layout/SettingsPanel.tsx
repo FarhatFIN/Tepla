@@ -130,7 +130,7 @@ export default function SettingsPanel() {
   return (
     <div className="fixed inset-0 z-40 flex animate-fade-in" onClick={toggleSettings}>
       <div className="absolute inset-0 bg-[var(--bg-overlay)]" />
-      <div className="relative ml-auto flex h-full w-full max-w-md bg-[var(--bg-sidebar)] shadow-2xl animate-slide-in-right" onClick={(e) => e.stopPropagation()}>
+      <div className="relative ml-auto flex h-full w-full max-w-md shadow-2xl animate-slide-in-right" style={{ background: "rgba(30,21,53,0.98)", backdropFilter: "blur(24px)", borderLeft: "1px solid rgba(108,61,232,0.2)" }} onClick={(e) => e.stopPropagation()}>
         <div className="flex h-full w-full flex-col">
           <header className="flex items-center gap-3 border-b border-[var(--border)] px-4 py-3">
             <button onClick={toggleSettings} className="rounded-lg p-1 text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)]">
@@ -162,7 +162,7 @@ export default function SettingsPanel() {
                     </span>
                   )}
                   {user?.isAdmin && (
-                    <span className="inline-flex items-center gap-0.5 rounded-full bg-amber-500 px-1.5 py-0.5 text-[9px] font-bold text-white">
+                    <span className="inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[9px] font-bold text-white" style={{ background: "linear-gradient(135deg, #6C3DE8, #00D46A)" }}>
                       <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87L18.18 22 12 18.27 5.82 22 7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
                       Admin
                     </span>
@@ -182,12 +182,12 @@ export default function SettingsPanel() {
                     />
                     {usernameStatus === "checking" && <div className="h-3 w-3 animate-spin rounded-full border border-[var(--accent)] border-t-transparent" />}
                     {usernameStatus === "available" && (
-                      <button onClick={handleUsernameSave} className="text-emerald-400">
+                      <button onClick={handleUsernameSave} className="text-[#00D46A]">
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="20 6 9 17 4 12"/></svg>
                       </button>
                     )}
                     {usernameStatus === "taken" && <span className="text-[10px] text-red-400">taken</span>}
-                    {usernameStatus === "saved" && <span className="text-[10px] text-emerald-400">saved!</span>}
+                    {usernameStatus === "saved" && <span className="text-[10px] text-[#00D46A]">saved!</span>}
                     <button onClick={() => { setEditingUsername(false); setUsernameStatus("idle"); }} className="text-[var(--text-tertiary)]">
                       <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
                     </button>
@@ -333,13 +333,13 @@ export default function SettingsPanel() {
                     <div className="mb-2 ml-10 mr-3 rounded-xl bg-[var(--bg-input)] p-3 animate-slide-up">
                       <p className="mb-2 text-[10px] font-semibold uppercase text-[var(--text-tertiary)]">{t("current_device")}</p>
                       <div className="flex items-center gap-3 rounded-lg bg-[var(--bg-main)] p-2.5 mb-3">
-                        <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-500/20 text-emerald-400">
+                        <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-[rgba(0,212,106,0.15)] text-[#00D46A]">
                           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
                         </div>
                         <div>
                           <p className="text-xs font-medium">{t("this_device")}</p>
                           <p className="text-[10px] text-[var(--text-tertiary)]">Windows - Chrome</p>
-                          <p className="text-[10px] text-emerald-400">{t("online_now")}</p>
+                          <p className="text-[10px] text-[#00D46A]">{t("online_now")}</p>
                         </div>
                       </div>
                       <button className="w-full rounded-lg bg-red-500/10 px-3 py-2 text-xs text-red-400 hover:bg-red-500/20 transition-colors">
@@ -373,11 +373,11 @@ export default function SettingsPanel() {
                           <p className="text-[10px] text-[var(--text-tertiary)]">{t("total_users")}</p>
                         </div>
                         <div className="rounded-lg bg-[var(--bg-main)] p-2.5 text-center">
-                          <p className="text-lg font-bold text-emerald-400">1</p>
+                          <p className="text-lg font-bold text-[#00D46A]">1</p>
                           <p className="text-[10px] text-[var(--text-tertiary)]">{t("online_now_stat")}</p>
                         </div>
                         <div className="rounded-lg bg-[var(--bg-main)] p-2.5 text-center">
-                          <p className="text-lg font-bold text-violet-400">2</p>
+                          <p className="text-lg font-bold text-[#8B5CF6]">2</p>
                           <p className="text-[10px] text-[var(--text-tertiary)]">{t("total_chats")}</p>
                         </div>
                         <div className="rounded-lg bg-[var(--bg-main)] p-2.5 text-center">

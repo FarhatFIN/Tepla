@@ -154,27 +154,32 @@ class CallRepository extends BaseRepository {
 }
 
 // ─── LiveKit Token Generator ───────────────
-function generateLiveKitToken(roomName: string, participantId: string, canPublish = true): string {
-  // In production, use livekit-server-sdk AccessToken
-  // For now, return a placeholder that LiveKit server will validate
-  const payload = {
-    iss: LIVEKIT_API_KEY,
-    sub: participantId,
-    jti: `${participantId}-${Date.now()}`,
-    exp: Math.floor(Date.now() / 1000) + 3600,
-    video: {
+async function generateLiveKitToken(roomName: string, participantId: string, canPublish = true): Promise<string> {
+  try {
+    const { AccessToken } = await import('livekit-server-sdk');
+    const at = new AccessToken(LIVEKIT_API_KEY, LIVEKIT_API_SECRET, {
+      identity: participantId,
+      ttl: '1h',
+    });
+    at.addGrant({
       room: roomName,
       roomJoin: true,
       canPublish,
       canSubscribe: true,
       canPublishData: true,
-    },
-  };
-  // In real implementation:
-  // const at = new AccessToken(LIVEKIT_API_KEY, LIVEKIT_API_SECRET, { identity: participantId });
-  // at.addGrant({ room: roomName, roomJoin: true, canPublish, canSubscribe: true });
-  // return at.toJwt();
-  return Buffer.from(JSON.stringify(payload)).toString('base64');
+    });
+    return await at.toJwt();
+  } catch {
+    // Fallback for dev mode without LiveKit SDK
+    const payload = {
+      iss: LIVEKIT_API_KEY,
+      sub: participantId,
+      jti: `${participantId}-${Date.now()}`,
+      exp: Math.floor(Date.now() / 1000) + 3600,
+      video: { room: roomName, roomJoin: true, canPublish, canSubscribe: true, canPublishData: true },
+    };
+    return Buffer.from(JSON.stringify(payload)).toString('base64');
+  }
 }
 
 // ─── Service Bootstrap ─────────────────────
@@ -230,7 +235,7 @@ class CallsService {
 
         await this.repo.addParticipant(callId, userId);
 
-        const token = generateLiveKitToken(roomName, userId);
+        const token = await generateLiveKitToken(roomName, userId);
 
         await this.kafka.send(EventTopic.CALL_EVENTS, {
           id: crypto.randomUUID(),
@@ -268,7 +273,7 @@ class CallsService {
         }
 
         await this.repo.addParticipant(callId, userId);
-        const token = generateLiveKitToken(call.livekitRoom!, userId);
+        const token = await generateLiveKitToken(call.livekitRoom!, userId);
 
         await this.kafka.send(EventTopic.CALL_EVENTS, {
           id: crypto.randomUUID(),

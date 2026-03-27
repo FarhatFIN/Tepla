@@ -29,7 +29,7 @@ export default function Modal({ open, onClose, title, children, size = "md" }: M
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center animate-fade-in" onClick={onClose}>
       <div className="absolute inset-0 bg-[var(--bg-overlay)]" />
-      <div className={`relative ${sizeClasses[size]} w-full rounded-2xl bg-[var(--bg-card)] p-6 shadow-xl animate-scale-in`} onClick={(e) => e.stopPropagation()}>
+      <div className={`relative ${sizeClasses[size]} w-full rounded-2xl p-6 shadow-xl animate-scale-in`} style={{ background: "rgba(19,13,36,0.95)", border: "1px solid rgba(108,61,232,0.2)", backdropFilter: "blur(24px)" }} onClick={(e) => e.stopPropagation()}>
         {title && (
           <div className="mb-4 flex items-center justify-between">
             <h2 className="text-lg font-semibold text-[var(--text-primary)]">{title}</h2>

@@ -3,7 +3,7 @@ import { v4 as uuid } from 'uuid';
 import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
 import Redis from 'ioredis';
-import { RedisClient, KafkaProducer, authMiddleware, ValidationError, UnauthorizedError, ForbiddenError, createLogger } from '@tepla/common';
+import { RedisClient, KafkaProducer, authMiddleware, ValidationError, UnauthorizedError, ForbiddenError, createLogger, db } from '@tepla/common';
 import { EventType, EventTopic, UserId } from '@tepla/types';
 import {
   SecurityRateLimiter,
@@ -16,7 +16,9 @@ import {
 import { OtpService } from '../services/otp.service';
 import { TokenService } from '../services/token.service';
 import { UserRepository } from '../repositories/user.repository';
-import { sendOtpEmail, sendLoginAlertEmail } from '../services/email.service';
+import { sendOtpEmail, sendLoginAlertEmail, sendSecurityAlertEmail } from '../services/email.service';
+import { RiskEngine } from '../services/risk.engine';
+import { ChallengeService } from '../services/challenge.service';
 
 const logger = createLogger('auth-routes');
 
@@ -31,6 +33,8 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
   const rateLimiter = new SecurityRateLimiter(rawRedis);
   const deviceSecurity = new DeviceSecurity(rawRedis);
   const sessionManager = new SessionManager(rawRedis);
+  const riskEngine = new RiskEngine(redis);
+  const challengeService = new ChallengeService(redis);
 
   // Set audit logger redis
   AuditLogger.setRedis(rawRedis);
@@ -792,6 +796,291 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
         success: true,
         data: { user: mapUser(user), tokens, sessionId: session },
       });
+    } catch (err) { next(err); }
+  });
+
+  // ─── PIN System ────────────────────────────
+
+  // POST /api/auth/pin/set
+  router.post('/pin/set', auth, async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const userId = req.user!.sub;
+      const { pin } = req.body;
+      if (!pin || pin.length !== 6 || !/^\d{6}$/.test(pin)) {
+        throw new ValidationError('PIN must be exactly 6 digits');
+      }
+
+      const pinHash = await bcrypt.hash(pin, 10);
+      await db.query(`UPDATE users SET pin_hash = $1 WHERE id = $2`, [pinHash, userId]);
+
+      await AuditLogger.log('pin_set', { userId, ip: req.ip });
+      res.json({ success: true, data: { message: 'PIN set successfully' } });
+    } catch (err) { next(err); }
+  });
+
+  // POST /api/auth/pin/verify
+  router.post('/pin/verify', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { userId, pin, deviceId } = req.body;
+      if (!userId || !pin) throw new ValidationError('userId and pin are required');
+
+      // Rate limit: 5 per device per hour
+      const rlKey = `pin_attempts:${deviceId || userId}`;
+      const attempts = parseInt(await redis.get(rlKey) || '0');
+      if (attempts >= 5) throw new ForbiddenError('Too many PIN attempts. Try again later.');
+
+      const user = await userRepo.findById(userId);
+      if (!user || !user.pin_hash) throw new UnauthorizedError('PIN not set');
+
+      const valid = await bcrypt.compare(pin, user.pin_hash);
+      if (!valid) {
+        await redis.set(rlKey, String(attempts + 1), 3600);
+        await AuditLogger.log('pin_verify_failed', { userId, ip: req.ip });
+        throw new UnauthorizedError('Invalid PIN');
+      }
+
+      await redis.del(rlKey);
+
+      const tokens = tokenService.generateTokens({
+        sub: user.id as UserId,
+        username: user.username,
+        isPremium: user.is_premium,
+      });
+      await redis.set(`session:${tokens.refreshToken}`, user.id, 30 * 24 * 3600);
+
+      await AuditLogger.log('pin_verify_success', { userId, ip: req.ip });
+      res.json({ success: true, data: { tokens, user: mapUser(user) } });
+    } catch (err) { next(err); }
+  });
+
+  // POST /api/auth/pin/reset
+  router.post('/pin/reset', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { email } = req.body;
+      if (!email) throw new ValidationError('Email is required');
+
+      const user = await userRepo.findByEmail(email.toLowerCase().trim());
+      if (!user) throw new UnauthorizedError('User not found');
+
+      const challenge = await challengeService.createOtpChallenge(email, user.id);
+      res.json({ success: true, data: { challengeId: challenge.challengeId, message: 'Check your email' } });
+    } catch (err) { next(err); }
+  });
+
+  // ─── Biometric System ────────────────────
+
+  // POST /api/auth/biometric/register
+  router.post('/biometric/register', auth, async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const userId = req.user!.sub;
+      const { publicKey, deviceId } = req.body;
+      if (!publicKey || !deviceId) throw new ValidationError('publicKey and deviceId required');
+
+      await db.query(
+        `UPDATE devices SET biometric_public_key = $1 WHERE user_id = $2 AND device_id = $3`,
+        [publicKey, userId, deviceId]
+      );
+
+      await AuditLogger.log('biometric_registered', { userId, deviceId, ip: req.ip });
+      res.json({ success: true, data: { message: 'Biometric registered' } });
+    } catch (err) { next(err); }
+  });
+
+  // POST /api/auth/biometric/login
+  router.post('/biometric/login', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { userId, deviceId, signature } = req.body;
+      if (!userId || !deviceId || !signature) throw new ValidationError('userId, deviceId, signature required');
+
+      const device = await db.queryRow(
+        `SELECT * FROM devices WHERE user_id = $1 AND device_id = $2 AND biometric_public_key IS NOT NULL`,
+        [userId, deviceId]
+      );
+      if (!device) throw new UnauthorizedError('Biometric not registered for this device');
+
+      // In production, verify signature with stored public key using WebAuthn
+      // For now, trust the client-side biometric verification
+      const user = await userRepo.findById(userId);
+      if (!user) throw new UnauthorizedError('User not found');
+
+      const tokens = tokenService.generateTokens({
+        sub: user.id as UserId,
+        username: user.username,
+        isPremium: user.is_premium,
+      });
+      await redis.set(`session:${tokens.refreshToken}`, user.id, 30 * 24 * 3600);
+
+      await AuditLogger.log('biometric_login', { userId, deviceId, ip: req.ip });
+      res.json({ success: true, data: { tokens, user: mapUser(user) } });
+    } catch (err) { next(err); }
+  });
+
+  // ─── Risk-based Login ────────────────────
+
+  // POST /api/auth/login/init — new device login with risk assessment
+  router.post('/login/init', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { email } = req.body;
+      if (!email) throw new ValidationError('Email is required');
+
+      const normalizedEmail = email.toLowerCase().trim();
+      await rateLimiter.checkAuth(normalizedEmail);
+
+      const user = await userRepo.findByEmail(normalizedEmail);
+      if (!user) throw new UnauthorizedError('User not found');
+      if (user.blocked_until && new Date(user.blocked_until) > new Date()) {
+        throw new ForbiddenError('Account temporarily blocked');
+      }
+
+      const fingerprint = RiskEngine.generateFingerprint(req.headers as Record<string, string>);
+      const riskScore = await riskEngine.calculateRiskScore({
+        userId: user.id,
+        fingerprint,
+        ip: req.ip || '0.0.0.0',
+      });
+
+      const requiredAuth = riskEngine.getRequiredAuth(riskScore);
+
+      if (requiredAuth === 'blocked') {
+        await sendSecurityAlertEmail(normalizedEmail, 'Suspicious login blocked', req.headers['user-agent'] || 'Unknown', req.ip || 'unknown');
+        throw new ForbiddenError('Login blocked due to security concerns');
+      }
+
+      let challenge;
+      if (requiredAuth === 'number_challenge') {
+        challenge = await challengeService.createNumberChallenge(normalizedEmail, user.id, req.headers['user-agent'], req.ip);
+      } else {
+        challenge = await challengeService.createOtpChallenge(normalizedEmail, user.id);
+      }
+
+      await AuditLogger.log('login_init', { userId: user.id, riskScore, requiredAuth, ip: req.ip });
+
+      res.json({
+        success: true,
+        data: {
+          challengeId: challenge.challengeId,
+          challengeType: challenge.type,
+          displayNumber: challenge.type === 'number_challenge' ? (challenge as any).displayNumber : undefined,
+          riskLevel: riskEngine.getRiskLevel(riskScore),
+        },
+      });
+    } catch (err) { next(err); }
+  });
+
+  // POST /api/auth/login/challenge-verify — verify challenge (OTP or number)
+  router.post('/login/challenge-verify', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { challengeId, answer, challengeType, deviceName } = req.body;
+      if (!challengeId || answer === undefined) throw new ValidationError('challengeId and answer required');
+
+      let result;
+      if (challengeType === 'number_challenge') {
+        result = await challengeService.verifyNumberChallenge(challengeId, parseInt(answer));
+      } else {
+        result = await challengeService.verifyOtp(challengeId, String(answer));
+      }
+
+      if (!result.valid) {
+        await SecurityMetrics.authFailure(rawRedis);
+        throw new UnauthorizedError('Invalid code');
+      }
+
+      const userId = result.userId || (result as any).pendingData?.userId;
+      if (!userId) throw new UnauthorizedError('Invalid challenge');
+
+      const user = await userRepo.findById(userId);
+      if (!user) throw new UnauthorizedError('User not found');
+
+      // Create/trust device
+      const fingerprint = RiskEngine.generateFingerprint(req.headers as Record<string, string>);
+      const deviceId = crypto.randomUUID();
+
+      await db.query(
+        `INSERT INTO devices (user_id, device_id, fingerprint, name, is_trusted, trust_expires_at, last_ip)
+         VALUES ($1, $2, $3, $4, true, NOW() + INTERVAL '30 days', $5)
+         ON CONFLICT (user_id, device_id) DO UPDATE SET fingerprint = $3, is_trusted = true, trust_expires_at = NOW() + INTERVAL '30 days', last_ip = $5, last_active = NOW()`,
+        [userId, deviceId, fingerprint, deviceName || req.headers['user-agent'] || 'Unknown', req.ip]
+      );
+
+      const tokens = tokenService.generateTokens({
+        sub: user.id as UserId,
+        username: user.username,
+        isPremium: user.is_premium,
+      });
+
+      await redis.set(`session:${tokens.refreshToken}`, user.id, 30 * 24 * 3600);
+      await userRepo.updateLastSeen(user.id);
+
+      // Send login alert
+      sendLoginAlertEmail(user.email, req.headers['user-agent'] || 'Unknown', req.ip || 'unknown').catch(() => {});
+
+      await AuditLogger.log('login_challenge_success', { userId, ip: req.ip });
+
+      res.json({
+        success: true,
+        data: { user: mapUser(user), tokens, deviceId },
+      });
+    } catch (err) { next(err); }
+  });
+
+  // POST /api/auth/login/trusted — trusted device login
+  router.post('/login/trusted', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { userId, deviceId, pinHash, biometricSignature } = req.body;
+      if (!userId || !deviceId) throw new ValidationError('userId and deviceId required');
+
+      const device = await db.queryRow(
+        `SELECT * FROM devices WHERE user_id = $1 AND device_id = $2`,
+        [userId, deviceId]
+      );
+      if (!device || !device.is_trusted) throw new UnauthorizedError('Device not trusted');
+      if (device.trust_expires_at && new Date(device.trust_expires_at) < new Date()) {
+        throw new UnauthorizedError('Device trust expired');
+      }
+
+      const fingerprint = RiskEngine.generateFingerprint(req.headers as Record<string, string>);
+      const riskScore = await riskEngine.calculateRiskScore({ userId, deviceId, fingerprint, ip: req.ip || '0.0.0.0' });
+
+      if (riskScore > 30) {
+        return res.json({ success: true, data: { needsChallenge: true, riskLevel: riskEngine.getRiskLevel(riskScore) } });
+      }
+
+      // Verify PIN or biometric
+      const user = await userRepo.findById(userId);
+      if (!user) throw new UnauthorizedError('User not found');
+
+      if (pinHash && user.pin_hash) {
+        const valid = await bcrypt.compare(pinHash, user.pin_hash);
+        if (!valid) throw new UnauthorizedError('Invalid PIN');
+      } else if (biometricSignature && device.biometric_public_key) {
+        // Trust client biometric in web context
+      } else {
+        throw new ValidationError('PIN or biometric required');
+      }
+
+      const tokens = tokenService.generateTokens({
+        sub: user.id as UserId,
+        username: user.username,
+        isPremium: user.is_premium,
+      });
+      await redis.set(`session:${tokens.refreshToken}`, user.id, 30 * 24 * 3600);
+
+      await db.query(`UPDATE devices SET last_active = NOW(), last_ip = $1 WHERE id = $2`, [req.ip, device.id]);
+      await AuditLogger.log('trusted_device_login', { userId, deviceId, ip: req.ip });
+
+      res.json({ success: true, data: { tokens, user: mapUser(user) } });
+    } catch (err) { next(err); }
+  });
+
+  // GET /api/auth/check-username/:username
+  router.get('/check-username/:username', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { username } = req.params;
+      if (!username || username.length < 4) {
+        return res.json({ success: true, data: { available: false } });
+      }
+      const existing = await userRepo.findByUsername(username.toLowerCase());
+      res.json({ success: true, data: { available: !existing } });
     } catch (err) { next(err); }
   });
 

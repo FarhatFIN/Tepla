@@ -45,6 +45,52 @@ export async function sendOtpEmail(to: string, code: string): Promise<void> {
   }
 }
 
+export async function sendEmail(to: string, subject: string, html: string): Promise<void> {
+  if (!process.env.SMTP_USER) {
+    logger.info(`[DEV] Email to ${to}: ${subject}`);
+    return;
+  }
+  try {
+    await transporter.sendMail({ from: FROM, to, subject, html });
+  } catch (err) {
+    logger.error('Failed to send email', { error: (err as Error).message });
+    throw err;
+  }
+}
+
+export async function sendSecurityAlertEmail(to: string, event: string, device: string, ip: string, country?: string): Promise<void> {
+  const time = new Date().toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' });
+  const html = `
+    <div style="font-family:Inter,system-ui,sans-serif;max-width:480px;margin:0 auto;padding:40px 20px;background:#130D24;color:#F0EAFF;border-radius:16px;">
+      <div style="text-align:center;margin-bottom:32px;">
+        <h1 style="font-size:32px;font-weight:800;background:linear-gradient(135deg,#5B21B6,#6C3DE8);-webkit-background-clip:text;-webkit-text-fill-color:transparent;margin:0;">⚡ Tepla</h1>
+      </div>
+      <div style="background:#1E1535;border-radius:12px;padding:24px;margin-bottom:24px;">
+        <p style="font-size:18px;font-weight:600;color:#F59E0B;margin:0 0 16px;">⚠️ ${event}</p>
+        <table style="width:100%;color:#9B89C4;font-size:14px;">
+          <tr><td style="padding:4px 0;">Device:</td><td style="color:#F0EAFF;">${device}</td></tr>
+          <tr><td style="padding:4px 0;">IP:</td><td style="color:#F0EAFF;">${ip}</td></tr>
+          <tr><td style="padding:4px 0;">Time:</td><td style="color:#F0EAFF;">${time}</td></tr>
+          ${country ? `<tr><td style="padding:4px 0;">Location:</td><td style="color:#F0EAFF;">${country}</td></tr>` : ''}
+        </table>
+      </div>
+      <div style="text-align:center;">
+        <a href="#" style="display:inline-block;background:linear-gradient(135deg,#5B21B6,#6C3DE8);color:white;padding:12px 32px;border-radius:12px;text-decoration:none;font-weight:500;">Secure my account</a>
+      </div>
+      <p style="font-size:12px;color:#5C4D87;text-align:center;margin-top:16px;">If this wasn't you, secure your account immediately.</p>
+    </div>`;
+
+  if (!process.env.SMTP_USER) {
+    logger.info(`[DEV] Security alert for ${to}: ${event}`);
+    return;
+  }
+  try {
+    await transporter.sendMail({ from: FROM, to, subject: `⚠️ Tepla — ${event}`, html });
+  } catch (err) {
+    logger.error('Failed to send security alert', { error: (err as Error).message });
+  }
+}
+
 export async function sendLoginAlertEmail(to: string, device: string, ip: string, location?: string): Promise<void> {
   const time = new Date().toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' });
   const subject = 'New login to your Tepla account';

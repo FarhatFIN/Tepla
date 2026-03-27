@@ -2,26 +2,47 @@
 import { FormEvent, useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { motion } from "framer-motion";
 import { useAuthStore } from "@/stores/auth-store";
-import Input from "@/components/ui/Input";
 import OtpInput from "@/components/ui/OtpInput";
 import { languages } from "@/lib/countries";
-import { useTheme } from "@/hooks/useTheme";
 import { useTranslation } from "@/hooks/useTranslation";
+
+const fadeUp = {
+  hidden: { opacity: 0, y: 20 },
+  visible: { opacity: 1, y: 0, transition: { duration: 0.4, ease: [0.25, 0.1, 0.25, 1] } },
+};
+
+const inputClass =
+  "w-full h-[54px] bg-transparent border-b border-[#1E2D3D] text-[#E8EDF2] placeholder:text-[#4A6480] px-0 text-[16px] outline-none transition-all focus:border-[#3390EC]";
+
+function getPasswordStrength(pw: string): number {
+  let s = 0;
+  if (pw.length >= 6) s++;
+  if (pw.length >= 10) s++;
+  if (/[A-Z]/.test(pw) && /[a-z]/.test(pw)) s++;
+  if (/\d/.test(pw) && /[^A-Za-z0-9]/.test(pw)) s++;
+  return s;
+}
+
+const strengthColors = ["#EF4444", "#F59E0B", "#EAB308", "#00D46A"];
+const strengthLabels = ["password_strength_weak", "password_strength_fair", "password_strength_good", "password_strength_strong"];
 
 export default function RegisterPage() {
   const [name, setName] = useState("");
   const [username, setUsername] = useState("");
+  const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
-  const [language, setLanguage] = useState("ru");
+  const [showPassword, setShowPassword] = useState(false);
+  const [language, setLanguage] = useState("en");
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [globalError, setGlobalError] = useState("");
   const [loading, setLoading] = useState(false);
   const [usernameStatus, setUsernameStatus] = useState<"idle" | "checking" | "available" | "taken">("idle");
+  const [agreedTerms, setAgreedTerms] = useState(false);
 
-  // OTP step
   const [otpStep, setOtpStep] = useState(false);
   const [otpEmail, setOtpEmail] = useState("");
   const [otpError, setOtpError] = useState("");
@@ -31,10 +52,8 @@ export default function RegisterPage() {
 
   const { register, verifyOtp, resendCode } = useAuthStore();
   const router = useRouter();
-  const { theme, toggleTheme } = useTheme();
   const t = useTranslation();
 
-  // Resend cooldown timer
   useEffect(() => {
     if (resendCooldown <= 0) return;
     const timer = setTimeout(() => setResendCooldown((c) => c - 1), 1000);
@@ -50,6 +69,11 @@ export default function RegisterPage() {
     setTimeout(() => {
       setUsernameStatus(taken.includes(clean) ? "taken" : "available");
     }, 500);
+  }
+
+  function formatPhone(val: string) {
+    const digits = val.replace(/[^\d+]/g, "");
+    setPhone(digits);
   }
 
   function validate() {
@@ -100,7 +124,6 @@ export default function RegisterPage() {
 
   async function handleResend() {
     if (resendCooldown > 0) return;
-    setResendMessage("");
     try {
       await resendCode(otpEmail);
       setResendMessage(t("new_code_sent"));
@@ -110,143 +133,173 @@ export default function RegisterPage() {
     }
   }
 
-  // OTP verification screen
+  const pwStrength = getPasswordStrength(password);
+
+  // OTP verification
   if (otpStep) {
     return (
-      <div className="flex min-h-[100dvh] flex-col items-center justify-center overflow-y-auto bg-[var(--bg-main)] px-4 py-8">
-        <button onClick={toggleTheme} className="fixed top-4 right-4 z-10 rounded-lg p-2 text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]">
-          {theme === "dark"
-            ? <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/></svg>
-            : <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>}
-        </button>
+      <div className="fixed inset-0 z-50 flex flex-col items-center overflow-y-auto bg-[#0E1621]">
+        <div className="flex min-h-full w-full max-w-[360px] flex-col items-center justify-center px-4 py-8">
+        <motion.div initial="hidden" animate="visible" variants={fadeUp} className="w-full">
+          <div className="flex flex-col items-center">
+            <button onClick={() => { setOtpStep(false); setOtpError(""); }} className="self-start mb-8 text-[#4A6480] hover:text-[#E8EDF2] transition-colors">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+            </button>
 
-        <div className="mb-8 text-center">
-          <h1 className="text-4xl font-bold gradient-text">Tepla</h1>
-        </div>
-
-        <div className="w-full max-w-sm rounded-2xl bg-[var(--bg-sidebar)] p-6 shadow-lg">
-          <div className="flex flex-col items-center gap-5">
-            <div className="flex h-16 w-16 items-center justify-center rounded-full bg-[var(--accent)]/10">
-              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="1.5">
-                <rect x="2" y="4" width="20" height="16" rx="3"/>
-                <polyline points="22,7 12,13 2,7"/>
-              </svg>
+            <div className="flex h-[120px] w-[120px] items-center justify-center rounded-full bg-[#152232]">
+              <svg width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="#3390EC" strokeWidth="1.2"><rect x="2" y="4" width="20" height="16" rx="3"/><polyline points="22,7 12,13 2,7"/></svg>
             </div>
 
-            <h2 className="text-xl font-semibold">{t("verify_email")}</h2>
-            <p className="text-center text-sm text-[var(--text-tertiary)]">
-              {t("code_sent_to")} <span className="font-medium text-[var(--text-primary)]">{otpEmail}</span>
+            <h1 className="mt-6 text-2xl font-semibold text-[#E8EDF2]">{t("verify_email")}</h1>
+            <p className="mt-3 text-center text-[14px] leading-relaxed text-[#6B8CAE]">
+              {t("code_sent_to")} <span className="text-[#E8EDF2]">{otpEmail}</span>
             </p>
 
-            {otpError && <p className="w-full rounded-lg bg-red-500/10 px-3 py-2 text-center text-sm text-red-400">{otpError}</p>}
-            {resendMessage && <p className="w-full rounded-lg bg-emerald-500/10 px-3 py-2 text-center text-sm text-emerald-400">{resendMessage}</p>}
+            {otpError && <p className="mt-4 text-sm text-[#EF4444]">{otpError}</p>}
+            {resendMessage && <p className="mt-4 text-sm text-[#00D46A]">{resendMessage}</p>}
 
-            <OtpInput onComplete={handleOtpComplete} disabled={otpLoading} />
+            <div className="mt-8">
+              <OtpInput onComplete={handleOtpComplete} disabled={otpLoading} />
+            </div>
 
             {otpLoading && (
-              <div className="flex items-center gap-2 text-sm text-[var(--text-tertiary)]">
-                <div className="h-4 w-4 animate-spin rounded-full border-2 border-[var(--accent)] border-t-transparent" />
+              <div className="mt-6 flex items-center gap-2 text-sm text-[#6B8CAE]">
+                <div className="h-4 w-4 animate-spin rounded-full border-2 border-[#3390EC] border-t-transparent" />
                 {t("verifying")}
               </div>
             )}
 
-            <button
-              onClick={handleResend}
-              disabled={resendCooldown > 0}
-              className="text-sm text-[var(--accent)] hover:underline disabled:text-[var(--text-tertiary)] disabled:no-underline transition-colors"
-            >
-              {resendCooldown > 0 ? t("resend_in", { seconds: resendCooldown }) : t("resend_code")}
-            </button>
-
-            <button
-              onClick={() => { setOtpStep(false); setOtpError(""); setResendMessage(""); }}
-              className="text-xs text-[var(--text-tertiary)] hover:text-[var(--accent)] transition-colors"
-            >
-              {t("back_to_saved")}
-            </button>
+            <div className="mt-8 text-center">
+              <p className="text-[13px] text-[#4A6480]">{t("didnt_receive")}</p>
+              <button onClick={handleResend} disabled={resendCooldown > 0} className="mt-1 text-[14px] text-[#3390EC] hover:text-[#5EAEF0] disabled:text-[#4A6480] transition-colors">
+                {resendCooldown > 0 ? t("resend_in", { seconds: resendCooldown }) : t("resend_code")}
+              </button>
+            </div>
           </div>
+        </motion.div>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="flex min-h-[100dvh] flex-col items-center justify-center overflow-y-auto bg-[var(--bg-main)] px-4 py-8">
-      <button onClick={toggleTheme} className="fixed top-4 right-4 z-10 rounded-lg p-2 text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]">
-        {theme === "dark"
-          ? <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/></svg>
-          : <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>}
-      </button>
+    <div className="fixed inset-0 z-50 flex flex-col items-center overflow-y-auto bg-[#0E1621]">
+      <div className="w-full max-w-[360px] px-4 py-10">
+      <motion.div initial="hidden" animate="visible" variants={fadeUp} className="w-full">
+        {/* Logo */}
+        <div className="mb-10 flex flex-col items-center">
+          <div className="flex h-[100px] w-[100px] items-center justify-center rounded-full bg-[#152232]">
+            <svg width="44" height="44" viewBox="0 0 24 24" fill="none">
+              <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" fill="#3390EC"/>
+            </svg>
+          </div>
+          <h1 className="mt-4 text-2xl font-semibold text-[#E8EDF2]">{t("register")}</h1>
+          <p className="mt-2 text-center text-[14px] text-[#6B8CAE]">{t("create_tepla_account") || "Create your Tepla account"}</p>
+        </div>
 
-      <div className="mb-8 text-center">
-        <h1 className="text-4xl font-bold gradient-text">Tepla</h1>
-        <p className="mt-2 text-sm text-[var(--text-tertiary)]">{t("create_your_account")}</p>
-      </div>
+        {globalError && <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="mb-6 text-center text-[14px] text-[#EF4444]">{globalError}</motion.p>}
 
-      <div className="w-full max-w-sm rounded-2xl bg-[var(--bg-sidebar)] p-6 shadow-lg">
-        <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-          <h2 className="text-center text-xl font-semibold">{t("register")}</h2>
-
-          {globalError && <p className="rounded-lg bg-red-500/10 px-3 py-2 text-center text-sm text-red-400">{globalError}</p>}
-
-          <Input label={t("name")} placeholder={t("your_name")} value={name} onChange={(e) => setName(e.target.value)} error={errors.name} autoComplete="name" />
-
-          {/* Username field */}
-          <div className="flex flex-col gap-1.5">
-            <label className="text-sm font-medium text-[var(--text-secondary)]">{t("username")}</label>
-            <div className="relative">
-              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-[var(--text-tertiary)]">@</span>
-              <input
-                type="text"
-                placeholder={t("your_username")}
-                value={username}
-                onChange={(e) => validateUsername(e.target.value)}
-                maxLength={32}
-                className={`w-full rounded-xl bg-[var(--bg-input)] py-2.5 pl-8 pr-10 text-sm outline-none transition-colors placeholder:text-[var(--text-tertiary)] focus:ring-2 ${errors.username ? "ring-2 ring-red-500" : "focus:ring-[var(--accent)]"}`}
-              />
-              {usernameStatus === "checking" && (
-                <div className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 animate-spin rounded-full border-2 border-[var(--accent)] border-t-transparent" />
-              )}
-              {usernameStatus === "available" && (
-                <svg className="absolute right-3 top-1/2 -translate-y-1/2 text-emerald-400" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="20 6 9 17 4 12"/></svg>
-              )}
-              {usernameStatus === "taken" && (
-                <svg className="absolute right-3 top-1/2 -translate-y-1/2 text-red-400" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
-              )}
-            </div>
-            {errors.username && <p className="text-xs text-red-400">{errors.username}</p>}
-            {usernameStatus === "available" && <p className="text-[10px] text-emerald-400">{t("username_available")}</p>}
-            {usernameStatus === "taken" && <p className="text-[10px] text-red-400">{t("username_taken")}</p>}
-            <p className="text-[10px] text-[var(--text-tertiary)]">{t("username_hint", { username: username || "username" })}</p>
+        <form onSubmit={handleSubmit} className="flex flex-col">
+          {/* Name */}
+          <div>
+            <input type="text" placeholder={t("your_name")} value={name} onChange={(e) => setName(e.target.value)} className={inputClass} />
+            {errors.name && <p className="mt-1 text-[12px] text-[#EF4444]">{errors.name}</p>}
           </div>
 
-          <Input label={t("email")} type="email" placeholder={t("your_email")} value={email} onChange={(e) => setEmail(e.target.value)} error={errors.email} autoComplete="email" />
+          {/* Username */}
+          <div className="relative mt-2">
+            <input type="text" placeholder={t("your_username")} value={username} onChange={(e) => validateUsername(e.target.value)} maxLength={32} className={inputClass} />
+            <div className="absolute right-0 top-1/2 -translate-y-1/2">
+              {usernameStatus === "checking" && <div className="h-4 w-4 animate-spin rounded-full border-2 border-[#3390EC] border-t-transparent" />}
+              {usernameStatus === "available" && <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#00D46A" strokeWidth="2"><polyline points="20 6 9 17 4 12"/></svg>}
+              {usernameStatus === "taken" && <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#EF4444" strokeWidth="2"><path d="M18 6L6 18M6 6l12 12"/></svg>}
+            </div>
+            {usernameStatus === "available" && <p className="mt-1 text-[12px] text-[#00D46A]">{t("username_available")}</p>}
+            {usernameStatus === "taken" && <p className="mt-1 text-[12px] text-[#EF4444]">{t("username_taken")}</p>}
+            {errors.username && <p className="mt-1 text-[12px] text-[#EF4444]">{errors.username}</p>}
+          </div>
 
-          {/* Language selector */}
-          <div className="flex flex-col gap-1.5">
-            <label className="text-sm font-medium text-[var(--text-secondary)]">{t("auto_translate_lang")}</label>
-            <div className="grid grid-cols-3 gap-1.5">
+          {/* Phone */}
+          <div className="mt-2">
+            <input type="tel" placeholder={t("phone_number") || "Phone number"} value={phone} onChange={(e) => formatPhone(e.target.value)} className={inputClass} autoComplete="tel" />
+          </div>
+
+          {/* Email */}
+          <div className="mt-2">
+            <input type="email" placeholder={t("your_email")} value={email} onChange={(e) => setEmail(e.target.value)} className={inputClass} autoComplete="email" />
+            {errors.email && <p className="mt-1 text-[12px] text-[#EF4444]">{errors.email}</p>}
+          </div>
+
+          {/* Language */}
+          <div className="mt-6">
+            <p className="mb-3 text-[12px] font-medium uppercase tracking-wider text-[#4A6480]">{t("auto_translate_lang")}</p>
+            <div className="flex flex-wrap gap-2">
               {languages.slice(0, 9).map((lang) => (
                 <button key={lang.code} type="button" onClick={() => setLanguage(lang.code)}
-                  className={`flex items-center gap-1.5 rounded-lg px-2 py-2 text-xs transition-colors ${language === lang.code ? "bg-[var(--accent)] text-white" : "bg-[var(--bg-input)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"}`}>
+                  className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[13px] transition-all ${language === lang.code ? "bg-[#3390EC] text-white" : "bg-[#152232] text-[#6B8CAE] hover:bg-[#1A2B3D]"}`}>
                   <span>{lang.flag}</span>
-                  <span className="truncate">{lang.name}</span>
+                  <span>{lang.name}</span>
                 </button>
               ))}
             </div>
-            <p className="text-[10px] text-[var(--text-tertiary)]">{t("auto_translate_hint")}</p>
           </div>
 
-          <Input label={t("password")} isPassword placeholder={t("min_6_chars")} value={password} onChange={(e) => setPassword(e.target.value)} error={errors.password} autoComplete="new-password" />
-          <Input label={t("confirm_password")} isPassword placeholder={t("repeat_password")} value={confirm} onChange={(e) => setConfirm(e.target.value)} error={errors.confirm} autoComplete="new-password" />
+          {/* Password */}
+          <div className="relative mt-6">
+            <input type={showPassword ? "text" : "password"} placeholder={t("password")} value={password} onChange={(e) => setPassword(e.target.value)} className={inputClass} autoComplete="new-password" />
+            <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-0 top-1/2 -translate-y-1/2 p-2 text-[#4A6480] hover:text-[#6B8CAE] transition-colors">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+            </button>
+            {errors.password && <p className="mt-1 text-[12px] text-[#EF4444]">{errors.password}</p>}
+            {password.length > 0 && (
+              <div className="mt-3 flex items-center gap-2">
+                <div className="flex flex-1 gap-1">
+                  {[0, 1, 2, 3].map((i) => (
+                    <div key={i} className="h-[3px] flex-1 rounded-full transition-colors" style={{ background: i < pwStrength ? strengthColors[pwStrength - 1] : "#152232" }} />
+                  ))}
+                </div>
+                <span className="text-[11px] min-w-[40px]" style={{ color: strengthColors[pwStrength - 1] || "#4A6480" }}>
+                  {pwStrength > 0 ? t(strengthLabels[pwStrength - 1]) : ""}
+                </span>
+              </div>
+            )}
+          </div>
 
-          <button type="submit" disabled={loading} className="mt-2 flex items-center justify-center rounded-xl bg-[var(--accent)] px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-[var(--accent-hover)] disabled:opacity-60">
-            {loading ? <div className="h-5 w-5 animate-spin rounded-full border-2 border-white border-t-transparent" /> : t("create_account")}
+          {/* Confirm */}
+          <div className="relative mt-2">
+            <input type="password" placeholder={t("repeat_password")} value={confirm} onChange={(e) => setConfirm(e.target.value)} className={inputClass} autoComplete="new-password" />
+            {confirm.length > 0 && confirm === password && (
+              <svg className="absolute right-0 top-1/2 -translate-y-1/2" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#00D46A" strokeWidth="2"><polyline points="20 6 9 17 4 12"/></svg>
+            )}
+            {errors.confirm && <p className="mt-1 text-[12px] text-[#EF4444]">{errors.confirm}</p>}
+          </div>
+
+          {/* Terms */}
+          <label className="mt-6 flex items-start gap-3 cursor-pointer">
+            <button type="button" onClick={() => setAgreedTerms(!agreedTerms)} className={`mt-0.5 flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded transition-colors ${agreedTerms ? "bg-[#3390EC]" : "border border-[#1E2D3D]"}`}>
+              {agreedTerms && <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3"><polyline points="20 6 9 17 4 12"/></svg>}
+            </button>
+            <span className="text-[13px] leading-relaxed text-[#6B8CAE]">{t("agree_terms")}</span>
+          </label>
+
+          <button
+            type="submit"
+            disabled={loading || !agreedTerms}
+            className="mt-8 h-[48px] w-full rounded-lg bg-[#3390EC] text-[15px] font-medium text-white transition-all hover:bg-[#4AA3F5] active:scale-[0.98] disabled:opacity-40"
+          >
+            {loading ? (
+              <div className="flex items-center justify-center">
+                <div className="h-5 w-5 animate-spin rounded-full border-2 border-white border-t-transparent" />
+              </div>
+            ) : t("create_account")}
           </button>
-          <p className="text-center text-sm text-[var(--text-tertiary)]">
-            {t("already_have_account")} <Link href="/login" className="text-[var(--accent)] hover:underline">{t("sign_in")}</Link>
+
+          <p className="mt-6 mb-4 text-center text-[14px] text-[#6B8CAE]">
+            {t("already_have_account")}{" "}
+            <Link href="/login" className="text-[#3390EC] hover:text-[#5EAEF0] transition-colors">{t("sign_in")}</Link>
           </p>
         </form>
+      </motion.div>
       </div>
     </div>
   );

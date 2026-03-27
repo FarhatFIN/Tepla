@@ -24,6 +24,8 @@ interface ChatState {
   callType: "voice" | "video";
   showSettings: boolean;
   showPremium: boolean;
+  showWallet: boolean;
+  showWBIT: boolean;
   showThread: boolean;
   _socketBound: boolean;
 
@@ -37,6 +39,8 @@ interface ChatState {
   toggleCalls: (type?: "voice" | "video") => void;
   toggleSettings: () => void;
   togglePremium: () => void;
+  toggleWallet: () => void;
+  toggleWBIT: () => void;
   toggleThread: () => void;
   sendMessage: (chatId: string, text: string, type?: string, attachments?: any[]) => void;
   forwardMessage: (messageId: string, toChatId: string) => void;
@@ -160,6 +164,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
   callType: "voice" as const,
   showSettings: false,
   showPremium: false,
+  showWallet: false,
+  showWBIT: false,
   showThread: false,
   _socketBound: false,
 
@@ -382,6 +388,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
   toggleCalls: (type) => set((s) => ({ showCalls: !s.showCalls, callType: type || s.callType })),
   toggleSettings: () => set((s) => ({ showSettings: !s.showSettings })),
   togglePremium: () => set((s) => ({ showPremium: !s.showPremium })),
+  toggleWallet: () => set((s) => ({ showWallet: !s.showWallet })),
+  toggleWBIT: () => set((s) => ({ showWBIT: !s.showWBIT })),
   toggleThread: () => set((s) => ({ showThread: !s.showThread })),
 
   // ─── Send message with optional attachments via API ──────────────────────

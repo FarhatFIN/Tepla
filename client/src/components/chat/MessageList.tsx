@@ -33,11 +33,13 @@ export default function MessageList({ messages, currentUserId }: MessageListProp
 
   if (messages.length === 0) {
     return (
-      <div className="flex flex-1 flex-col items-center justify-center gap-3">
-        <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-[var(--accent-soft)]">
-          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="1.5"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+      <div className="flex flex-1 flex-col items-center justify-center gap-3 chat-wallpaper">
+        <div className="relative z-[1] flex flex-col items-center gap-3">
+          <div className="flex h-16 w-16 items-center justify-center rounded-2xl" style={{ background: "linear-gradient(135deg, rgba(91,33,182,0.2), rgba(108,61,232,0.2))" }}>
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#8B5CF6" strokeWidth="1.5"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+          </div>
+          <p className="text-sm text-[var(--text-tertiary)]">No messages yet. Say hi!</p>
         </div>
-        <p className="text-sm text-[var(--text-tertiary)]">No messages yet. Say hi!</p>
       </div>
     );
   }
@@ -56,8 +58,8 @@ export default function MessageList({ messages, currentUserId }: MessageListProp
   });
 
   return (
-    <div className="flex-1 overflow-y-auto px-4 py-3">
-      <div className="mx-auto flex max-w-3xl flex-col">{elements}<div ref={bottomRef} /></div>
+    <div className="flex-1 overflow-y-auto chat-wallpaper">
+      <div className="relative z-[1] mx-auto flex max-w-3xl flex-col px-4 py-3">{elements}<div ref={bottomRef} /></div>
     </div>
   );
 }

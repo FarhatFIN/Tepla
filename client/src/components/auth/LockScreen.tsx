@@ -59,24 +59,29 @@ export default function LockScreen({ onUnlock, pinLength = 4 }: LockScreenProps)
   const numpad = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "", "0", "⌫"];
 
   return (
-    <div className="fixed inset-0 z-[100] flex flex-col items-center justify-center bg-[var(--bg-main)]">
-      <div className="mb-2 text-4xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-sky-400 to-cyan-300">Tepla</div>
-      <p className="mb-6 text-sm text-[var(--text-secondary)]">Enter your passcode</p>
+    <div className="fixed inset-0 z-[100] flex flex-col items-center justify-center bg-[#130D24]" style={{ backgroundImage: "url('/wallpaper/tepla-pattern.svg')", backgroundSize: "400px 400px" }}>
+      <div className="absolute inset-0 bg-[rgba(10,6,18,0.88)]" />
+      <div className="relative z-10 flex flex-col items-center">
+      <div className="flex h-14 w-14 items-center justify-center rounded-full mb-4" style={{ background: "linear-gradient(135deg, #5B21B6, #6C3DE8)", boxShadow: "0 0 24px rgba(108,61,232,0.4)" }}>
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="white"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+      </div>
+      <div className="mb-2 text-3xl font-bold text-white">Tepla</div>
+      <p className="mb-6 text-sm text-[#9B89C4]">Enter your passcode</p>
       {isLocked && <p className="mb-4 text-sm text-red-400">Locked. Try again in {countdown}s</p>}
       <div className={`flex gap-3 mb-8 ${error ? "animate-shake" : ""}`}>
         {Array.from({ length: pinLength }).map((_, i) => (
-          <div key={i} className={`w-3.5 h-3.5 rounded-full transition-all ${i < pin.length ? "bg-[var(--accent)] scale-110" : "bg-[var(--bg-input)] border border-[var(--border)]"}`} />
+          <div key={i} className={`w-3.5 h-3.5 rounded-full transition-all ${i < pin.length ? (error ? "bg-red-500" : "bg-[#6C3DE8]") + " scale-110" : "bg-[rgba(108,61,232,0.2)]"}`} />
         ))}
       </div>
       <div className="grid grid-cols-3 gap-4 w-64">
         {numpad.map((key, i) => (
           key === "" ? <div key={i} /> :
           key === "⌫" ? (
-            <button key={i} onClick={handleBackspace} disabled={isLocked} className="flex items-center justify-center h-14 rounded-2xl text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] transition-colors disabled:opacity-30">
+            <button key={i} onClick={handleBackspace} disabled={isLocked} className="flex items-center justify-center h-14 rounded-2xl text-[#9B89C4] hover:bg-[rgba(108,61,232,0.15)] transition-colors disabled:opacity-30">
               <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 4H8l-7 8 7 8h13a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2z"/><line x1="18" y1="9" x2="12" y2="15"/><line x1="12" y1="9" x2="18" y2="15"/></svg>
             </button>
           ) : (
-            <button key={i} onClick={() => handleInput(key)} disabled={isLocked} className="flex items-center justify-center h-14 rounded-2xl text-xl font-medium text-[var(--text-primary)] hover:bg-[var(--bg-hover)] active:bg-[var(--accent-soft)] transition-colors disabled:opacity-30">
+            <button key={i} onClick={() => handleInput(key)} disabled={isLocked} className="flex items-center justify-center h-14 rounded-2xl text-xl font-medium text-white bg-white/[0.08] hover:bg-white/[0.12] active:bg-[rgba(108,61,232,0.3)] transition-colors disabled:opacity-30">
               {key}
             </button>
           )
@@ -86,6 +91,7 @@ export default function LockScreen({ onUnlock, pinLength = 4 }: LockScreenProps)
         if (e.key >= "0" && e.key <= "9") handleInput(e.key);
         else if (e.key === "Backspace") handleBackspace();
       }} />
+      </div>
     </div>
   );
 }

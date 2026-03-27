@@ -36,7 +36,7 @@ function hashColor(name: string): string {
   return colors[Math.abs(h) % colors.length];
 }
 
-const statusColors: Record<string, string> = { online: "bg-emerald-400", offline: "bg-gray-400", away: "bg-amber-400", dnd: "bg-red-400" };
+const statusColors: Record<string, string> = { online: "bg-[#00D46A]", offline: "bg-[#5C4D87]", away: "bg-amber-400", dnd: "bg-red-400" };
 
 export default function Avatar({ name, src, status, size = "md", isPremium, showStatus = true, onClick, storyRing, storyViewed }: AvatarProps) {
   const initial = name.charAt(0).toUpperCase();
@@ -59,7 +59,7 @@ export default function Avatar({ name, src, status, size = "md", isPremium, show
         <span className={`absolute right-0 bottom-0 block ${statusDots[size]} rounded-full ring-[var(--bg-sidebar)] ${statusColors[status]}`} />
       )}
       {isPremium && (
-        <span className="absolute -top-0.5 -right-0.5 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-amber-500 text-[8px] text-white">S</span>
+        <span className="absolute -top-0.5 -right-0.5 flex h-3.5 w-3.5 items-center justify-center rounded-full text-[8px] text-white" style={{ background: "linear-gradient(135deg, #6C3DE8, #00D46A)" }}>&#x2B50;</span>
       )}
     </div>
   );
