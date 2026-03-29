@@ -1,5 +1,7 @@
 import { BaseService } from '@tepla/common';
 import { userRouter } from './routes/user.routes';
+import { e2eRouter } from './routes/e2e.routes';
+import { ktRouter } from './routes/kt.routes';
 
 class UserService extends BaseService {
   constructor() {
@@ -8,7 +10,9 @@ class UserService extends BaseService {
 
   async setup(): Promise<void> {
     this.registerRoutes('/api/users', userRouter(this.redis!, this.kafka!));
-    this.logger.info('User service routes registered');
+    this.registerRoutes('/api/e2e', e2eRouter());
+    this.registerRoutes('/api/kt', ktRouter());
+    this.logger.info('User service routes registered (E2E + Key Transparency enabled)');
   }
 }
 
