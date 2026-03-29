@@ -15,23 +15,59 @@ const PREMIUM_MONTHLY_PRICE = 100n * 1_000_000_000n;  // 100 WBIT
 const PREMIUM_YEARLY_PRICE = 999n * 1_000_000_000n;    // 999 WBIT
 const TRANSFER_FEE_PERCENT = 1; // 1%
 
+// Format v2: salt_hex:iv_hex:ciphertext_hex (random salt per encryption)
+// Format v1 (legacy): iv_hex:ciphertext_hex (hardcoded salt — auto-migrated on decrypt)
 function encrypt(text: string): string {
-  const key = crypto.scryptSync(WALLET_ENCRYPTION_KEY, 'salt', 32);
+  const salt = crypto.randomBytes(32);
+  const key = crypto.scryptSync(WALLET_ENCRYPTION_KEY, salt, 32);
   const iv = crypto.randomBytes(16);
   const cipher = crypto.createCipheriv('aes-256-cbc', key, iv);
   let encrypted = cipher.update(text, 'utf8', 'hex');
   encrypted += cipher.final('hex');
-  return iv.toString('hex') + ':' + encrypted;
+  return salt.toString('hex') + ':' + iv.toString('hex') + ':' + encrypted;
 }
 
 function decrypt(encryptedText: string): string {
-  const key = crypto.scryptSync(WALLET_ENCRYPTION_KEY, 'salt', 32);
-  const [ivHex, encrypted] = encryptedText.split(':');
-  const iv = Buffer.from(ivHex, 'hex');
+  const parts = encryptedText.split(':');
+  let salt: Buffer, iv: Buffer, encrypted: string;
+
+  if (parts.length === 3) {
+    // v2 format: salt:iv:ciphertext
+    salt = Buffer.from(parts[0], 'hex');
+    iv = Buffer.from(parts[1], 'hex');
+    encrypted = parts[2];
+  } else if (parts.length === 2) {
+    // v1 legacy format: iv:ciphertext (hardcoded salt)
+    salt = Buffer.from('salt');
+    iv = Buffer.from(parts[0], 'hex');
+    encrypted = parts[1];
+  } else {
+    throw new Error('Invalid encrypted format');
+  }
+
+  const key = crypto.scryptSync(WALLET_ENCRYPTION_KEY, salt, 32);
   const decipher = crypto.createDecipheriv('aes-256-cbc', key, iv);
   let decrypted = decipher.update(encrypted, 'hex', 'utf8');
   decrypted += decipher.final('utf8');
   return decrypted;
+}
+
+/** Re-encrypt legacy v1 wallets with random salt (run once via admin endpoint or migration script) */
+async function migrateLegacyWallets(repo: WbitRepository): Promise<number> {
+  const wallets = await repo.queryMany<any>(`SELECT user_id, encrypted_mnemonic FROM ton_wallets`, []);
+  let migrated = 0;
+  for (const w of wallets) {
+    const parts = w.encrypted_mnemonic.split(':');
+    if (parts.length === 2) {
+      // v1 format — re-encrypt with random salt
+      const plaintext = decrypt(w.encrypted_mnemonic);
+      const reEncrypted = encrypt(plaintext);
+      await repo.execute(`UPDATE ton_wallets SET encrypted_mnemonic = $1 WHERE user_id = $2`, [reEncrypted, w.user_id]);
+      migrated++;
+    }
+  }
+  logger.info(`Migrated ${migrated} legacy wallets to v2 encryption`);
+  return migrated;
 }
 
 class WbitRepository extends BaseRepository {

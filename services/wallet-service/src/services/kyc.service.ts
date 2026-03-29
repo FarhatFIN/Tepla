@@ -42,6 +42,15 @@ async function sumsubRequest(method: string, path: string, body?: Record<string,
   return res.json();
 }
 
+/** Call at service startup to fail-fast if KYC is not configured */
+export function validateKycConfig(): void {
+  if (process.env.NODE_ENV === 'production') {
+    if (!SUMSUB_APP_TOKEN) throw new Error('SUMSUB_APP_TOKEN is required in production');
+    if (!SUMSUB_SECRET_KEY) throw new Error('SUMSUB_SECRET_KEY is required in production');
+    if (!SUMSUB_WEBHOOK_SECRET) throw new Error('SUMSUB_WEBHOOK_SECRET is required in production');
+  }
+}
+
 export class KycService {
   // Create applicant in Sumsub
   async createApplicant(userId: string, email?: string, phone?: string): Promise<{ applicantId: string }> {
@@ -96,9 +105,11 @@ export class KycService {
     return sumsubRequest('GET', `/resources/applicants/${applicantId}/one`);
   }
 
-  // Verify webhook signature
+  // Verify webhook signature — no fallback, must be configured
   verifyWebhookSignature(body: string, signature: string): boolean {
-    if (!SUMSUB_WEBHOOK_SECRET) return true; // DEV mode
+    if (!SUMSUB_WEBHOOK_SECRET) {
+      throw new Error('SUMSUB_WEBHOOK_SECRET is not configured. KYC webhooks cannot be verified.');
+    }
     const expected = crypto.createHmac('sha256', SUMSUB_WEBHOOK_SECRET).update(body).digest('hex');
     return crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected));
   }
