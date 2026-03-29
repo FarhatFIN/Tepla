@@ -1,3 +1,0 @@
-module.exports=[89578,a=>{a.v({className:"geist_a71539c9-module__T19VSG__className",variable:"geist_a71539c9-module__T19VSG__variable"})},28873,a=>{"use strict";var b=a.i(39100),c=a.i(89578);let d={className:c.default.className,style:{fontFamily:"'Geist', 'Geist Fallback'",fontStyle:"normal"}};function e({children:a}){return(0,b.jsx)("html",{lang:"ru",className:"dark",children:(0,b.jsx)("body",{className:`${d.variable} antialiased`,children:a})})}null!=c.default.variable&&(d.variable=c.default.variable),a.s(["default",()=>e,"metadata",0,{title:"Tepla Messenger",description:"Modern encrypted messenger with calls, stories, bots, and more"}],28873)}];
-
-//# sourceMappingURL=%5Broot-of-the-server%5D__2782e965._.js.map
