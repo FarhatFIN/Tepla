@@ -1,5 +1,5 @@
 import { Router, Request, Response, NextFunction } from 'express';
-import { v4 as uuid } from 'uuid';
+import { uuidv7 } from 'uuidv7';
 import { RedisClient, KafkaProducer, authMiddleware, NotFoundError, ValidationError, ForbiddenError, createLogger } from '@tepla/common';
 import { EventType, EventTopic, UserId } from '@tepla/types';
 import { BaseRepository } from '@tepla/common';
@@ -72,12 +72,12 @@ export function scheduledRouter(redis: RedisClient, kafka: KafkaProducer): Route
       const ready = await repo.getReady();
       for (const msg of ready) {
         await kafka.publish({
-          id: uuid(),
+          id: uuidv7(),
           type: EventType.SCHEDULED_MESSAGE_SENT,
           topic: EventTopic.MESSAGE_EVENTS,
           timestamp: new Date().toISOString(),
           source: 'message-service',
-          correlationId: uuid(),
+          correlationId: uuidv7(),
           userId: msg.sender_id as UserId,
           payload: {
             chatId: msg.chat_id,
@@ -106,7 +106,7 @@ export function scheduledRouter(redis: RedisClient, kafka: KafkaProducer): Route
       if (schedDate <= new Date()) throw new ValidationError('scheduledAt must be in the future');
 
       const msg = await repo.create({
-        id: uuid(),
+        id: uuidv7(),
         chatId,
         senderId: req.user!.sub,
         content,
@@ -118,12 +118,12 @@ export function scheduledRouter(redis: RedisClient, kafka: KafkaProducer): Route
       });
 
       await kafka.publish({
-        id: uuid(),
+        id: uuidv7(),
         type: EventType.MESSAGE_SCHEDULED,
         topic: EventTopic.MESSAGE_EVENTS,
         timestamp: new Date().toISOString(),
         source: 'message-service',
-        correlationId: uuid(),
+        correlationId: uuidv7(),
         userId: req.user!.sub as UserId,
         payload: { scheduledMessageId: msg.id, chatId, scheduledAt },
       });

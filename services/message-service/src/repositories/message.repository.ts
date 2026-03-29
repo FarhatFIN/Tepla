@@ -1,5 +1,5 @@
 import { BaseRepository } from '@tepla/common';
-import { v4 as uuid } from 'uuid';
+import { uuidv7 } from 'uuidv7';
 
 export class MessageRepository extends BaseRepository {
   constructor() {
@@ -12,20 +12,21 @@ export class MessageRepository extends BaseRepository {
 
   async findByChatId(chatId: string, limit: number, cursor?: string): Promise<any[]> {
     if (cursor) {
+      // UUIDv7 cursor: id_v7 is time-sortable, no subquery needed
       return this.queryMany(
-        `SELECT * FROM messages WHERE chat_id = $1 AND created_at < (SELECT created_at FROM messages WHERE id = $3)
-         AND is_deleted = false ORDER BY created_at DESC LIMIT $2`,
+        `SELECT * FROM messages WHERE chat_id = $1 AND id_v7 < $3::uuid
+         AND is_deleted = false ORDER BY id_v7 DESC LIMIT $2`,
         [chatId, limit, cursor]
       );
     }
     return this.queryMany(
-      'SELECT * FROM messages WHERE chat_id = $1 AND is_deleted = false ORDER BY created_at DESC LIMIT $2',
+      'SELECT * FROM messages WHERE chat_id = $1 AND is_deleted = false ORDER BY id_v7 DESC LIMIT $2',
       [chatId, limit]
     );
   }
 
   async create(input: any): Promise<any> {
-    const id = uuid();
+    const id = uuidv7();
 
     // Check if chat has TTL for disappearing messages
     const chat = await this.queryOne<any>('SELECT message_ttl_seconds FROM chats WHERE id = $1', [input.chat_id]);
@@ -33,8 +34,8 @@ export class MessageRepository extends BaseRepository {
     const expiresAt = ttl ? `NOW() + INTERVAL '${parseInt(ttl)} seconds'` : 'NULL';
 
     const sql = `
-      INSERT INTO messages (id, chat_id, sender_id, content, content_iv, encrypted_keys, type, reply_to_id, ttl_seconds, expires_at, created_at)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, ${expiresAt}, NOW())
+      INSERT INTO messages (id, id_v7, chat_id, sender_id, content, content_iv, encrypted_keys, type, reply_to_id, ttl_seconds, expires_at, created_at)
+      VALUES ($1, $1, $2, $3, $4, $5, $6, $7, $8, $9, ${expiresAt}, NOW())
       RETURNING *
     `;
     return this.queryOne(sql, [
@@ -61,9 +62,9 @@ export class MessageRepository extends BaseRepository {
   async addAttachments(messageId: string, attachments: any[]): Promise<void> {
     for (const att of attachments) {
       await this.execute(
-        `INSERT INTO files (id, message_id, uploader_id, url, type, mime_type, size_bytes, file_name, created_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())`,
-        [uuid(), messageId, att.uploaderId, att.url, att.type, att.mimeType, att.sizeBytes, att.fileName]
+        `INSERT INTO files (id, id_v7, message_id, uploader_id, url, type, mime_type, size_bytes, file_name, created_at)
+         VALUES ($1, $1, $2, $3, $4, $5, $6, $7, $8, NOW())`,
+        [uuidv7(), messageId, att.uploaderId, att.url, att.type, att.mimeType, att.sizeBytes, att.fileName]
       );
     }
   }
@@ -176,11 +177,11 @@ export class MessageRepository extends BaseRepository {
 
   // ─── Polls ───────────────────────────
   async createPoll(messageId: string, question: string, options: string[], type: string, correctOptionId?: number): Promise<any> {
-    const id = uuid();
+    const id = uuidv7();
     const optionsJson = JSON.stringify(options.map((text, i) => ({ index: i, text, voter_count: 0 })));
     const sql = `
-      INSERT INTO polls (id, message_id, question, options, type, correct_option_id, created_at)
-      VALUES ($1, $2, $3, $4::jsonb, $5, $6, NOW())
+      INSERT INTO polls (id, id_v7, message_id, question, options, type, correct_option_id, created_at)
+      VALUES ($1, $1, $2, $3, $4::jsonb, $5, $6, NOW())
       RETURNING *
     `;
     return this.queryOne(sql, [id, messageId, question, optionsJson, type || 'regular', correctOptionId ?? null]);
@@ -269,10 +270,10 @@ export class MessageRepository extends BaseRepository {
   async createForward(originalMessageId: string, toChatId: string, senderId: string): Promise<any> {
     const original = await this.findById(originalMessageId);
     if (!original) return null;
-    const id = uuid();
+    const id = uuidv7();
     const sql = `
-      INSERT INTO messages (id, chat_id, sender_id, content, type, forward_from_id, forward_from_chat_id, created_at)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+      INSERT INTO messages (id, id_v7, chat_id, sender_id, content, type, forward_from_id, forward_from_chat_id, created_at)
+      VALUES ($1, $1, $2, $3, $4, $5, $6, $7, NOW())
       RETURNING *
     `;
     return this.queryOne(sql, [

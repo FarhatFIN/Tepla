@@ -1,13 +1,14 @@
 import { BaseService, createLogger } from '@tepla/common';
 import { initializeSecurity } from '@tepla/security';
 import { EventType, EventTopic, UserId } from '@tepla/types';
-import { v4 as uuid } from 'uuid';
+import { uuidv7 } from 'uuidv7';
 import { messageRouter } from './routes/message.routes';
 import { reactionRouter } from './routes/reaction.routes';
 import { sparksRouter } from './routes/sparks.routes';
 import { threadRouter } from './routes/thread.routes';
 import { scheduledRouter } from './routes/scheduled.routes';
 import { MessageRepository } from './repositories/message.repository';
+import { OutboxWorker } from './services/outbox.worker';
 
 const expiryLogger = createLogger('message-expiry');
 
@@ -28,6 +29,10 @@ class MessageService extends BaseService {
 
     // Disappearing messages — expiry worker (every 60s)
     this.startExpiryWorker();
+
+    // Transactional outbox worker — polls unpublished events → Kafka
+    const outboxWorker = new OutboxWorker(this.kafka!);
+    outboxWorker.start();
 
     this.logger.info('Message service routes registered', {
       e2eEncryption: true,
@@ -59,12 +64,12 @@ class MessageService extends BaseService {
           for (const [chatId, messageIds] of byChatId) {
             for (const messageId of messageIds) {
               await kafka.publish({
-                id: uuid(),
+                id: uuidv7(),
                 type: EventType.MESSAGE_DELETED,
                 topic: EventTopic.MESSAGE_EVENTS,
                 timestamp: new Date().toISOString(),
                 source: 'message-service',
-                correlationId: uuid(),
+                correlationId: uuidv7(),
                 payload: { chatId, messageId },
               });
             }

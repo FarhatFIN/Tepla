@@ -1,14 +1,11 @@
 import { Router, Request, Response, NextFunction } from 'express';
-import { v4 as uuid } from 'uuid';
+import { uuidv7 } from 'uuidv7';
 import Redis from 'ioredis';
 import { RedisClient, KafkaProducer, authMiddleware, NotFoundError, ValidationError, ForbiddenError, createLogger } from '@tepla/common';
 import { EventType, EventTopic, UserId } from '@tepla/types';
 import {
-  MessagePipeline,
   ReplayProtection,
   AuditLogger,
-  SecurityMetrics,
-  SecureMessage,
 } from '@tepla/security';
 import { MessageRepository } from '../repositories/message.repository';
 
@@ -19,9 +16,8 @@ export function messageRouter(redis: RedisClient, kafka: KafkaProducer): Router 
   const auth = authMiddleware();
   const msgRepo = new MessageRepository();
 
-  // Security framework — E2E message pipeline
+  // Security framework — replay protection + audit
   const rawRedis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379');
-  const messagePipeline = new MessagePipeline(rawRedis);
   const replayProtection = new ReplayProtection(rawRedis);
   AuditLogger.setRedis(rawRedis);
 
@@ -58,8 +54,10 @@ export function messageRouter(redis: RedisClient, kafka: KafkaProducer): Router 
         chatId, content, type = 'text', replyToId,
         contentIv, encryptedKeys, attachments,
         isSilent,
-        // E2E encryption fields (new — Double Ratchet pipeline)
-        e2e, sessionId, clientNonce,
+        // E2E fields — client-side encryption (server is blind relay)
+        e2e, clientNonce,
+        // X3DH initial message header (sent only in first message of a session)
+        x3dhHeader,
       } = req.body;
       if (!chatId || !content) throw new ValidationError('chatId and content are required');
 
@@ -87,16 +85,11 @@ export function messageRouter(redis: RedisClient, kafka: KafkaProducer): Router 
         await replayProtection.validate(req.user!.sub, clientNonce);
       }
 
-      let finalContent = content;
-      let finalContentIv = contentIv || null;
-      let securePacket: SecureMessage | undefined;
-
-      // If client requests server-side E2E encryption via Double Ratchet
-      if (e2e && sessionId) {
-        securePacket = await messagePipeline.outgoing(sessionId, req.user!.sub, content);
-        finalContent = JSON.stringify(securePacket.payload);
-        finalContentIv = securePacket.nonce;
-      }
+      // E2EE: server is a BLIND RELAY — stores ciphertext as-is.
+      // Client encrypts before sending; client decrypts on receive.
+      // Server never sees plaintext for e2e messages.
+      const finalContent = content;
+      const finalContentIv = contentIv || null;
 
       const message = await msgRepo.create({
         chat_id: chatId,
@@ -122,12 +115,12 @@ export function messageRouter(redis: RedisClient, kafka: KafkaProducer): Router 
 
       // Publish event for WebSocket delivery + notification
       await kafka.publish({
-        id: uuid(),
+        id: uuidv7(),
         type: EventType.MESSAGE_SENT,
         topic: EventTopic.MESSAGE_EVENTS,
         timestamp: new Date().toISOString(),
         source: 'message-service',
-        correlationId: req.correlationId || uuid(),
+        correlationId: req.correlationId || uuidv7(),
         userId: req.user!.sub as UserId,
         payload: {
           messageId: message.id,
@@ -139,6 +132,7 @@ export function messageRouter(redis: RedisClient, kafka: KafkaProducer): Router 
           attachments: attachments || [],
           createdAt: message.created_at,
           e2e: !!e2e,
+          x3dhHeader: x3dhHeader || null,
           isSilent: isSilent || false,
         },
       });
@@ -150,67 +144,10 @@ export function messageRouter(redis: RedisClient, kafka: KafkaProducer): Router 
     } catch (err) { next(err); }
   });
 
-  // POST /api/messages/decrypt — decrypt incoming E2E message
-  router.post('/decrypt', auth, async (req: Request, res: Response, next: NextFunction) => {
-    try {
-      const { sessionId, packet } = req.body;
-      if (!sessionId || !packet) throw new ValidationError('sessionId and packet are required');
-
-      const decrypted = await messagePipeline.incoming(sessionId, req.user!.sub, packet);
-
-      if (decrypted === null) {
-        await SecurityMetrics.encryptionError(rawRedis);
-        throw new ValidationError('Failed to decrypt message');
-      }
-
-      res.json({ success: true, data: { content: decrypted } });
-    } catch (err) { next(err); }
-  });
-
-  // POST /api/messages/e2e/session — create E2E ratchet session for a chat
-  router.post('/e2e/session', auth, async (req: Request, res: Response, next: NextFunction) => {
-    try {
-      const { sessionId, userA, userB, sharedKey } = req.body;
-      if (!sessionId || !userA || !userB || !sharedKey) {
-        throw new ValidationError('sessionId, userA, userB, and sharedKey are required');
-      }
-
-      // Verify the requester is one of the participants
-      if (req.user!.sub !== userA && req.user!.sub !== userB) {
-        throw new ForbiddenError('Can only create sessions you participate in');
-      }
-
-      await messagePipeline.createSession(
-        sessionId,
-        userA,
-        userB,
-        Buffer.from(sharedKey, 'base64')
-      );
-
-      await AuditLogger.log('e2e_session_created', {
-        sessionId,
-        userA,
-        userB,
-        createdBy: req.user!.sub,
-      });
-
-      res.status(201).json({ success: true, data: { sessionId, message: 'E2E session created' } });
-    } catch (err) { next(err); }
-  });
-
-  // DELETE /api/messages/e2e/session/:sessionId — destroy ratchet session
-  router.delete('/e2e/session/:sessionId', auth, async (req: Request, res: Response, next: NextFunction) => {
-    try {
-      await messagePipeline.destroySession(req.params.sessionId);
-
-      await AuditLogger.log('e2e_session_destroyed', {
-        sessionId: req.params.sessionId,
-        userId: req.user!.sub,
-      });
-
-      res.json({ success: true, data: { message: 'E2E session destroyed' } });
-    } catch (err) { next(err); }
-  });
+  // E2E decrypt/session endpoints REMOVED — server is now a blind relay.
+  // Session establishment happens client-side via X3DH + Double Ratchet.
+  // See: src/lib/crypto/x3dh.ts, src/lib/crypto/signal.ts
+  // Key management: GET/POST /api/e2e/keys/* (user-service)
 
   // PATCH /api/messages/:messageId — edit
   router.patch('/:messageId', auth, async (req: Request, res: Response, next: NextFunction) => {
@@ -225,12 +162,12 @@ export function messageRouter(redis: RedisClient, kafka: KafkaProducer): Router 
       });
 
       await kafka.publish({
-        id: uuid(),
+        id: uuidv7(),
         type: EventType.MESSAGE_EDITED,
         topic: EventTopic.MESSAGE_EVENTS,
         timestamp: new Date().toISOString(),
         source: 'message-service',
-        correlationId: req.correlationId || uuid(),
+        correlationId: req.correlationId || uuidv7(),
         userId: req.user!.sub as UserId,
         payload: { messageId: msg.id, chatId: msg.chat_id, content: req.body.content },
       });
@@ -249,12 +186,12 @@ export function messageRouter(redis: RedisClient, kafka: KafkaProducer): Router 
       await msgRepo.softDelete(req.params.messageId);
 
       await kafka.publish({
-        id: uuid(),
+        id: uuidv7(),
         type: EventType.MESSAGE_DELETED,
         topic: EventTopic.MESSAGE_EVENTS,
         timestamp: new Date().toISOString(),
         source: 'message-service',
-        correlationId: req.correlationId || uuid(),
+        correlationId: req.correlationId || uuidv7(),
         userId: req.user!.sub as UserId,
         payload: { messageId: msg.id, chatId: msg.chat_id },
       });
@@ -273,12 +210,12 @@ export function messageRouter(redis: RedisClient, kafka: KafkaProducer): Router 
 
       const eventType = updated.is_pinned ? EventType.MESSAGE_PINNED : EventType.MESSAGE_UNPINNED;
       await kafka.publish({
-        id: uuid(),
+        id: uuidv7(),
         type: eventType,
         topic: EventTopic.MESSAGE_EVENTS,
         timestamp: new Date().toISOString(),
         source: 'message-service',
-        correlationId: req.correlationId || uuid(),
+        correlationId: req.correlationId || uuidv7(),
         userId: req.user!.sub as UserId,
         payload: { messageId: msg.id, chatId: msg.chat_id, isPinned: updated.is_pinned },
       });
@@ -310,12 +247,12 @@ export function messageRouter(redis: RedisClient, kafka: KafkaProducer): Router 
 
       if (readMessageIds.length > 0) {
         await kafka.publish({
-          id: uuid(),
+          id: uuidv7(),
           type: EventType.MESSAGE_READ,
           topic: EventTopic.MESSAGE_EVENTS,
           timestamp: new Date().toISOString(),
           source: 'message-service',
-          correlationId: req.correlationId || uuid(),
+          correlationId: req.correlationId || uuidv7(),
           userId: userId as UserId,
           payload: { chatId, messageIds: readMessageIds, readBy: userId },
         });
@@ -364,12 +301,12 @@ export function messageRouter(redis: RedisClient, kafka: KafkaProducer): Router 
       const poll = await msgRepo.createPoll(message.id, question, options, type, correctOptionId);
 
       await kafka.publish({
-        id: uuid(),
+        id: uuidv7(),
         type: EventType.MESSAGE_SENT,
         topic: EventTopic.MESSAGE_EVENTS,
         timestamp: new Date().toISOString(),
         source: 'message-service',
-        correlationId: req.correlationId || uuid(),
+        correlationId: req.correlationId || uuidv7(),
         userId: req.user!.sub as UserId,
         payload: {
           messageId: message.id,
@@ -410,12 +347,12 @@ export function messageRouter(redis: RedisClient, kafka: KafkaProducer): Router 
       const msg = await msgRepo.findById(poll.message_id);
 
       await kafka.publish({
-        id: uuid(),
+        id: uuidv7(),
         type: EventType.MESSAGE_EDITED,
         topic: EventTopic.MESSAGE_EVENTS,
         timestamp: new Date().toISOString(),
         source: 'message-service',
-        correlationId: req.correlationId || uuid(),
+        correlationId: req.correlationId || uuidv7(),
         userId: req.user!.sub as UserId,
         payload: {
           chatId: msg?.chat_id,
@@ -464,12 +401,12 @@ export function messageRouter(redis: RedisClient, kafka: KafkaProducer): Router 
       if (!forwarded) throw new NotFoundError('Message');
 
       await kafka.publish({
-        id: uuid(),
+        id: uuidv7(),
         type: EventType.MESSAGE_FORWARDED,
         topic: EventTopic.MESSAGE_EVENTS,
         timestamp: new Date().toISOString(),
         source: 'message-service',
-        correlationId: req.correlationId || uuid(),
+        correlationId: req.correlationId || uuidv7(),
         userId: req.user!.sub as UserId,
         payload: {
           messageId: forwarded.id,

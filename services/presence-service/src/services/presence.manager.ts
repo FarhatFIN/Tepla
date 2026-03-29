@@ -16,9 +16,11 @@ export class PresenceManager {
 
   async setOnline(userId: string): Promise<void> {
     const wasOnline = await this.redis.sismember('presence:online', userId);
-    await this.redis.sadd('presence:online', userId);
-    await this.redis.set(`presence:heartbeat:${userId}`, Date.now().toString(), HEARTBEAT_TTL);
-    await this.redis.hset('presence:status', userId, PresenceStatus.ONLINE);
+    const pipeline = this.redis.pipeline();
+    pipeline.sadd('presence:online', userId);
+    pipeline.set(`presence:heartbeat:${userId}`, Date.now().toString(), HEARTBEAT_TTL);
+    pipeline.hset('presence:status', userId, PresenceStatus.ONLINE);
+    await pipeline.exec();
 
     if (!wasOnline) {
       await this.kafka.publish({
@@ -37,12 +39,13 @@ export class PresenceManager {
 
   async setOffline(userId: string): Promise<void> {
     const wasOnline = await this.redis.sismember('presence:online', userId);
-    await this.redis.srem('presence:online', userId);
-    await this.redis.del(`presence:heartbeat:${userId}`);
-    await this.redis.hset('presence:status', userId, PresenceStatus.OFFLINE);
-
     const lastSeen = new Date().toISOString();
-    await this.redis.hset('presence:lastSeen', userId, lastSeen);
+    const pipeline = this.redis.pipeline();
+    pipeline.srem('presence:online', userId);
+    pipeline.del(`presence:heartbeat:${userId}`);
+    pipeline.hset('presence:status', userId, PresenceStatus.OFFLINE);
+    pipeline.hset('presence:lastSeen', userId, lastSeen);
+    await pipeline.exec();
 
     if (wasOnline) {
       await this.kafka.publish({

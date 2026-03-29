@@ -104,107 +104,142 @@ async function start() {
     });
   });
 
-  // ─── Kafka Consumer — route domain events to Socket.IO rooms ───
-  const consumer = new KafkaConsumer('ws-gateway', 'ws-gateway-group');
-  await consumer.subscribe([
-    EventTopic.MESSAGE_EVENTS,
-    EventTopic.PRESENCE_EVENTS,
-    EventTopic.CHAT_EVENTS,
-    EventTopic.PREMIUM_EVENTS,
-    EventTopic.USER_EVENTS,
-  ]);
+  // ─── Delivery Batcher — timing metadata protection ─────────
+  // Holds messages up to 100ms and emits them as a batch.
+  // Prevents timing correlation (server can't tell who's talking based on delivery timing).
+  // Typing indicators bypass the batcher (separate channel, acceptable leak).
+  const BATCH_INTERVAL_MS = 100;
+  type QueuedEmit = { room: string; event: string; data: any };
+  let emitQueue: QueuedEmit[] = [];
+  let batchTimer: NodeJS.Timeout | null = null;
 
-  consumer.on(EventType.MESSAGE_SENT, async (event: DomainEvent) => {
+  function queueEmit(room: string, event: string, data: any): void {
+    emitQueue.push({ room, event, data });
+    if (!batchTimer) {
+      batchTimer = setTimeout(flushEmitQueue, BATCH_INTERVAL_MS);
+    }
+  }
+
+  function flushEmitQueue(): void {
+    batchTimer = null;
+    const batch = emitQueue;
+    emitQueue = [];
+    for (const { room, event, data } of batch) {
+      io.to(room).emit(event, data);
+    }
+  }
+
+  // ─── Kafka Consumers — separate consumer group per topic ───
+  // Each topic gets its own consumer group so a slow handler on one
+  // topic doesn't block event processing on another. MESSAGE_EVENTS
+  // is keyed by chatId for per-chat ordering guarantees.
+
+  // 1. MESSAGE_EVENTS — highest throughput, keyed by chatId
+  const msgConsumer = new KafkaConsumer('ws-gw-msg', 'ws-gw-messages');
+  await msgConsumer.subscribe([EventTopic.MESSAGE_EVENTS]);
+
+  msgConsumer.on(EventType.MESSAGE_SENT, async (event: DomainEvent) => {
     const { chatId, ...message } = event.payload as any;
-    io.to(`chat:${chatId}`).emit('message:new', { chatId, message });
+    queueEmit(`chat:${chatId}`, 'message:new', { chatId, message });
   });
 
-  consumer.on(EventType.MESSAGE_EDITED, async (event: DomainEvent) => {
+  msgConsumer.on(EventType.MESSAGE_EDITED, async (event: DomainEvent) => {
     const { chatId, ...data } = event.payload as any;
-    io.to(`chat:${chatId}`).emit('message:updated', { chatId, ...data });
+    queueEmit(`chat:${chatId}`, 'message:updated', { chatId, ...data });
   });
 
-  consumer.on(EventType.MESSAGE_DELETED, async (event: DomainEvent) => {
+  msgConsumer.on(EventType.MESSAGE_DELETED, async (event: DomainEvent) => {
     const { chatId, messageId } = event.payload as any;
-    io.to(`chat:${chatId}`).emit('message:deleted', { chatId, messageId });
+    queueEmit(`chat:${chatId}`, 'message:deleted', { chatId, messageId });
   });
 
-  consumer.on(EventType.MESSAGE_PINNED, async (event: DomainEvent) => {
+  msgConsumer.on(EventType.MESSAGE_PINNED, async (event: DomainEvent) => {
     const { chatId } = event.payload as any;
-    io.to(`chat:${chatId}`).emit('message:pinned', event.payload);
+    queueEmit(`chat:${chatId}`, 'message:pinned', event.payload);
   });
 
-  consumer.on(EventType.MESSAGE_UNPINNED, async (event: DomainEvent) => {
+  msgConsumer.on(EventType.MESSAGE_UNPINNED, async (event: DomainEvent) => {
     const { chatId } = event.payload as any;
-    io.to(`chat:${chatId}`).emit('message:unpinned', event.payload);
+    queueEmit(`chat:${chatId}`, 'message:unpinned', event.payload);
   });
 
-  consumer.on(EventType.MESSAGE_READ, async (event: DomainEvent) => {
+  msgConsumer.on(EventType.MESSAGE_READ, async (event: DomainEvent) => {
     const { chatId, messageIds, readBy } = event.payload as any;
-    io.to(`chat:${chatId}`).emit('message:read', { chatId, messageIds, readBy });
+    queueEmit(`chat:${chatId}`, 'message:read', { chatId, messageIds, readBy });
   });
 
-  consumer.on(EventType.MESSAGE_DELIVERED, async (event: DomainEvent) => {
+  msgConsumer.on(EventType.MESSAGE_DELIVERED, async (event: DomainEvent) => {
     const { chatId, messageIds, deliveredTo } = event.payload as any;
-    io.to(`chat:${chatId}`).emit('message:delivered', { chatId, messageIds, deliveredTo });
+    queueEmit(`chat:${chatId}`, 'message:delivered', { chatId, messageIds, deliveredTo });
   });
 
-  consumer.on(EventType.MESSAGE_FORWARDED, async (event: DomainEvent) => {
+  msgConsumer.on(EventType.MESSAGE_FORWARDED, async (event: DomainEvent) => {
     const { chatId, ...message } = event.payload as any;
-    io.to(`chat:${chatId}`).emit('message:new', { chatId, message });
+    queueEmit(`chat:${chatId}`, 'message:new', { chatId, message });
   });
 
-  consumer.on(EventType.REACTION_ADDED, async (event: DomainEvent) => {
+  msgConsumer.on(EventType.REACTION_ADDED, async (event: DomainEvent) => {
     const chatId = (event.payload as any).chatId;
-    if (chatId) io.to(`chat:${chatId}`).emit('reaction:changed', event.payload);
+    if (chatId) queueEmit(`chat:${chatId}`, 'reaction:changed', event.payload);
   });
 
-  consumer.on(EventType.REACTION_REMOVED, async (event: DomainEvent) => {
+  msgConsumer.on(EventType.REACTION_REMOVED, async (event: DomainEvent) => {
     const chatId = (event.payload as any).chatId;
-    if (chatId) io.to(`chat:${chatId}`).emit('reaction:changed', event.payload);
+    if (chatId) queueEmit(`chat:${chatId}`, 'reaction:changed', event.payload);
   });
 
-  consumer.on(EventType.USER_ONLINE, async (event: DomainEvent) => {
+  // 2. PRESENCE_EVENTS — latency-sensitive, lightweight
+  const presenceConsumer = new KafkaConsumer('ws-gw-presence', 'ws-gw-presence');
+  await presenceConsumer.subscribe([EventTopic.PRESENCE_EVENTS]);
+
+  presenceConsumer.on(EventType.USER_ONLINE, async (event: DomainEvent) => {
     const { userId } = event.payload as any;
     io.emit('presence:online', { userId });
   });
 
-  consumer.on(EventType.USER_OFFLINE, async (event: DomainEvent) => {
+  presenceConsumer.on(EventType.USER_OFFLINE, async (event: DomainEvent) => {
     const { userId, lastSeen } = event.payload as any;
     io.emit('presence:offline', { userId, lastSeen });
   });
 
-  consumer.on(EventType.USER_TYPING, async (event: DomainEvent) => {
+  presenceConsumer.on(EventType.USER_TYPING, async (event: DomainEvent) => {
     const { chatId, userId } = event.payload as any;
     io.to(`chat:${chatId}`).emit('typing', { chatId, userId });
   });
 
-  consumer.on(EventType.MEMBER_JOINED, async (event: DomainEvent) => {
+  // 3. CHAT_EVENTS — membership changes
+  const chatConsumer = new KafkaConsumer('ws-gw-chat', 'ws-gw-chats');
+  await chatConsumer.subscribe([EventTopic.CHAT_EVENTS]);
+
+  chatConsumer.on(EventType.MEMBER_JOINED, async (event: DomainEvent) => {
     const { chatId, userId } = event.payload as any;
     io.to(`chat:${chatId}`).emit('chat:member_joined', { chatId, userId });
     io.to(`user:${userId}`).emit('chats:updated');
   });
 
-  consumer.on(EventType.MEMBER_LEFT, async (event: DomainEvent) => {
+  chatConsumer.on(EventType.MEMBER_LEFT, async (event: DomainEvent) => {
     const { chatId, userId } = event.payload as any;
     io.to(`chat:${chatId}`).emit('chat:member_left', { chatId, userId });
   });
 
-  consumer.on(EventType.SUBSCRIPTION_CREATED, async (event: DomainEvent) => {
+  // 4. USER_EVENTS + PREMIUM_EVENTS — low throughput
+  const userConsumer = new KafkaConsumer('ws-gw-user', 'ws-gw-users');
+  await userConsumer.subscribe([EventTopic.USER_EVENTS, EventTopic.PREMIUM_EVENTS]);
+
+  userConsumer.on(EventType.SUBSCRIPTION_CREATED, async (event: DomainEvent) => {
     const { userId } = event.payload as any;
     io.to(`user:${userId}`).emit('premium:activated', event.payload);
   });
 
-  // User profile updated (username change, etc.) — broadcast to all connected clients
-  consumer.on(EventType.USER_UPDATED, async (event: DomainEvent) => {
+  userConsumer.on(EventType.USER_UPDATED, async (event: DomainEvent) => {
     const { userId, fields } = event.payload as any;
-    // Notify the user's own sessions
     io.to(`user:${userId}`).emit('user:updated', event.payload);
-    // Broadcast to all clients so they can update cached user data (username in chat list, etc.)
     io.emit('user:profile_changed', { userId, fields });
   });
 
-  await consumer.start();
+  // Start all consumers in parallel
+  const consumers = [msgConsumer, presenceConsumer, chatConsumer, userConsumer];
+  await Promise.all(consumers.map(c => c.start()));
 
   // ─── Start Server ───
   server.listen(PORT, () => {
@@ -220,7 +255,7 @@ async function start() {
   const shutdown = async () => {
     logger.info('Shutting down...');
     io.close();
-    await consumer.disconnect();
+    await Promise.all(consumers.map(c => c.disconnect()));
     await pubClient.disconnect();
     await subClient.disconnect();
     securityRedis.disconnect();

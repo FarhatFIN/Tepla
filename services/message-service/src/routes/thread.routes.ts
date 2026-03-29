@@ -1,5 +1,5 @@
 import { Router, Request, Response, NextFunction } from 'express';
-import { v4 as uuid } from 'uuid';
+import { uuidv7 } from 'uuidv7';
 import { RedisClient, KafkaProducer, authMiddleware, NotFoundError, ValidationError, createLogger } from '@tepla/common';
 import { EventType, EventTopic, UserId, ThreadId, MessageId, ChatId } from '@tepla/types';
 import { BaseRepository } from '@tepla/common';
@@ -86,7 +86,7 @@ export function threadRouter(redis: RedisClient, kafka: KafkaProducer): Router {
       if (existing) return res.json({ success: true, data: existing });
 
       const thread = await threadRepo.create({
-        id: uuid(),
+        id: uuidv7(),
         chatId,
         rootMessageId: messageId,
         title: title || null,
@@ -94,12 +94,12 @@ export function threadRouter(redis: RedisClient, kafka: KafkaProducer): Router {
       });
 
       await kafka.publish({
-        id: uuid(),
+        id: uuidv7(),
         type: EventType.THREAD_CREATED,
         topic: EventTopic.MESSAGE_EVENTS,
         timestamp: new Date().toISOString(),
         source: 'message-service',
-        correlationId: uuid(),
+        correlationId: uuidv7(),
         userId: req.user!.sub as UserId,
         payload: { threadId: thread.id, chatId, messageId },
       });

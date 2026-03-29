@@ -1,5 +1,5 @@
 import { Router, Request, Response, NextFunction } from 'express';
-import { v4 as uuid } from 'uuid';
+import { uuidv7 } from 'uuidv7';
 import { RedisClient, KafkaProducer, authMiddleware, ValidationError, createLogger } from '@tepla/common';
 import { UserId } from '@tepla/types';
 import { SparksRepository } from '../repositories/sparks.repository';
