@@ -3,6 +3,7 @@ import type {
   ClientToServerSocketEvents,
   ServerToClientSocketEvents,
 } from "@/server/sockets/events";
+import { useAuthStore } from "@/stores/auth.store";
 
 type TeplaSocket = Socket<ServerToClientSocketEvents, ClientToServerSocketEvents>;
 
@@ -21,12 +22,17 @@ export const getTeplaSocket = (): TeplaSocket => {
     process.env.NEXT_PUBLIC_TEPLA_SOCKET_URL ??
     (typeof window !== "undefined" ? window.location.origin : "");
 
+  const { accessToken } = useAuthStore.getState();
+
   socket = io(url, {
     path: "/api/socket/io",
     transports: ["websocket"],
     autoConnect: true,
     withCredentials: true,
     reconnectionAttempts: 5,
+    auth: {
+      token: accessToken ?? "",
+    },
   });
 
   return socket;

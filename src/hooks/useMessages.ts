@@ -25,8 +25,16 @@ type PinnedMessagesResponse = {
   pinnedMessages: TeplaMessage[];
 };
 
+const getAuthHeaders = (): Record<string, string> => {
+  const { accessToken } = useAuthStore.getState();
+  return accessToken ? { Authorization: `Bearer ${accessToken}` } : {};
+};
+
 const fetcher = async <TResponse>(input: RequestInfo, init?: RequestInit) => {
-  const response = await fetch(input, init);
+  const response = await fetch(input, {
+    ...init,
+    headers: { ...init?.headers, ...getAuthHeaders() },
+  });
   if (!response.ok) {
     throw new Error("Failed to load messages.");
   }
@@ -267,7 +275,7 @@ export const useMessages = (chatId: ChatId | null) => {
     try {
       const response = await fetch("/api/messages", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...getAuthHeaders() },
         body: JSON.stringify({
           chatId: params.chatId,
           senderId: currentUserId,
@@ -316,9 +324,8 @@ export const useMessages = (chatId: ChatId | null) => {
 
     const response = await fetch(`/api/messages/${messageId}`, {
       method: "PATCH",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...getAuthHeaders() },
       body: JSON.stringify({
-        userId: currentUserId,
         content: content.trim(),
       }),
     });
@@ -343,12 +350,10 @@ export const useMessages = (chatId: ChatId | null) => {
       return;
     }
 
-    const response = await fetch(
-      `/api/messages/${messageId}?userId=${encodeURIComponent(currentUserId)}`,
-      {
-        method: "DELETE",
-      },
-    );
+    const response = await fetch(`/api/messages/${messageId}`, {
+      method: "DELETE",
+      headers: { ...getAuthHeaders() },
+    });
 
     if (!response.ok) {
       const body = await response.json().catch(() => null);
@@ -380,9 +385,8 @@ export const useMessages = (chatId: ChatId | null) => {
 
     const response = await fetch(`/api/messages/${messageId}/pin`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...getAuthHeaders() },
       body: JSON.stringify({
-        userId: currentUserId,
         pinned,
       }),
     });
@@ -408,21 +412,19 @@ export const useMessages = (chatId: ChatId | null) => {
     const requestInit: RequestInit = hasReacted
       ? {
           method: "DELETE",
+          headers: { ...getAuthHeaders() },
         }
       : {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", ...getAuthHeaders() },
           body: JSON.stringify({
             messageId,
-            userId: currentUserId,
             emoji,
           }),
         };
 
     const requestUrl = hasReacted
-      ? `/api/reactions?messageId=${encodeURIComponent(messageId)}&userId=${encodeURIComponent(
-          currentUserId,
-        )}&emoji=${encodeURIComponent(emoji)}`
+      ? `/api/reactions?messageId=${encodeURIComponent(messageId)}&emoji=${encodeURIComponent(emoji)}`
       : "/api/reactions";
 
     const response = await fetch(requestUrl, requestInit);

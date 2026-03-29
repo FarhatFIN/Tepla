@@ -1,9 +1,11 @@
 import { NextResponse } from "next/server";
 import { messagesService } from "@/server/services/messages.service";
+import { AuthError, requireAuth } from "@/server/auth/require-auth";
 
 export const messagesController = {
   async list(request: Request) {
     try {
+      const userId = await requireAuth(request);
       const { searchParams } = new URL(request.url);
       const chatId = searchParams.get("chatId");
       if (!chatId) {
@@ -12,13 +14,16 @@ export const messagesController = {
 
       const payload = await messagesService.listMessages({
         chatId,
-        userId: searchParams.get("userId"),
+        userId,
         limit: searchParams.get("limit"),
         cursor: searchParams.get("cursor"),
       });
 
       return NextResponse.json(payload, { status: 200 });
     } catch (error) {
+      if (error instanceof AuthError) {
+        return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+      }
       return NextResponse.json(
         { error: error instanceof Error ? error.message : "Failed to load messages." },
         { status: 400 },
@@ -28,9 +33,9 @@ export const messagesController = {
 
   async create(request: Request) {
     try {
+      const userId = await requireAuth(request);
       const body = (await request.json()) as {
         chatId: string;
-        senderId: string;
         clientMessageId?: string | null;
         content?: string | null;
         contentIv?: string | null;
@@ -53,9 +58,15 @@ export const messagesController = {
         }>;
       };
 
-      const message = await messagesService.createMessage(body);
+      const message = await messagesService.createMessage({
+        ...body,
+        senderId: userId,
+      });
       return NextResponse.json({ message }, { status: 201 });
     } catch (error) {
+      if (error instanceof AuthError) {
+        return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+      }
       return NextResponse.json(
         { error: error instanceof Error ? error.message : "Failed to send message." },
         { status: 400 },
@@ -65,14 +76,18 @@ export const messagesController = {
 
   async update(request: Request, context: { params: { messageId: string } }) {
     try {
-      const body = (await request.json()) as { userId: string; content: string };
+      const userId = await requireAuth(request);
+      const body = (await request.json()) as { content: string };
       const message = await messagesService.editMessage({
         messageId: context.params.messageId,
-        userId: body.userId,
+        userId,
         content: body.content,
       });
       return NextResponse.json({ message }, { status: 200 });
     } catch (error) {
+      if (error instanceof AuthError) {
+        return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+      }
       return NextResponse.json(
         { error: error instanceof Error ? error.message : "Failed to edit message." },
         { status: 400 },
@@ -82,11 +97,7 @@ export const messagesController = {
 
   async remove(request: Request, context: { params: { messageId: string } }) {
     try {
-      const { searchParams } = new URL(request.url);
-      const userId = searchParams.get("userId");
-      if (!userId) {
-        return NextResponse.json({ error: "userId is required." }, { status: 400 });
-      }
+      const userId = await requireAuth(request);
 
       const payload = await messagesService.deleteMessage({
         messageId: context.params.messageId,
@@ -94,6 +105,9 @@ export const messagesController = {
       });
       return NextResponse.json(payload, { status: 200 });
     } catch (error) {
+      if (error instanceof AuthError) {
+        return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+      }
       return NextResponse.json(
         { error: error instanceof Error ? error.message : "Failed to delete message." },
         { status: 400 },
@@ -103,15 +117,19 @@ export const messagesController = {
 
   async pin(request: Request, context: { params: { messageId: string } }) {
     try {
-      const body = (await request.json()) as { userId: string; pinned?: boolean };
+      const userId = await requireAuth(request);
+      const body = (await request.json()) as { pinned?: boolean };
       const pinnedMessages = await messagesService.setPinnedState({
         messageId: context.params.messageId,
-        userId: body.userId,
+        userId,
         pinned: body.pinned ?? true,
       });
 
       return NextResponse.json({ pinnedMessages }, { status: 200 });
     } catch (error) {
+      if (error instanceof AuthError) {
+        return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+      }
       return NextResponse.json(
         { error: error instanceof Error ? error.message : "Failed to pin message." },
         { status: 400 },

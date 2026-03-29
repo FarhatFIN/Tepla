@@ -7,8 +7,13 @@ type ChatsResponse = {
   chats: TeplaChat[];
 };
 
+const getAuthHeaders = (): Record<string, string> => {
+  const { accessToken } = useAuthStore.getState();
+  return accessToken ? { Authorization: `Bearer ${accessToken}` } : {};
+};
+
 const fetcher = async (url: string) => {
-  const response = await fetch(url);
+  const response = await fetch(url, { headers: { ...getAuthHeaders() } });
   if (!response.ok) {
     throw new Error("Failed to load chats.");
   }
@@ -20,9 +25,7 @@ export const useChats = () => {
   const authUser = useAuthStore((state) => state.user);
   const currentUserId = authUser?.id ?? DEMO_CURRENT_USER.id;
   const backendEnabled = Boolean(authUser?.id);
-  const swrKey = backendEnabled
-    ? `/api/chats?userId=${encodeURIComponent(currentUserId)}`
-    : null;
+  const swrKey = backendEnabled ? `/api/chats` : null;
 
   const { data, error, isLoading, mutate } = useSWR<ChatsResponse>(swrKey, fetcher);
 
@@ -38,11 +41,8 @@ export const useChats = () => {
 
     const response = await fetch("/api/chats", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        userId: currentUserId,
-        ...payload,
-      }),
+      headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+      body: JSON.stringify(payload),
     });
 
     if (!response.ok) {
@@ -72,10 +72,9 @@ export const useChats = () => {
 
     const response = await fetch("/api/chats", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...getAuthHeaders() },
       body: JSON.stringify({
         type: "direct",
-        userId: currentUserId,
         peerUserId: payload.peerUserId,
         peerUsername: payload.peerUsername ?? null,
         peerDisplayName: payload.peerDisplayName ?? null,

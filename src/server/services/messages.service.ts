@@ -89,13 +89,11 @@ const ensureChatMember = async (chatId: string, userId: string) => {
 export const messagesService = {
   async listMessages(params: {
     chatId: string;
-    userId?: string | null;
+    userId: string;
     limit?: string | null;
     cursor?: string | null;
   }) {
-    if (params.userId) {
-      await ensureChatMember(params.chatId, params.userId);
-    }
+    await ensureChatMember(params.chatId, params.userId);
 
     const limit = parseLimit(params.limit, 30, 100);
     const rows = await messagesRepository.listByChat(
@@ -119,10 +117,8 @@ export const messagesService = {
     };
   },
 
-  async listPinnedMessages(chatId: string, userId?: string | null) {
-    if (userId) {
-      await ensureChatMember(chatId, userId);
-    }
+  async listPinnedMessages(chatId: string, userId: string) {
+    await ensureChatMember(chatId, userId);
 
     const rows = await messagesRepository.listPinnedMessages(chatId);
     return hydrateMessages(rows.reverse(), userId ?? null);
