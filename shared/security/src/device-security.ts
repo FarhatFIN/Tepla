@@ -23,18 +23,41 @@ export class DeviceSecurity {
     this.redis = redis;
   }
 
-  /** Generate device fingerprint from HTTP headers */
+  /**
+   * Generate device fingerprint from HTTP headers.
+   * IP is NOT included — it changes with networks and x-forwarded-for is spoofable.
+   * Use getClientIp() separately for IP-based checks.
+   */
   static fingerprint(headers: Record<string, string | undefined>, cookieId?: string): string {
     const components = [
       headers['user-agent'] || '',
       headers['accept-language'] || '',
       headers['sec-ch-ua'] || '',
       headers['sec-ch-ua-platform'] || '',
-      headers['x-forwarded-for'] || '',
       cookieId || '',
     ].join('|');
 
     return crypto.createHash('sha256').update(components).digest('hex');
+  }
+
+  /**
+   * Extract client IP safely.
+   * Only trust x-forwarded-for from proxies in TRUSTED_PROXIES allowlist.
+   * Otherwise use socket remoteAddress.
+   */
+  static getClientIp(req: { socket: { remoteAddress?: string }; headers: Record<string, string | undefined> }): string {
+    const trustedProxies = (process.env.TRUSTED_PROXIES || '').split(',').filter(Boolean);
+    const socketIp = req.socket.remoteAddress || '0.0.0.0';
+
+    if (trustedProxies.length > 0 && trustedProxies.includes(socketIp)) {
+      const forwarded = req.headers['x-forwarded-for'];
+      if (forwarded) {
+        // First IP in the chain is the original client
+        return forwarded.split(',')[0].trim();
+      }
+    }
+
+    return socketIp;
   }
 
   /** Register a device for a user */

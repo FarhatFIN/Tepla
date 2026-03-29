@@ -3,19 +3,39 @@ import { createLogger } from './logger';
 
 const logger = createLogger('redis');
 
+export type RedisRole = 'cache' | 'persist' | 'default';
+
+const REDIS_URLS: Record<RedisRole, string> = {
+  cache: process.env.REDIS_CACHE_URL || process.env.REDIS_URL || 'redis://localhost:6379',
+  persist: process.env.REDIS_PERSIST_URL || process.env.REDIS_URL || 'redis://localhost:6379',
+  default: process.env.REDIS_URL || 'redis://localhost:6379',
+};
+
 export class RedisClient {
   private client: Redis;
   private subscriber: Redis | null = null;
+  public readonly role: RedisRole;
 
-  constructor(url?: string) {
-    this.client = new Redis(url || process.env.REDIS_URL || 'redis://localhost:6379', {
+  constructor(urlOrRole?: string) {
+    // If it's a known role name, resolve the URL; otherwise treat as raw URL
+    if (urlOrRole && (urlOrRole === 'cache' || urlOrRole === 'persist' || urlOrRole === 'default')) {
+      this.role = urlOrRole;
+    } else {
+      this.role = 'default';
+    }
+
+    const url = (urlOrRole === 'cache' || urlOrRole === 'persist' || urlOrRole === 'default')
+      ? REDIS_URLS[urlOrRole]
+      : (urlOrRole || REDIS_URLS.default);
+
+    this.client = new Redis(url, {
       maxRetriesPerRequest: 3,
       retryStrategy: (times) => Math.min(times * 200, 5000),
       lazyConnect: true,
     });
 
-    this.client.on('error', (err) => logger.error('Redis error', { error: err.message }));
-    this.client.on('connect', () => logger.info('Redis connected'));
+    this.client.on('error', (err) => logger.error(`Redis[${this.role}] error`, { error: err.message }));
+    this.client.on('connect', () => logger.info(`Redis[${this.role}] connected`));
   }
 
   async connect(): Promise<void> {

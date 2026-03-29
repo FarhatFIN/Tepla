@@ -35,11 +35,14 @@ export class KafkaProducer {
 
   async publish<T>(event: DomainEvent<T>): Promise<void> {
     if (!this.connected) await this.connect();
+    // Use chatId as partition key for message events → per-chat ordering
+    const payload = event.payload as any;
+    const key = payload?.chatId || event.userId || event.id;
     await this.producer.send({
       topic: event.topic,
       messages: [
         {
-          key: event.userId || event.id,
+          key,
           value: JSON.stringify(event),
           headers: {
             'event-type': event.type,

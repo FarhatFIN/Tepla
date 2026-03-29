@@ -22,6 +22,8 @@ export abstract class BaseService {
   protected logger: Logger;
   protected kafka: KafkaProducer | null = null;
   protected redis: RedisClient | null = null;
+  protected redisCache: RedisClient | null = null;     // volatile: allkeys-lru — presence, sparks balance, hot messages
+  protected redisPersist: RedisClient | null = null;    // durable: sessions, ratchet keys, rate limits
   protected config: ServiceConfig;
   private startTime = Date.now();
 
@@ -69,7 +71,13 @@ export abstract class BaseService {
     if (this.config.enableRedis !== false) {
       this.redis = new RedisClient();
       await this.redis.connect();
-      this.logger.info('Redis connected');
+
+      // Split Redis: cache (volatile) + persist (durable)
+      // Falls back to same instance if REDIS_CACHE_URL / REDIS_PERSIST_URL not set
+      this.redisCache = new RedisClient('cache');
+      this.redisPersist = new RedisClient('persist');
+      await Promise.all([this.redisCache.connect(), this.redisPersist.connect()]);
+      this.logger.info('Redis connected (default + cache + persist)');
     }
 
     if (this.config.enableKafka !== false) {
@@ -124,7 +132,11 @@ export abstract class BaseService {
       const shutdown = async (signal: string) => {
         this.logger.info(`${signal} received, shutting down...`);
         if (this.kafka) await this.kafka.disconnect();
-        if (this.redis) await this.redis.disconnect();
+        await Promise.all([
+          this.redis?.disconnect(),
+          this.redisCache?.disconnect(),
+          this.redisPersist?.disconnect(),
+        ]);
         process.exit(0);
       };
 
