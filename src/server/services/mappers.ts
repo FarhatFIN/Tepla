@@ -60,6 +60,7 @@ export const mapAuthUser = (row: UserProfileRow): AuthUser => ({
 export const mapChat = (
   row: ChatRow,
   currentUserRole: TeplaChat["currentUserRole"] = null,
+  isFavorite = false,
 ): TeplaChat => ({
   id: row.id,
   type: row.type as TeplaChat["type"],
@@ -70,6 +71,7 @@ export const mapChat = (
   createdBy: row.created_by,
   isPublic: Boolean(row.is_public),
   isVerified: Boolean(row.is_verified),
+  isFavorite,
   membersCount: row.members_count ?? 0,
   slowModeSeconds: row.slow_mode_seconds ?? 0,
   messageTtlSeconds: row.message_ttl_seconds,

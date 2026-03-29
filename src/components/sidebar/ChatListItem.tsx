@@ -1,4 +1,4 @@
-import { BadgeCheck, Pin } from "lucide-react";
+import { BadgeCheck, Pin, Star } from "lucide-react";
 import { motion } from "framer-motion";
 import type { TeplaChat } from "@/types/chat";
 import { Avatar } from "@/components/ui/avatar";
@@ -14,7 +14,9 @@ type ChatListItemProps = {
   online?: boolean;
   unreadCount?: number;
   pinned?: boolean;
+  favorite?: boolean;
   onTogglePin?: () => void;
+  onToggleFavorite?: () => void;
   onClick?: () => void;
 };
 
@@ -27,7 +29,9 @@ export const ChatListItem = ({
   online,
   unreadCount,
   pinned,
+  favorite,
   onTogglePin,
+  onToggleFavorite,
   onClick,
 }: ChatListItemProps) => {
   return (
@@ -77,6 +81,25 @@ export const ChatListItem = ({
               }}
             >
               <Pin className={cn("h-3.5 w-3.5", pinned ? "text-sky-300" : "text-white/45")} />
+            </Button>
+          ) : null}
+          {onToggleFavorite ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-6 w-6"
+              onClick={(event) => {
+                event.stopPropagation();
+                onToggleFavorite();
+              }}
+            >
+              <Star
+                className={cn(
+                  "h-3.5 w-3.5",
+                  favorite ? "fill-amber-300 text-amber-300" : "text-white/45",
+                )}
+              />
             </Button>
           ) : null}
           {unreadCount ? (

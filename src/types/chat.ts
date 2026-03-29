@@ -17,6 +17,7 @@ export type TeplaChat = {
   createdBy: UserId | null;
   isPublic: boolean;
   isVerified: boolean;
+  isFavorite?: boolean;
   membersCount: number;
   slowModeSeconds: number;
   messageTtlSeconds: number | null;

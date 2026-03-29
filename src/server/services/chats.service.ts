@@ -24,7 +24,11 @@ export const chatsService = {
   },
 
   async listChats(userId: string) {
-    const memberships = await chatsRepository.listMemberships(userId);
+    const [memberships, favoriteChatIds] = await Promise.all([
+      chatsRepository.listMemberships(userId),
+      chatsRepository.listFavoriteChatIds(userId),
+    ]);
+    const favoriteChatIdSet = new Set(favoriteChatIds);
 
     const chats = await Promise.all(
       memberships
@@ -33,7 +37,11 @@ export const chatsService = {
           const chatRow = membership.chats!;
           const [lastMessage] = await messagesRepository.listByChat(chatRow.id, 1);
           return {
-            ...mapChat(chatRow, membership.role as ChatRole),
+            ...mapChat(
+              chatRow,
+              membership.role as ChatRole,
+              favoriteChatIdSet.has(chatRow.id),
+            ),
             lastMessage: lastMessage
               ? {
                   id: lastMessage.id,
@@ -48,6 +56,10 @@ export const chatsService = {
     );
 
     return chats.sort((left, right) => {
+      if (Boolean(left.isFavorite) !== Boolean(right.isFavorite)) {
+        return left.isFavorite ? -1 : 1;
+      }
+
       const leftDate = left.lastMessage?.createdAt ?? left.createdAt;
       const rightDate = right.lastMessage?.createdAt ?? right.createdAt;
       return new Date(rightDate).getTime() - new Date(leftDate).getTime();
@@ -193,5 +205,27 @@ export const chatsService = {
     }
 
     return mapChat(chat, role);
+  },
+
+  async toggleFavoriteChat(payload: {
+    chatId: string;
+    userId: string;
+    favorite: boolean;
+  }) {
+    const role = await chatsRepository.getMemberRole(payload.chatId, payload.userId);
+    if (!role || role === "banned") {
+      throw new Error("You do not have access to this chat.");
+    }
+
+    if (payload.favorite) {
+      await chatsRepository.addFavoriteChat(payload.userId, payload.chatId);
+    } else {
+      await chatsRepository.removeFavoriteChat(payload.userId, payload.chatId);
+    }
+
+    return {
+      chatId: payload.chatId,
+      isFavorite: payload.favorite,
+    };
   },
 };

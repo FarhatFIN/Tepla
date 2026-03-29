@@ -88,6 +88,32 @@ export const chatsController = {
     }
   },
 
+  async toggleFavorite(request: Request, context: { params: { chatId: string } }) {
+    try {
+      const body = (await request.json()) as {
+        userId: string;
+        favorite: boolean;
+      };
+
+      if (!body.userId) {
+        return NextResponse.json({ error: "userId is required." }, { status: 400 });
+      }
+
+      const result = await chatsService.toggleFavoriteChat({
+        chatId: context.params.chatId,
+        userId: body.userId,
+        favorite: Boolean(body.favorite),
+      });
+
+      return NextResponse.json(result, { status: 200 });
+    } catch (error) {
+      return NextResponse.json(
+        { error: error instanceof Error ? error.message : "Failed to update favorites." },
+        { status: 400 },
+      );
+    }
+  },
+
   async listPins(request: Request, context: { params: { chatId: string } }) {
     try {
       const { searchParams } = new URL(request.url);

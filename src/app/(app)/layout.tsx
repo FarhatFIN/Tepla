@@ -20,7 +20,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
   const activeChatId = useUIStore((state) => state.activeChatId);
   const setActiveChatId = useUIStore((state) => state.setActiveChatId);
   const messagesByChat = useChatStore((state) => state.messagesByChat);
-  const { chats, createGroup, startDirectChat, backendEnabled } = useChats();
+  const { chats, createGroup, startDirectChat, toggleFavoriteChat, backendEnabled } = useChats();
   const isSettings = pathname?.startsWith("/settings");
   useSocket(activeChatId);
 
@@ -89,6 +89,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
           setActiveChatId(chat.id);
           return chat;
         }}
+        onToggleFavoriteChat={toggleFavoriteChat}
       />
       <div className="flex h-full flex-1 flex-col overflow-hidden">
         {isSettings ? children : <ChatWindow chat={activeChat} />}

@@ -102,6 +102,38 @@ export const useChats = () => {
     return result.chat;
   };
 
+  const toggleFavoriteChat = async (chatId: string, favorite: boolean) => {
+    if (!backendEnabled) {
+      throw new Error("Sign in to sync favorites across your devices.");
+    }
+
+    const response = await fetch(`/api/chats/${chatId}/favorite`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        userId: currentUserId,
+        favorite,
+      }),
+    });
+
+    if (!response.ok) {
+      const body = await response.json().catch(() => null);
+      throw new Error(body?.error ?? "Failed to update favorites.");
+    }
+
+    await mutate(
+      (current) =>
+        current
+          ? {
+              chats: current.chats.map((chat) =>
+                chat.id === chatId ? { ...chat, isFavorite: favorite } : chat,
+              ),
+            }
+          : current,
+      { revalidate: true },
+    );
+  };
+
   return {
     chats: backendEnabled ? data?.chats ?? [] : DEMO_CHATS,
     currentUserId,
@@ -110,6 +142,7 @@ export const useChats = () => {
     error,
     createGroup,
     startDirectChat,
+    toggleFavoriteChat,
     refreshChats: mutate,
   };
 };

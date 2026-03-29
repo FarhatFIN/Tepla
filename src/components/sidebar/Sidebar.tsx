@@ -9,6 +9,7 @@ import {
   Search as SearchIcon,
   Settings,
   Sparkles,
+  Star,
 } from "lucide-react";
 import { ChatListItem } from "./ChatListItem";
 import { CreateGroupDialog } from "./CreateGroupDialog";
@@ -45,6 +46,7 @@ type SidebarProps = {
     peerUsername?: string | null;
     peerDisplayName?: string | null;
   }) => Promise<TeplaChat>;
+  onToggleFavoriteChat: (chatId: string, favorite: boolean) => Promise<void>;
 };
 
 export const Sidebar = ({
@@ -55,14 +57,25 @@ export const Sidebar = ({
   backendEnabled,
   onCreateGroup,
   onStartDirectChat,
+  onToggleFavoriteChat,
 }: SidebarProps) => {
   const [query, setQuery] = useState("");
   const [isCreateGroupOpen, setCreateGroupOpen] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
-  const { isSidebarCollapsed, setSidebarCollapsed, pinnedChatIds, togglePinnedChat } =
+  const {
+    isSidebarCollapsed,
+    setSidebarCollapsed,
+    pinnedChatIds,
+    favoriteChatIds,
+    togglePinnedChat,
+    toggleFavoriteChat: toggleFavoriteChatLocal,
+  } =
     useUIStore();
   const { limits } = usePremium();
   const { users: searchedUsers, isLoading: isSearchingUsers } = useUserSearch(query);
+
+  const isChatFavorite = (chat: TeplaChat) =>
+    backendEnabled ? Boolean(chat.isFavorite) : favoriteChatIds.includes(chat.id);
 
   const filteredChats = useMemo(() => {
     const source = query
@@ -111,6 +124,9 @@ export const Sidebar = ({
   const liveNow = Object.values(chatSnapshots).filter((snapshot) => snapshot.online).length;
   const userSearchActive = backendEnabled && query.trim().replace(/^@+/, "").length >= 2;
   const canPinMoreChats = pinnedChatIds.length < limits.pinnedChats;
+  const favoriteChats = filteredChats.filter((chat) => isChatFavorite(chat));
+  const regularChats = filteredChats.filter((chat) => !isChatFavorite(chat));
+  const orderedChats = [...favoriteChats, ...regularChats];
 
   return (
     <>
@@ -297,12 +313,17 @@ export const Sidebar = ({
           ) : null}
 
           <div className="space-y-0.5">
-            {!isSidebarCollapsed && userSearchActive ? (
+            {!isSidebarCollapsed && userSearchActive && favoriteChats.length === 0 ? (
               <div className="px-3 pb-1 pt-1 text-[10px] uppercase tracking-[0.18em] text-tepla-text-muted">
                 Chats
               </div>
             ) : null}
-            {filteredChats.map((chat) => (
+            {!isSidebarCollapsed && favoriteChats.length > 0 ? (
+              <div className="px-3 pb-1 pt-1 text-[10px] uppercase tracking-[0.18em] text-amber-200">
+                Favorites
+              </div>
+            ) : null}
+            {(isSidebarCollapsed ? orderedChats : favoriteChats).map((chat) => (
               <ChatListItem
                 key={chat.id}
                 chat={chat}
@@ -313,6 +334,7 @@ export const Sidebar = ({
                 updatedAt={chatSnapshots[chat.id]?.updatedAt}
                 unreadCount={chatSnapshots[chat.id]?.unreadCount}
                 pinned={pinnedChatIds.includes(chat.id)}
+                favorite={isChatFavorite(chat)}
                 onTogglePin={() => {
                   const isPinned = pinnedChatIds.includes(chat.id);
                   if (!isPinned && !canPinMoreChats) {
@@ -325,13 +347,90 @@ export const Sidebar = ({
                   setSearchError(null);
                   togglePinnedChat(chat.id);
                 }}
+                onToggleFavorite={() => {
+                  void (async () => {
+                    try {
+                      setSearchError(null);
+                      if (backendEnabled) {
+                        await onToggleFavoriteChat(chat.id, !isChatFavorite(chat));
+                      } else {
+                        toggleFavoriteChatLocal(chat.id);
+                      }
+                    } catch (favoriteError) {
+                      setSearchError(
+                        favoriteError instanceof Error
+                          ? favoriteError.message
+                          : "Failed to update favorites.",
+                      );
+                    }
+                  })();
+                }}
                 onClick={() => onSelectChat(chat.id)}
               />
             ))}
-            {filteredChats.length === 0 && !isSidebarCollapsed ? (
+            {!isSidebarCollapsed &&
+            regularChats.length > 0 &&
+            (favoriteChats.length > 0 || userSearchActive) ? (
+              <div className="px-3 pb-1 pt-3 text-[10px] uppercase tracking-[0.18em] text-tepla-text-muted">
+                Chats
+              </div>
+            ) : null}
+            {!isSidebarCollapsed &&
+            regularChats.map((chat) => (
+              <ChatListItem
+                key={chat.id}
+                chat={chat}
+                collapsed={false}
+                active={chat.id === activeChatId}
+                online={chatSnapshots[chat.id]?.online}
+                preview={chatSnapshots[chat.id]?.preview}
+                updatedAt={chatSnapshots[chat.id]?.updatedAt}
+                unreadCount={chatSnapshots[chat.id]?.unreadCount}
+                pinned={pinnedChatIds.includes(chat.id)}
+                favorite={isChatFavorite(chat)}
+                onTogglePin={() => {
+                  const isPinned = pinnedChatIds.includes(chat.id);
+                  if (!isPinned && !canPinMoreChats) {
+                    setSearchError(
+                      `Pinned chats limit reached. Your current limit is ${limits.pinnedChats}.`,
+                    );
+                    return;
+                  }
+
+                  setSearchError(null);
+                  togglePinnedChat(chat.id);
+                }}
+                onToggleFavorite={() => {
+                  void (async () => {
+                    try {
+                      setSearchError(null);
+                      if (backendEnabled) {
+                        await onToggleFavoriteChat(chat.id, !isChatFavorite(chat));
+                      } else {
+                        toggleFavoriteChatLocal(chat.id);
+                      }
+                    } catch (favoriteError) {
+                      setSearchError(
+                        favoriteError instanceof Error
+                          ? favoriteError.message
+                          : "Failed to update favorites.",
+                      );
+                    }
+                  })();
+                }}
+                onClick={() => onSelectChat(chat.id)}
+              />
+            ))}
+            {orderedChats.length === 0 && !isSidebarCollapsed ? (
               <div className="rounded-2xl border border-dashed border-white/10 px-3 py-5 text-center text-tepla-text-muted">
-                <SearchIcon className="mx-auto mb-2 h-4 w-4" />
-                No chats match this search yet.
+                {query.trim() ? (
+                  <SearchIcon className="mx-auto mb-2 h-4 w-4" />
+                ) : (
+                  <Star className="mx-auto mb-2 h-4 w-4" />
+                )}
+                {query.trim()
+                  ? "No chats match this search yet."
+                  : "Mark chats as favorites to keep your most important conversations on top."}
               </div>
             ) : null}
             {searchError && !userSearchActive ? (

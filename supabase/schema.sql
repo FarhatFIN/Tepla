@@ -95,6 +95,15 @@ create table if not exists public.chat_members (
   unique (chat_id, user_id)
 );
 
+-- FAVORITE CHATS --------------------------------------------------------------
+
+create table if not exists public.favorite_chats (
+  user_id uuid references public.users(id) on delete cascade,
+  chat_id uuid references public.chats(id) on delete cascade,
+  created_at timestamptz default now(),
+  primary key (user_id, chat_id)
+);
+
 -- MESSAGES --------------------------------------------------------------------
 
 create table if not exists public.messages (
@@ -595,6 +604,10 @@ create index if not exists idx_chat_members_chat_id on public.chat_members (chat
 create index if not exists idx_chat_members_user_id on public.chat_members (user_id);
 create index if not exists idx_chat_members_role on public.chat_members (chat_id, role);
 
+-- Favorite chats
+create index if not exists idx_favorite_chats_user_id on public.favorite_chats (user_id);
+create index if not exists idx_favorite_chats_chat_id on public.favorite_chats (chat_id);
+
 -- Messages
 create index if not exists idx_messages_chat_created_at on public.messages (chat_id, created_at desc);
 create index if not exists idx_messages_sender_id on public.messages (sender_id);
@@ -687,6 +700,7 @@ create index if not exists idx_login_events_created_at on public.login_events (c
 alter table public.users enable row level security;
 alter table public.chats enable row level security;
 alter table public.chat_members enable row level security;
+alter table public.favorite_chats enable row level security;
 alter table public.messages enable row level security;
 alter table public.message_reads enable row level security;
 alter table public.reactions enable row level security;
@@ -822,6 +836,23 @@ create policy "chat_members_update_admins"
         and cm2.role in ('owner', 'admin')
     )
   );
+
+-- FAVORITE CHATS: users manage their own favorites
+
+create policy "favorite_chats_select_own"
+  on public.favorite_chats
+  for select
+  using (user_id = auth.uid());
+
+create policy "favorite_chats_insert_own"
+  on public.favorite_chats
+  for insert
+  with check (user_id = auth.uid());
+
+create policy "favorite_chats_delete_own"
+  on public.favorite_chats
+  for delete
+  using (user_id = auth.uid());
 
 -- MESSAGES: visible if user is member of chat; insert if member and not banned
 

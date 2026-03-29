@@ -18,12 +18,14 @@ export type TeplaUIState = {
   isSidebarCollapsed: boolean;
   activeChatId: string | null;
   pinnedChatIds: string[];
+  favoriteChatIds: string[];
   setTheme: (theme: ThemePreference) => void;
   setAccentColor: (color: string) => void;
   setDensity: (density: Density) => void;
   setSidebarCollapsed: (collapsed: boolean) => void;
   setActiveChatId: (chatId: string | null) => void;
   togglePinnedChat: (chatId: string) => void;
+  toggleFavoriteChat: (chatId: string) => void;
 };
 
 export const useUIStore = create<TeplaUIState>()(
@@ -35,6 +37,7 @@ export const useUIStore = create<TeplaUIState>()(
       isSidebarCollapsed: false,
       activeChatId: null,
       pinnedChatIds: [],
+      favoriteChatIds: [],
       setTheme: (theme) => set({ theme }),
       setAccentColor: (accentColor) => set({ accentColor }),
       setDensity: (density) => set({ density }),
@@ -45,6 +48,12 @@ export const useUIStore = create<TeplaUIState>()(
           pinnedChatIds: state.pinnedChatIds.includes(chatId)
             ? state.pinnedChatIds.filter((id) => id !== chatId)
             : [chatId, ...state.pinnedChatIds],
+        })),
+      toggleFavoriteChat: (chatId) =>
+        set((state) => ({
+          favoriteChatIds: state.favoriteChatIds.includes(chatId)
+            ? state.favoriteChatIds.filter((id) => id !== chatId)
+            : [chatId, ...state.favoriteChatIds],
         })),
     }),
     {

@@ -23,6 +23,10 @@ export type ChatMembershipRow = {
   chats: ChatRow | null;
 };
 
+export type FavoriteChatRow = {
+  chat_id: string;
+};
+
 export const chatsRepository = {
   async listMemberships(userId: string) {
     const supabase = getServiceSupabaseClient();
@@ -73,6 +77,51 @@ export const chatsRepository = {
     }
 
     return (data?.role as string | undefined) ?? null;
+  },
+
+  async listFavoriteChatIds(userId: string) {
+    const supabase = getServiceSupabaseClient();
+    const { data, error } = await supabase
+      .from("favorite_chats")
+      .select("chat_id")
+      .eq("user_id", userId)
+      .order("created_at", { ascending: false });
+
+    if (error) {
+      throw new Error("Failed to load favorite chats.");
+    }
+
+    return ((data ?? []) as FavoriteChatRow[]).map((row) => row.chat_id);
+  },
+
+  async addFavoriteChat(userId: string, chatId: string) {
+    const supabase = getServiceSupabaseClient();
+    const { error } = await supabase
+      .from("favorite_chats")
+      .upsert(
+        {
+          user_id: userId,
+          chat_id: chatId,
+        },
+        { onConflict: "user_id,chat_id" },
+      );
+
+    if (error) {
+      throw new Error("Failed to add favorite chat.");
+    }
+  },
+
+  async removeFavoriteChat(userId: string, chatId: string) {
+    const supabase = getServiceSupabaseClient();
+    const { error } = await supabase
+      .from("favorite_chats")
+      .delete()
+      .eq("user_id", userId)
+      .eq("chat_id", chatId);
+
+    if (error) {
+      throw new Error("Failed to remove favorite chat.");
+    }
   },
 
   async findDirectChatBetweenUsers(leftUserId: string, rightUserId: string) {
