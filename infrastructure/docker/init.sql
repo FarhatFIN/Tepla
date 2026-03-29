@@ -7,6 +7,20 @@
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
+-- UUIDv7 generator (ms-precision timestamp + random, B-tree friendly)
+CREATE OR REPLACE FUNCTION gen_uuidv7() RETURNS uuid AS $$
+DECLARE
+  ts_ms  bigint;
+  uuid_bytes bytea;
+BEGIN
+  ts_ms := (EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::bigint;
+  uuid_bytes := substring(int8send(ts_ms) FROM 3 FOR 6) || gen_random_bytes(10);
+  uuid_bytes := set_byte(uuid_bytes, 6, (get_byte(uuid_bytes, 6) & x'0F'::int) | x'70'::int);
+  uuid_bytes := set_byte(uuid_bytes, 8, (get_byte(uuid_bytes, 8) & x'3F'::int) | x'80'::int);
+  RETURN encode(uuid_bytes, 'hex')::uuid;
+END
+$$ LANGUAGE plpgsql VOLATILE;
+
 -- ─── Users ──────────────────────────────────
 CREATE TABLE IF NOT EXISTS users (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -80,7 +94,8 @@ CREATE INDEX idx_chat_members_chat ON chat_members(chat_id);
 
 -- ─── Messages ───────────────────────────────
 CREATE TABLE IF NOT EXISTS messages (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  id UUID PRIMARY KEY DEFAULT gen_uuidv7(),
+  id_v7 UUID UNIQUE NOT NULL DEFAULT gen_uuidv7(),
   chat_id UUID NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
   sender_id UUID REFERENCES users(id),
   content TEXT NOT NULL DEFAULT '',
@@ -105,6 +120,7 @@ CREATE TABLE IF NOT EXISTS messages (
 );
 
 CREATE INDEX idx_messages_chat_created ON messages(chat_id, created_at DESC);
+CREATE INDEX idx_messages_chat_idv7 ON messages(chat_id, id_v7 DESC);
 CREATE INDEX idx_messages_sender ON messages(sender_id);
 CREATE INDEX idx_messages_pinned ON messages(chat_id, is_pinned) WHERE is_pinned = true;
 CREATE INDEX idx_messages_reply ON messages(reply_to_id) WHERE reply_to_id IS NOT NULL;
@@ -142,7 +158,8 @@ CREATE INDEX idx_reactions_message ON reactions(message_id);
 
 -- ─── Files (Attachments) ────────────────────
 CREATE TABLE IF NOT EXISTS files (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  id UUID PRIMARY KEY DEFAULT gen_uuidv7(),
+  id_v7 UUID UNIQUE NOT NULL DEFAULT gen_uuidv7(),
   message_id UUID REFERENCES messages(id) ON DELETE CASCADE,
   uploader_id UUID REFERENCES users(id),
   url TEXT NOT NULL,
@@ -184,7 +201,8 @@ CREATE TABLE IF NOT EXISTS sparks_wallet (
 );
 
 CREATE TABLE IF NOT EXISTS sparks_transactions (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  id UUID PRIMARY KEY DEFAULT gen_uuidv7(),
+  id_v7 UUID UNIQUE NOT NULL DEFAULT gen_uuidv7(),
   from_user_id UUID REFERENCES users(id),
   to_user_id UUID REFERENCES users(id),
   chat_id UUID REFERENCES chats(id),
@@ -196,6 +214,22 @@ CREATE TABLE IF NOT EXISTS sparks_transactions (
 
 CREATE INDEX idx_sparks_tx_from ON sparks_transactions(from_user_id);
 CREATE INDEX idx_sparks_tx_to ON sparks_transactions(to_user_id);
+
+-- ─── Transactional Outbox ─────────────────────
+-- Guarantees at-least-once Kafka delivery for DB-committed events
+CREATE TABLE IF NOT EXISTS outbox (
+  id UUID PRIMARY KEY DEFAULT gen_uuidv7(),
+  aggregate_type TEXT NOT NULL,
+  aggregate_id TEXT NOT NULL,
+  event_type TEXT NOT NULL,
+  topic TEXT NOT NULL,
+  payload JSONB NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  published_at TIMESTAMPTZ,
+  retries INTEGER DEFAULT 0
+);
+
+CREATE INDEX idx_outbox_unpublished ON outbox(created_at) WHERE published_at IS NULL;
 
 -- ─── Push Subscriptions ─────────────────────
 CREATE TABLE IF NOT EXISTS push_subscriptions (
@@ -260,7 +294,8 @@ CREATE INDEX idx_sessions_user ON active_sessions(user_id);
 
 -- ─── Polls ──────────────────────────────────
 CREATE TABLE IF NOT EXISTS polls (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  id UUID PRIMARY KEY DEFAULT gen_uuidv7(),
+  id_v7 UUID UNIQUE NOT NULL DEFAULT gen_uuidv7(),
   message_id UUID NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
   question TEXT NOT NULL,
   options JSONB NOT NULL,
@@ -825,6 +860,30 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS blocked_until TIMESTAMPTZ;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS phone_region VARCHAR(10);
 ALTER TABLE users ADD COLUMN IF NOT EXISTS phone_country_code VARCHAR(5);
 CREATE INDEX IF NOT EXISTS idx_users_phone_region ON users(phone_region);
+
+-- ─── E2EE: X3DH Prekey Bundles ────────────────
+-- Each user publishes an identity key + signed prekey + one-time prekeys.
+-- Clients fetch the bundle to establish E2E sessions without the server seeing plaintext.
+CREATE TABLE IF NOT EXISTS e2e_identity_keys (
+  user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  identity_key TEXT NOT NULL,            -- base64 Ed25519 public key
+  signed_prekey TEXT NOT NULL,           -- base64 X25519 public key
+  signed_prekey_signature TEXT NOT NULL, -- Ed25519 signature over signed_prekey
+  signed_prekey_id INTEGER NOT NULL DEFAULT 1,
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS e2e_one_time_prekeys (
+  id SERIAL PRIMARY KEY,
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  key_id INTEGER NOT NULL,
+  prekey TEXT NOT NULL,                  -- base64 X25519 public key
+  used BOOLEAN DEFAULT false,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE (user_id, key_id)
+);
+
+CREATE INDEX idx_e2e_otp_available ON e2e_one_time_prekeys(user_id, used) WHERE used = false;
 
 -- ─── ElevenBot System Bot ───────────────────
 INSERT INTO users (username, display_name, is_verified, is_bot)

@@ -96,34 +96,60 @@ class SearchService extends BaseService {
 
     this.registerRoutes('/api/search', router);
 
+    // ─── Bulk buffer: batch ES writes for throughput ───
+    const bulkBuffer: Array<{ action: object; doc?: object }> = [];
+    const BULK_MAX_SIZE = 100;
+    const BULK_FLUSH_MS = 500;
+    let bulkTimer: NodeJS.Timeout | null = null;
+
+    const flushBulk = async () => {
+      if (bulkBuffer.length === 0) return;
+      const ops = bulkBuffer.splice(0, bulkBuffer.length);
+      const body = ops.flatMap(op => op.doc ? [op.action, op.doc] : [op.action]);
+      try {
+        const result = await this.elastic.bulk({ body });
+        if (result.errors) {
+          const errors = result.items.filter((i: any) => i.index?.error || i.delete?.error);
+          logger.warn(`Bulk indexing: ${errors.length} errors in batch of ${ops.length}`);
+        }
+      } catch (err) {
+        logger.error('Bulk indexing failed', { error: (err as Error).message, count: ops.length });
+      }
+    };
+
+    const enqueueBulk = (action: object, doc?: object) => {
+      bulkBuffer.push({ action, doc });
+      if (bulkBuffer.length >= BULK_MAX_SIZE) {
+        if (bulkTimer) { clearTimeout(bulkTimer); bulkTimer = null; }
+        flushBulk();
+      } else if (!bulkTimer) {
+        bulkTimer = setTimeout(() => { bulkTimer = null; flushBulk(); }, BULK_FLUSH_MS);
+      }
+    };
+
     // ─── Kafka Consumer: index new/updated messages ───
     const consumer = new KafkaConsumer('search-svc', 'search-index-group');
     await consumer.subscribe([EventTopic.MESSAGE_EVENTS, EventTopic.USER_EVENTS, EventTopic.CHAT_EVENTS]);
 
     consumer.on(EventType.MESSAGE_SENT, async (event: DomainEvent) => {
       const msg = event.payload as any;
-      await this.elastic.index({
-        index: 'tepla-messages',
-        id: msg.messageId,
-        body: {
-          messageId: msg.messageId, chatId: msg.chatId, senderId: msg.senderId,
-          content: msg.content, type: msg.type, createdAt: msg.createdAt,
-        },
-      });
+      enqueueBulk(
+        { index: { _index: 'tepla-messages', _id: msg.messageId } },
+        { messageId: msg.messageId, chatId: msg.chatId, senderId: msg.senderId, content: msg.content, type: msg.type, createdAt: msg.createdAt },
+      );
     });
 
     consumer.on(EventType.MESSAGE_DELETED, async (event: DomainEvent) => {
       const { messageId } = event.payload as any;
-      await this.elastic.delete({ index: 'tepla-messages', id: messageId }).catch(() => {});
+      enqueueBulk({ delete: { _index: 'tepla-messages', _id: messageId } });
     });
 
     consumer.on(EventType.USER_CREATED, async (event: DomainEvent) => {
-      const { userId } = event.payload as any;
       // Index user (would need to fetch full profile)
     });
 
     await consumer.start();
-    this.logger.info('Search service ready');
+    this.logger.info('Search service ready (bulk indexing enabled)');
   }
 
   private async ensureIndices(): Promise<void> {

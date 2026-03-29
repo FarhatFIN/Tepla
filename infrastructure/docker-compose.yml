@@ -12,6 +12,8 @@ x-service-defaults: &service-defaults
   environment: &common-env
     NODE_ENV: production
     REDIS_URL: redis://redis:6379
+    REDIS_CACHE_URL: redis://redis-cache:6379
+    REDIS_PERSIST_URL: redis://redis-persist:6379
     KAFKA_BROKERS: kafka:9092
     DATABASE_URL: postgresql://tepla:tepla_secret@postgres:5432/tepla
     JWT_SECRET: ${JWT_SECRET:-tepla-jwt-secret-change-in-production}
@@ -52,6 +54,40 @@ services:
       - redis_data:/data
     ports:
       - "6379:6379"
+    networks:
+      - tepla-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Volatile cache: presence, sparks balance, hot messages — evicts under pressure
+  redis-cache:
+    image: redis:7-alpine
+    container_name: tepla-redis-cache
+    restart: unless-stopped
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru --save ""
+    ports:
+      - "6380:6379"
+    networks:
+      - tepla-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Durable persist: sessions, ratchet keys, rate limits — no eviction
+  redis-persist:
+    image: redis:7-alpine
+    container_name: tepla-redis-persist
+    restart: unless-stopped
+    command: redis-server --maxmemory 256mb --maxmemory-policy noeviction --appendonly yes
+    volumes:
+      - redis_persist_data:/data
+    ports:
+      - "6381:6379"
     networks:
       - tepla-network
     healthcheck:
@@ -583,6 +619,7 @@ services:
 volumes:
   postgres_data:
   redis_data:
+  redis_persist_data:
   zookeeper_data:
   kafka_data:
   elasticsearch_data:

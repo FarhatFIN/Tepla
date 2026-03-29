@@ -41,7 +41,7 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
 
   // ─── Email OTP Helpers ─────────────────────
   function generateEmailOtp(): string {
-    return Math.floor(100000 + Math.random() * 900000).toString();
+    return crypto.randomInt(100000, 999999).toString();
   }
 
   async function storeAndSendEmailOtp(email: string): Promise<void> {
@@ -898,8 +898,27 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
       );
       if (!device) throw new UnauthorizedError('Biometric not registered for this device');
 
-      // In production, verify signature with stored public key using WebAuthn
-      // For now, trust the client-side biometric verification
+      // Verify Ed25519 signature: client signs a challenge (timestamp + deviceId + userId)
+      const publicKeyBuf = Buffer.from(device.biometric_public_key, 'base64');
+      const signatureBuf = Buffer.from(signature, 'base64');
+
+      // The signed payload is deterministic: the client signs `${userId}:${deviceId}:${timestamp}`
+      // We accept timestamps within a 5-minute window to prevent replay
+      const now = Math.floor(Date.now() / 1000);
+      let signatureValid = false;
+      for (let ts = now - 300; ts <= now; ts++) {
+        const challenge = Buffer.from(`${userId}:${deviceId}:${ts}`);
+        if (crypto.verify('Ed25519', challenge, publicKeyBuf, signatureBuf)) {
+          signatureValid = true;
+          break;
+        }
+      }
+
+      if (!signatureValid) {
+        await AuditLogger.log('biometric_login_failed', { userId, deviceId, ip: req.ip, reason: 'invalid_signature' });
+        throw new UnauthorizedError('Biometric signature verification failed');
+      }
+
       const user = await userRepo.findById(userId);
       if (!user) throw new UnauthorizedError('User not found');
 
@@ -1053,7 +1072,15 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
         const valid = await bcrypt.compare(pinHash, user.pin_hash);
         if (!valid) throw new UnauthorizedError('Invalid PIN');
       } else if (biometricSignature && device.biometric_public_key) {
-        // Trust client biometric in web context
+        const pubKey = Buffer.from(device.biometric_public_key, 'base64');
+        const sigBuf = Buffer.from(biometricSignature, 'base64');
+        const now = Math.floor(Date.now() / 1000);
+        let bioValid = false;
+        for (let ts = now - 300; ts <= now; ts++) {
+          const challenge = Buffer.from(`${userId}:${deviceId}:${ts}`);
+          if (crypto.verify('Ed25519', challenge, pubKey, sigBuf)) { bioValid = true; break; }
+        }
+        if (!bioValid) throw new UnauthorizedError('Biometric signature verification failed');
       } else {
         throw new ValidationError('PIN or biometric required');
       }

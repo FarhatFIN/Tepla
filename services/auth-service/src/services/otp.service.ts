@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import { RedisClient, createLogger, ValidationError } from '@tepla/common';
 
 const logger = createLogger('otp-service');
@@ -52,6 +53,6 @@ export class OtpService {
   }
 
   private generateCode(): string {
-    return Math.floor(100000 + Math.random() * 900000).toString();
+    return crypto.randomInt(100000, 999999).toString();
   }
 }

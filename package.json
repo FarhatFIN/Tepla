@@ -16,6 +16,8 @@
     "@ffmpeg-installer/ffmpeg": "^1.1.0",
     "@livekit/components-react": "^2.9.20",
     "@livekit/components-styles": "^1.2.0",
+    "@noble/ed25519": "^3.0.1",
+    "@noble/hashes": "^2.0.1",
     "@radix-ui/react-slot": "^1.2.4",
     "@socket.io/redis-adapter": "^8.3.0",
     "@stablelib/hkdf": "^2.0.1",

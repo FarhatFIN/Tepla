@@ -99,29 +99,11 @@ export const subscriptionsService = {
     const now = new Date();
     const expiresAt = addDays(now, resolvePlanDurationDays(payload.plan));
 
-    if (!priceId || !process.env.PADDLE_API_KEY) {
-      const subscription = await subscriptionsRepository.create({
-        userId: payload.userId,
-        plan: payload.plan,
-        status: "active",
-        startedAt: now.toISOString(),
-        expiresAt: expiresAt.toISOString(),
-      });
-      const user = await usersRepository.activatePremium(payload.userId);
-
-      return {
-        checkoutId: null,
-        checkoutUrl: null,
-        subscription: {
-          id: subscription.id,
-          plan: subscription.plan,
-          startDate: subscription.started_at,
-          endDate: subscription.expires_at,
-          status: "active" as const,
-        },
-        state: await this.getPremiumState(payload.userId),
-        user: mapAuthUser(user),
-      };
+    if (!priceId) {
+      throw new Error(`No Paddle price ID configured for plan: ${payload.plan}`);
+    }
+    if (!process.env.PADDLE_API_KEY) {
+      throw new Error('PADDLE_API_KEY is not configured. Payment processing unavailable.');
     }
 
     const session = await createPaddleCheckout({

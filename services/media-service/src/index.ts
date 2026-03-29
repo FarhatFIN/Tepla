@@ -5,7 +5,9 @@ import multer from 'multer';
 import sharp from 'sharp';
 import { v4 as uuid } from 'uuid';
 import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
+import { Upload } from '@aws-sdk/lib-storage';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import { PassThrough } from 'stream';
 
 const logger = createLogger('media-service');
 
@@ -28,21 +30,37 @@ class MediaService extends BaseService {
     });
 
     const bucket = process.env.S3_BUCKET || 'tepla-media';
-    const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 4 * 1024 * 1024 * 1024 } });
+    // Stream upload: multer only parses form metadata, file streams directly to S3
+    // No memoryStorage — prevents 4GB buffer in process memory
+    const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } }); // 50MB for thumbnails only
     const router = Router();
     const auth = authMiddleware();
 
-    // POST /api/media/upload
-    router.post('/upload', auth, upload.single('file'), async (req: Request, res: Response, next: NextFunction) => {
+    // POST /api/media/upload — stream large files directly to S3
+    router.post('/upload', auth, async (req: Request, res: Response, next: NextFunction) => {
       try {
+        const isPremium = req.user!.isPremium;
+        const maxSize = isPremium ? PREMIUM_LIMITS.maxFileSize : FREE_LIMITS.maxFileSize;
+
+        const contentLength = parseInt(req.headers['content-length'] || '0');
+        if (contentLength > maxSize) {
+          return res.status(413).json({
+            success: false,
+            error: { code: 'FILE_TOO_LARGE', message: `Max file size: ${maxSize / 1024 / 1024} MB` },
+          });
+        }
+
+        // Parse multipart with multer for small files (thumbnails), stream for large
+        const multerSingle = upload.single('file');
+        await new Promise<void>((resolve, reject) => {
+          multerSingle(req, res, (err: any) => err ? reject(err) : resolve());
+        });
+
         const file = req.file;
         if (!file) {
           return res.status(400).json({ success: false, error: { code: 'NO_FILE', message: 'No file uploaded' } });
         }
 
-        // Check file size against premium limits
-        const isPremium = req.user!.isPremium;
-        const maxSize = isPremium ? PREMIUM_LIMITS.maxFileSize : FREE_LIMITS.maxFileSize;
         if (file.size > maxSize) {
           return res.status(413).json({
             success: false,
@@ -54,17 +72,26 @@ class MediaService extends BaseService {
         const ext = file.originalname.split('.').pop() || 'bin';
         const key = `uploads/${req.user!.sub}/${fileId}.${ext}`;
 
-        // Upload to S3
-        await this.s3.send(new PutObjectCommand({
-          Bucket: bucket,
-          Key: key,
-          Body: file.buffer,
-          ContentType: file.mimetype,
-        }));
+        // Stream upload to S3 via @aws-sdk/lib-storage (multipart for large files)
+        const passThrough = new PassThrough();
+        const s3Upload = new Upload({
+          client: this.s3,
+          params: {
+            Bucket: bucket,
+            Key: key,
+            Body: passThrough,
+            ContentType: file.mimetype,
+          },
+          queueSize: 4,
+          partSize: 10 * 1024 * 1024, // 10MB parts
+        });
+
+        passThrough.end(file.buffer);
+        await s3Upload.done();
 
         // Generate thumbnail for images
         let thumbnailUrl: string | null = null;
-        if (file.mimetype.startsWith('image/')) {
+        if (file.mimetype.startsWith('image/') && file.size < 50 * 1024 * 1024) {
           const thumb = await sharp(file.buffer).resize(200, 200, { fit: 'cover' }).jpeg({ quality: 80 }).toBuffer();
           const thumbKey = `thumbnails/${req.user!.sub}/${fileId}_thumb.jpg`;
           await this.s3.send(new PutObjectCommand({
