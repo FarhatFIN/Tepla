@@ -1,6 +1,7 @@
 "use client";
 import { KeyboardEvent, useEffect, useRef, useState } from "react";
 import { useChatStore } from "@/stores/chat-store";
+import { useShallow } from "zustand/react/shallow";
 import IconButton from "@/components/ui/IconButton";
 import api from "@/lib/api";
 import { useTranslation } from "@/hooks/useTranslation";
@@ -54,7 +55,7 @@ export default function MessageInput({ chatId }: MessageInputProps) {
   const chunksRef = useRef<Blob[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const mediaInputRef = useRef<HTMLInputElement>(null);
-  const { sendMessage, replyingTo, editingMessage, setReplyingTo, setEditingMessage, toggleStickers, getDraft, setDraft } = useChatStore();
+  const { sendMessage, replyingTo, editingMessage, setReplyingTo, setEditingMessage, toggleStickers, getDraft, setDraft } = useChatStore(useShallow(s => ({ sendMessage: s.sendMessage, replyingTo: s.replyingTo, editingMessage: s.editingMessage, setReplyingTo: s.setReplyingTo, setEditingMessage: s.setEditingMessage, toggleStickers: s.toggleStickers, getDraft: s.getDraft, setDraft: s.setDraft })));
 
   useEffect(() => {
     const draft = getDraft(chatId);

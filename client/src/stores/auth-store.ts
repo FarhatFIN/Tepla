@@ -77,7 +77,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   user: null,
   token: null,
   isLoading: true,
-  language: "ru",
+  language: "en",
   savedAccounts: [],
   otpPending: null,
 
@@ -91,7 +91,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
           api.setToken(data.token);
           connectSocket(data.token);
           const u = applyOwnerFlags(data.user);
-          set({ user: u, token: data.token, language: data.language || "ru", isLoading: false, savedAccounts: accounts });
+          set({ user: u, token: data.token, language: data.language || "en", isLoading: false, savedAccounts: accounts });
           return;
         }
       } catch { /* corrupted */ }

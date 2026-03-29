@@ -3,6 +3,7 @@ import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useAuthStore } from "@/stores/auth-store";
 import { useChatStore } from "@/stores/chat-store";
+import { useShallow } from "zustand/react/shallow";
 import Sidebar from "@/components/layout/Sidebar";
 import ChatArea from "@/components/layout/ChatArea";
 import EmptyChat from "@/components/chat/EmptyChat";
@@ -17,7 +18,7 @@ import { useTranslation } from "@/hooks/useTranslation";
 
 export default function Home() {
   const { user, isLoading, hydrate } = useAuthStore();
-  const { chats, activeChatId, setActiveChat, messages, loadChats, bindSocket } = useChatStore();
+  const { chats, activeChatId, setActiveChat, messages, loadChats, bindSocket } = useChatStore(useShallow(s => ({ chats: s.chats, activeChatId: s.activeChatId, setActiveChat: s.setActiveChat, messages: s.messages, loadChats: s.loadChats, bindSocket: s.bindSocket })));
   const router = useRouter();
   const t = useTranslation();
   const { locked, unlock } = useAutoLock();

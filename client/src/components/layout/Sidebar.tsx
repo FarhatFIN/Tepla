@@ -5,12 +5,13 @@ import Avatar from "@/components/ui/Avatar";
 import IconButton from "@/components/ui/IconButton";
 import StoriesBar from "@/components/stories/StoriesBar";
 import { useChatStore } from "@/stores/chat-store";
+import { useShallow } from "zustand/react/shallow";
 import { useTheme } from "@/hooks/useTheme";
 import { useTranslation } from "@/hooks/useTranslation";
 import NewChatModal from "@/components/chat/NewChatModal";
 
 export default function Sidebar() {
-  const { chats, activeChatId, setActiveChat, folders, activeFolderId, setActiveFolder, stories, searchQuery, setSearchQuery, toggleSettings, togglePremium, toggleWallet, toggleWBIT } = useChatStore();
+  const { chats, activeChatId, setActiveChat, folders, activeFolderId, setActiveFolder, stories, searchQuery, setSearchQuery, toggleSettings, togglePremium, toggleWallet, toggleWBIT } = useChatStore(useShallow(s => ({ chats: s.chats, activeChatId: s.activeChatId, setActiveChat: s.setActiveChat, folders: s.folders, activeFolderId: s.activeFolderId, setActiveFolder: s.setActiveFolder, stories: s.stories, searchQuery: s.searchQuery, setSearchQuery: s.setSearchQuery, toggleSettings: s.toggleSettings, togglePremium: s.togglePremium, toggleWallet: s.toggleWallet, toggleWBIT: s.toggleWBIT })));
   const { theme, toggleTheme } = useTheme();
   const t = useTranslation();
   const [showNewChat, setShowNewChat] = useState(false);

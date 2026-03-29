@@ -1,7 +1,7 @@
 "use client";
 import { create } from "zustand";
 import { Chat, Message, ChatFolder, UserStories } from "@/types";
-import { mockFolders, mockStories } from "@/lib/mock-data";
+// Mock data removed — load from API
 import api from "@/lib/api";
 import { getSocket } from "@/lib/socket";
 import { useAuthStore } from "@/stores/auth-store";
@@ -152,9 +152,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
   messages: {},
   activeChatId: null,
   activeThreadId: null,
-  folders: mockFolders,
+  folders: [],
   activeFolderId: null,
-  stories: mockStories,
+  stories: [],
   searchQuery: "",
   replyingTo: null,
   editingMessage: null,

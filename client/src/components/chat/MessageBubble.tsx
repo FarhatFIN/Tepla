@@ -2,6 +2,7 @@
 import { memo, useRef, useState } from "react";
 import { Message, MessageStatus, MessageAttachment } from "@/types";
 import { useChatStore } from "@/stores/chat-store";
+import { useShallow } from "zustand/react/shallow";
 import { useTranslation } from "@/hooks/useTranslation";
 import { getSocket } from "@/lib/socket";
 import RichText from "./RichText";
@@ -189,7 +190,7 @@ export default memo(function MessageBubble({ message, isOwn, isFirstInGroup, isL
   const t = useTranslation();
   const [showActions, setShowActions] = useState(false);
   const [showReactions, setShowReactions] = useState(false);
-  const { addReaction, setReplyingTo, pinMessage, deleteMessage } = useChatStore();
+  const { addReaction, setReplyingTo, pinMessage, deleteMessage } = useChatStore(useShallow(s => ({ addReaction: s.addReaction, setReplyingTo: s.setReplyingTo, pinMessage: s.pinMessage, deleteMessage: s.deleteMessage })));
 
   const radiusOwn = `rounded-2xl ${isFirstInGroup ? "rounded-tr-sm" : ""} ${isLastInGroup ? "rounded-br-sm" : ""}`;
   const radiusOther = `rounded-2xl ${isFirstInGroup ? "rounded-tl-sm" : ""} ${isLastInGroup ? "rounded-bl-sm" : ""}`;
