@@ -1,5 +1,5 @@
 "use client";
-import { memo, useState, useCallback } from "react";
+import { memo, useState, useCallback, useMemo } from "react";
 import hljs from "highlight.js/lib/core";
 import javascript from "highlight.js/lib/languages/javascript";
 import typescript from "highlight.js/lib/languages/typescript";
@@ -11,6 +11,8 @@ import json from "highlight.js/lib/languages/json";
 import bash from "highlight.js/lib/languages/bash";
 import css from "highlight.js/lib/languages/css";
 import xml from "highlight.js/lib/languages/xml";
+
+import SafeHtml from "@/components/ui/SafeHtml";
 
 hljs.registerLanguage("javascript", javascript);
 hljs.registerLanguage("js", javascript);
@@ -43,12 +45,13 @@ function SpoilerSpan({ text }: { text: string }) {
 function CodeBlock({ code, language, isOwn }: { code: string; language: string; isOwn: boolean }) {
   const [copied, setCopied] = useState(false);
   const lang = language.toLowerCase().trim();
-  let highlighted: string;
-  try {
-    highlighted = lang && hljs.getLanguage(lang) ? hljs.highlight(code, { language: lang }).value : hljs.highlightAuto(code).value;
-  } catch {
-    highlighted = code.replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  }
+  const highlighted = useMemo(() => {
+    try {
+      return lang && hljs.getLanguage(lang) ? hljs.highlight(code, { language: lang }).value : hljs.highlightAuto(code).value;
+    } catch {
+      return code.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    }
+  }, [code, lang]);
   const copy = useCallback(() => {
     navigator.clipboard.writeText(code);
     setCopied(true);
@@ -63,7 +66,9 @@ function CodeBlock({ code, language, isOwn }: { code: string; language: string; 
           {copied ? "Copied!" : "Copy"}
         </button>
       </div>
-      <pre className="p-3 overflow-x-auto text-[13px] leading-relaxed"><code dangerouslySetInnerHTML={{ __html: highlighted }} /></pre>
+      <pre className="p-3 overflow-x-auto text-[13px] leading-relaxed">
+        <SafeHtml as="code" html={highlighted} />
+      </pre>
     </div>
   );
 }

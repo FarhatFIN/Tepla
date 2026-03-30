@@ -1,4 +1,4 @@
-import { Pool, QueryResult } from 'pg';
+import { Pool, PoolClient, QueryResult, QueryResultRow } from 'pg';
 import { createLogger, Logger } from './logger';
 
 export class BaseRepository {
@@ -17,7 +17,10 @@ export class BaseRepository {
     });
   }
 
-  protected async query<T>(sql: string, params?: unknown[]): Promise<QueryResult<T>> {
+  protected async query<T extends QueryResultRow = QueryResultRow>(
+    sql: string,
+    params?: unknown[]
+  ): Promise<QueryResult<T>> {
     const start = Date.now();
     try {
       const result = await this.pool.query<T>(sql, params);
@@ -37,12 +40,18 @@ export class BaseRepository {
     }
   }
 
-  protected async queryOne<T>(sql: string, params?: unknown[]): Promise<T | null> {
+  protected async queryOne<T extends QueryResultRow = QueryResultRow>(
+    sql: string,
+    params?: unknown[]
+  ): Promise<T | null> {
     const result = await this.query<T>(sql, params);
     return result.rows[0] || null;
   }
 
-  protected async queryMany<T>(sql: string, params?: unknown[]): Promise<T[]> {
+  protected async queryMany<T extends QueryResultRow = QueryResultRow>(
+    sql: string,
+    params?: unknown[]
+  ): Promise<T[]> {
     const result = await this.query<T>(sql, params);
     return result.rows;
   }
@@ -52,7 +61,7 @@ export class BaseRepository {
     return result.rowCount || 0;
   }
 
-  async transaction<T>(fn: (client: any) => Promise<T>): Promise<T> {
+  async transaction<T>(fn: (client: PoolClient) => Promise<T>): Promise<T> {
     const client = await this.pool.connect();
     try {
       await client.query('BEGIN');

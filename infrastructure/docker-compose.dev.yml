@@ -1,14 +1,4 @@
-##############################################
-# Tepla Messenger — Development overrides
-# Usage: docker compose -f docker-compose.yml -f docker-compose.dev.yml up
-##############################################
-
-version: '3.9'
-
 services:
-  # In dev mode, only start infrastructure
-  # Services run locally with `npm run dev`
-
   postgres:
     ports:
       - "5432:5432"
@@ -30,7 +20,12 @@ services:
       - "9000:9000"
       - "9001:9001"
 
-  # Kafka UI for development
+  livekit:
+    ports:
+      - "7880:7880"
+      - "7881:7881"
+      - "7882:7882/udp"
+
   kafka-ui:
     image: provectuslabs/kafka-ui:latest
     container_name: tepla-kafka-ui
@@ -44,7 +39,6 @@ services:
     networks:
       - tepla-network
 
-  # Redis Commander for development
   redis-commander:
     image: rediscommander/redis-commander:latest
     container_name: tepla-redis-commander

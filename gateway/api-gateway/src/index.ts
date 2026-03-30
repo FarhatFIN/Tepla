@@ -113,6 +113,9 @@ app.use('/api/v2/auth',
 const protectedMiddleware = [auth, securityMiddleware.userRateLimit(200), securityMiddleware.anomalyDetection()];
 
 app.use('/api/v2/users', ...protectedMiddleware, proxy(config.services.user, { '^/': '/api/users/' }));
+app.use('/api/v2/e2e', auth, securityMiddleware.userRateLimit(120), securityMiddleware.anomalyDetection(), proxy(config.services.user, { '^/': '/api/e2e/' }));
+app.use('/api/v2/kt/head', proxy(config.services.user, { '^/': '/api/kt/head' }));
+app.use('/api/v2/kt', auth, securityMiddleware.userRateLimit(60), securityMiddleware.anomalyDetection(), proxy(config.services.user, { '^/': '/api/kt/' }));
 app.use('/api/v2/chats', ...protectedMiddleware, proxy(config.services.chat, { '^/': '/api/chats/' }));
 app.use('/api/v2/messages', auth, securityMiddleware.userRateLimit(120), securityMiddleware.anomalyDetection(), proxy(config.services.message, { '^/': '/api/messages/' }));
 app.use('/api/v2/presence', ...protectedMiddleware, proxy(config.services.presence, { '^/': '/api/presence/' }));

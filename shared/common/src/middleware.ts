@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
+import crypto from 'crypto';
 import { JwtPayload, UserId } from '@tepla/types';
 import { UnauthorizedError, ForbiddenError } from './errors';
 import { RedisClient } from './redis';
@@ -19,7 +20,7 @@ declare global {
 
 // ─── JWT Auth Middleware ─────────────────────
 export function authMiddleware(jwtSecret?: string) {
-  const secret = jwtSecret || process.env.JWT_SECRET || 'tepla-secret';
+  const secret = jwtSecret || process.env.JWT_SECRET || 'tepla-jwt-secret-change-me';
 
   return (req: Request, _res: Response, next: NextFunction) => {
     const authHeader = req.headers.authorization;
@@ -69,7 +70,7 @@ export function premiumMiddleware(redis?: RedisClient) {
 export function correlationMiddleware() {
   return (req: Request, _res: Response, next: NextFunction) => {
     req.correlationId = (req.headers['x-correlation-id'] as string) ||
-      `${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
+      crypto.randomUUID();
     next();
   };
 }
