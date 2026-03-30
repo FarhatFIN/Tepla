@@ -1,42 +1,53 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Tepla Messenger
 
-## Getting Started
+Tepla is being migrated from an unstable split between a root Next.js backend and an oversized microservice mesh to a strict microservice-first topology.
 
-First, run the app with the custom backend server:
+## Default Runtime
+
+The default repo entrypoint is now the standalone frontend in [client](/C:/Users/user/Desktop/tepla/client).
 
 ```bash
+npm run infra:up
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+- `npm run infra:up` starts the simplified shared infrastructure from [docker-compose.yml](/C:/Users/user/Desktop/tepla/infrastructure/docker-compose.yml)
+- `npm run dev` starts the standalone frontend on `http://localhost:3080`
 
-This project uses a custom Node server in [server.mts](/C:/Users/user/Desktop/tepla/server.mts), so `npm run dev` starts both:
+## Legacy Runtime
 
-- the Next.js app
-- backend HTTP handling
-- Socket.IO on `/api/socket/io`
+The old root Next.js backend in [server.mts](/C:/Users/user/Desktop/tepla/server.mts) is now treated as a migration-only path.
 
-If you need plain Next.js development mode without the custom backend, use:
+Use it only if you explicitly need the previous runtime:
 
 ```bash
-npm run dev:next
+npm run dev:legacy-root
 ```
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+The previous all-in-one compose stack is preserved in [docker-compose.legacy.yml](/C:/Users/user/Desktop/tepla/infrastructure/docker-compose.legacy.yml).
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Commands
 
-## Learn More
+- `npm run dev` — start the standalone frontend
+- `npm run build` — build the standalone frontend
+- `npm run start` — start the built standalone frontend
+- `npm run lint` — lint the standalone frontend
+- `npm run infra:up` — start shared infrastructure
+- `npm run infra:down` — stop shared infrastructure
+- `npm run stack:legacy:up` — start the legacy 18-service stack
+- `npm run stack:legacy:down` — stop the legacy 18-service stack
 
-To learn more about Next.js, take a look at the following resources:
+## Target Architecture
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+Premium is intentionally excluded from the current consolidation wave.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+The target application topology is:
 
-## Deploy on Vercel
+1. `gateway/api-gateway`
+2. `services/auth-user-service`
+3. `services/messaging-service`
+4. `services/media-service`
+5. `services/realtime-service`
+6. `services/bot-platform-service` (optional when ElevenBot or mini apps are enabled)
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+The detailed ownership map and migration order live in [ARCHITECTURE_V3.md](/C:/Users/user/Desktop/tepla/docs/ARCHITECTURE_V3.md).

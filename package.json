@@ -3,11 +3,19 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "node server.mts",
-    "build": "next build",
-    "start": "set NODE_ENV=production&& node server.mts",
-    "dev:next": "next dev",
-    "lint": "next lint"
+    "dev": "npm --prefix client run dev",
+    "build": "npm --prefix client run build",
+    "start": "npm --prefix client run start",
+    "lint": "npm --prefix client run lint",
+    "infra:up": "docker compose -f infrastructure/docker-compose.yml -f infrastructure/docker-compose.dev.yml up -d",
+    "infra:down": "docker compose -f infrastructure/docker-compose.yml -f infrastructure/docker-compose.dev.yml down",
+    "stack:legacy:up": "docker compose -f infrastructure/docker-compose.legacy.yml up -d",
+    "stack:legacy:down": "docker compose -f infrastructure/docker-compose.legacy.yml down",
+    "dev:legacy-root": "node server.mts",
+    "build:legacy-root": "next build",
+    "start:legacy-root": "set NODE_ENV=production&& node server.mts",
+    "lint:legacy-root": "next lint",
+    "dev:next": "next dev"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1010.0",

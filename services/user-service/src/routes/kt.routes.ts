@@ -10,8 +10,8 @@
 
 import { Router, Request, Response, NextFunction } from 'express';
 import { BaseRepository, authMiddleware, ValidationError, NotFoundError, createLogger } from '@tepla/common';
-import { sha256 } from '@noble/hashes/sha256';
-import { bytesToHex, hexToBytes, concatBytes } from '@noble/hashes/utils';
+import { sha256 } from '@noble/hashes/sha2.js';
+import { bytesToHex, hexToBytes, concatBytes } from '@noble/hashes/utils.js';
 import * as ed from '@noble/ed25519';
 import {
   hashLeaf,
@@ -19,7 +19,7 @@ import {
   generateProof,
   createLeafData,
   type SignedTreeHead,
-} from '@tepla/crypto/merkle';
+} from '../../../../shared/crypto/src/merkle';
 
 const logger = createLogger('key-transparency');
 

@@ -7,8 +7,8 @@
  * npm: @noble/hashes (pure JS, audited, no native deps)
  */
 
-import { sha256 } from '@noble/hashes/sha256';
-import { bytesToHex, hexToBytes, concatBytes } from '@noble/hashes/utils';
+import { sha256 } from '@noble/hashes/sha2.js';
+import { bytesToHex, hexToBytes, concatBytes } from '@noble/hashes/utils.js';
 
 const LEAF_PREFIX = new Uint8Array([0x00]);
 const NODE_PREFIX = new Uint8Array([0x01]);

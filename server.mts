@@ -8,6 +8,9 @@ const app = next({ dev });
 const handle = app.getRequestHandler();
 
 void app.prepare().then(() => {
+  // eslint-disable-next-line no-console
+  console.warn("[legacy-runtime] server.mts is a migration-only entrypoint. Use the standalone client and microservices stack by default.");
+
   const server = createServer((req, res) => {
     const parsedUrl = parse(req.url ?? "", true);
     void handle(req, res, parsedUrl);
