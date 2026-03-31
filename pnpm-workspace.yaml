@@ -1,4 +1,5 @@
 packages:
   - 'shared/*'
   - 'services/*'
+  - 'services/workers/*'
   - 'gateway/*'

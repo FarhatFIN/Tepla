@@ -9,6 +9,15 @@ import { Upload } from '@aws-sdk/lib-storage';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { PassThrough } from 'stream';
 
+// Stickers module (formerly sticker-service)
+import { stickerRouter } from './modules/stickers/stickers.module';
+
+// GIFs module (formerly sticker-service gifs)
+import { gifRouter } from './modules/gifs/gifs.module';
+
+// Stories module (formerly stories-service)
+import { storiesRouter, StoryRepository, startStoryCleanup } from './modules/stories/stories.module';
+
 const logger = createLogger('media-service');
 
 class MediaService extends BaseService {
@@ -22,7 +31,7 @@ class MediaService extends BaseService {
     this.s3 = new S3Client({
       region: process.env.S3_REGION || 'us-east-1',
       endpoint: process.env.S3_ENDPOINT || undefined,
-      forcePathStyle: !!process.env.S3_ENDPOINT, // MinIO compatibility
+      forcePathStyle: !!process.env.S3_ENDPOINT,
       credentials: {
         accessKeyId: process.env.S3_ACCESS_KEY || '',
         secretAccessKey: process.env.S3_SECRET_KEY || '',
@@ -30,13 +39,13 @@ class MediaService extends BaseService {
     });
 
     const bucket = process.env.S3_BUCKET || 'tepla-media';
-    // Stream upload: multer only parses form metadata, file streams directly to S3
-    // No memoryStorage — prevents 4GB buffer in process memory
-    const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } }); // 50MB for thumbnails only
+    const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
     const router = Router();
     const auth = authMiddleware();
 
-    // POST /api/media/upload — stream large files directly to S3
+    // ─── Upload module (inline — original media-service logic) ──
+
+    // POST /api/media/upload
     router.post('/upload', auth, async (req: Request, res: Response, next: NextFunction) => {
       try {
         const isPremium = req.user!.isPremium;
@@ -50,7 +59,6 @@ class MediaService extends BaseService {
           });
         }
 
-        // Parse multipart with multer for small files (thumbnails), stream for large
         const multerSingle = upload.single('file');
         await new Promise<void>((resolve, reject) => {
           multerSingle(req, res, (err: any) => err ? reject(err) : resolve());
@@ -72,7 +80,6 @@ class MediaService extends BaseService {
         const ext = file.originalname.split('.').pop() || 'bin';
         const key = `uploads/${req.user!.sub}/${fileId}.${ext}`;
 
-        // Stream upload to S3 via @aws-sdk/lib-storage (multipart for large files)
         const passThrough = new PassThrough();
         const s3Upload = new Upload({
           client: this.s3,
@@ -83,13 +90,12 @@ class MediaService extends BaseService {
             ContentType: file.mimetype,
           },
           queueSize: 4,
-          partSize: 10 * 1024 * 1024, // 10MB parts
+          partSize: 10 * 1024 * 1024,
         });
 
         passThrough.end(file.buffer);
         await s3Upload.done();
 
-        // Generate thumbnail for images
         let thumbnailUrl: string | null = null;
         if (file.mimetype.startsWith('image/') && file.size < 50 * 1024 * 1024) {
           const thumb = await sharp(file.buffer).resize(200, 200, { fit: 'cover' }).jpeg({ quality: 80 }).toBuffer();
@@ -120,7 +126,7 @@ class MediaService extends BaseService {
       } catch (err) { next(err); }
     });
 
-    // GET /api/media/presigned-url — get presigned download URL
+    // GET /api/media/presigned-url
     router.get('/presigned-url', auth, async (req: Request, res: Response, next: NextFunction) => {
       try {
         const { key } = req.query;
@@ -138,7 +144,6 @@ class MediaService extends BaseService {
     // DELETE /api/media/:fileId
     router.delete('/:fileId', auth, async (req: Request, res: Response, next: NextFunction) => {
       try {
-        // TODO: verify ownership from DB
         const key = req.query.key as string;
         if (key) {
           await this.s3.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
@@ -147,18 +152,31 @@ class MediaService extends BaseService {
       } catch (err) { next(err); }
     });
 
-    // GET /api/media/storage-usage — check storage usage
+    // GET /api/media/storage-usage
     router.get('/storage-usage', auth, async (req: Request, res: Response, next: NextFunction) => {
       try {
         const isPremium = req.user!.isPremium;
         const limit = isPremium ? PREMIUM_LIMITS.cloudStorageTotal : FREE_LIMITS.cloudStorageTotal;
-        // TODO: calculate from DB
         res.json({ success: true, data: { used: 0, limit, remaining: limit } });
       } catch (err) { next(err); }
     });
 
     this.registerRoutes('/api/media', router);
-    this.logger.info('Media service ready');
+
+    // ─── Stickers module ────────────────────────
+    this.registerRoutes('/api/stickers', stickerRouter(this.redis!));
+
+    // ─── GIFs module ────────────────────────────
+    this.registerRoutes('/api/gifs', gifRouter(this.redis!));
+
+    // ─── Stories module ─────────────────────────
+    this.registerRoutes('/api/stories', storiesRouter(this.redis!, this.kafka!));
+    const storyRepo = new StoryRepository();
+    startStoryCleanup(storyRepo);
+
+    this.logger.info('Media service ready', {
+      modules: ['uploads', 'stickers', 'gifs', 'stories'],
+    });
   }
 }
 
