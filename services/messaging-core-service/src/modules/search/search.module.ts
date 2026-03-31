@@ -1,5 +1,4 @@
-import { KafkaConsumer, authMiddleware, createLogger } from '@tepla/common';
-import { EventTopic, EventType, DomainEvent } from '@tepla/types';
+import { authMiddleware, createLogger } from '@tepla/common';
 import { Client as ElasticClient } from '@elastic/elasticsearch';
 import { Router, Request, Response, NextFunction } from 'express';
 
@@ -86,66 +85,8 @@ export function searchRouter(elastic: ElasticClient): Router {
   return router;
 }
 
-/**
- * Sets up the Kafka consumer for indexing messages, users, and chats into Elasticsearch.
- * Uses a bulk buffer to batch ES writes for throughput.
- */
-export async function startSearchIndexer(elastic: ElasticClient): Promise<void> {
-  // ─── Bulk buffer: batch ES writes for throughput ───
-  const bulkBuffer: Array<{ action: object; doc?: object }> = [];
-  const BULK_MAX_SIZE = 100;
-  const BULK_FLUSH_MS = 500;
-  let bulkTimer: NodeJS.Timeout | null = null;
-
-  const flushBulk = async () => {
-    if (bulkBuffer.length === 0) return;
-    const ops = bulkBuffer.splice(0, bulkBuffer.length);
-    const body = ops.flatMap(op => op.doc ? [op.action, op.doc] : [op.action]);
-    try {
-      const result = await elastic.bulk({ body });
-      if (result.errors) {
-        const errors = result.items.filter((i: any) => i.index?.error || i.delete?.error);
-        logger.warn(`Bulk indexing: ${errors.length} errors in batch of ${ops.length}`);
-      }
-    } catch (err) {
-      logger.error('Bulk indexing failed', { error: (err as Error).message, count: ops.length });
-    }
-  };
-
-  const enqueueBulk = (action: object, doc?: object) => {
-    bulkBuffer.push({ action, doc });
-    if (bulkBuffer.length >= BULK_MAX_SIZE) {
-      if (bulkTimer) { clearTimeout(bulkTimer); bulkTimer = null; }
-      flushBulk();
-    } else if (!bulkTimer) {
-      bulkTimer = setTimeout(() => { bulkTimer = null; flushBulk(); }, BULK_FLUSH_MS);
-    }
-  };
-
-  // ─── Kafka Consumer: index new/updated messages ───
-  const consumer = new KafkaConsumer('search-svc', 'search-index-group');
-  await consumer.subscribe([EventTopic.MESSAGE_EVENTS, EventTopic.USER_EVENTS, EventTopic.CHAT_EVENTS]);
-
-  consumer.on(EventType.MESSAGE_SENT, async (event: DomainEvent) => {
-    const msg = event.payload as any;
-    enqueueBulk(
-      { index: { _index: 'tepla-messages', _id: msg.messageId } },
-      { messageId: msg.messageId, chatId: msg.chatId, senderId: msg.senderId, content: msg.content, type: msg.type, createdAt: msg.createdAt },
-    );
-  });
-
-  consumer.on(EventType.MESSAGE_DELETED, async (event: DomainEvent) => {
-    const { messageId } = event.payload as any;
-    enqueueBulk({ delete: { _index: 'tepla-messages', _id: messageId } });
-  });
-
-  consumer.on(EventType.USER_CREATED, async (event: DomainEvent) => {
-    // Index user (would need to fetch full profile)
-  });
-
-  await consumer.start();
-  logger.info('Search service ready (bulk indexing enabled)');
-}
+// NOTE: Search indexing (Kafka → Elasticsearch) is handled by the standalone search-worker.
+// This module only provides HTTP query endpoints for the messaging-core-service.
 
 /**
  * Ensures the required Elasticsearch indices exist, creating them if missing.

@@ -31,7 +31,8 @@
       "Bash(curl -s --max-time 10 -X POST http://localhost:3000/api/v2/auth/register/email -H \"Content-Type: application/json\" -d \"{\"\"email\"\":\"\"test7@test.com\"\",\"\"username\"\":\"\"testuser7\"\",\"\"password\"\":\"\"Test1234\"\",\"\"displayName\"\":\"\"Test7\"\"}\")",
       "Bash(curl -s --max-time 10 -X POST http://localhost:3000/api/v2/auth/login -H \"Content-Type: application/json\" -d \"{\"\"email\"\":\"\"test9@test.com\"\",\"\"password\"\":\"\"Test1234\"\"}\")",
       "Bash(curl -s --max-time 10 -X POST http://localhost:3001/api/auth/login -H \"Content-Type: application/json\" -d \"{\"\"email\"\":\"\"test9@test.com\"\",\"\"password\"\":\"\"Test1234\"\"}\")",
-      "Bash(curl -s http://localhost:3003/health)"
+      "Bash(curl -s http://localhost:3003/health)",
+      "Bash(__NEW_LINE_af37a60c2f140af3__ echo:*)"
     ]
   }
 }

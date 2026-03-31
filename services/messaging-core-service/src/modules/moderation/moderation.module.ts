@@ -1,5 +1,4 @@
-import { KafkaConsumer, KafkaProducer, authMiddleware, createLogger, BaseRepository } from '@tepla/common';
-import { EventTopic, EventType, DomainEvent } from '@tepla/types';
+import { KafkaProducer, authMiddleware, createLogger, BaseRepository } from '@tepla/common';
 import { Router, Request, Response, NextFunction } from 'express';
 import { v4 as uuid } from 'uuid';
 
@@ -71,33 +70,5 @@ export function moderationRouter(kafka: KafkaProducer): Router {
   return router;
 }
 
-/**
- * Sets up a Kafka consumer that listens for MESSAGE_SENT events
- * and auto-flags content that matches spam/abuse patterns.
- */
-export async function startAutoModeration(kafka: KafkaProducer): Promise<void> {
-  const consumer = new KafkaConsumer('moderation-svc', 'moderation-group');
-  await consumer.subscribe([EventTopic.MESSAGE_EVENTS]);
-
-  consumer.on(EventType.MESSAGE_SENT, async (event: DomainEvent) => {
-    const { content, senderId, chatId, messageId } = event.payload as any;
-    const flags = analyzeContent(content);
-
-    if (flags.length > 0) {
-      logger.warn('Content flagged', { messageId, senderId, flags });
-
-      await kafka.publish({
-        id: uuid(),
-        type: EventType.CONTENT_FLAGGED,
-        topic: EventTopic.MODERATION_EVENTS,
-        timestamp: new Date().toISOString(),
-        source: 'moderation-service',
-        correlationId: event.correlationId,
-        payload: { messageId, senderId, chatId, flags },
-      });
-    }
-  });
-
-  await consumer.start();
-  logger.info('Auto-moderation consumer ready');
-}
+// NOTE: Auto-moderation (Kafka consumer → content flagging) is handled by the standalone moderation-worker.
+// This module only provides HTTP report/admin endpoints for the messaging-core-service.
