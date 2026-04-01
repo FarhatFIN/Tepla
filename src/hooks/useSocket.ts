@@ -44,6 +44,15 @@ export const useSocket = (activeChatId: string | null) => {
 
     const handleMessageNew = (payload: { chatId: string; message: TeplaMessage }) => {
       upsertMessage(payload.chatId, toLocalMessage(payload.message));
+
+      // Send delivery ACK for messages from other users
+      if (payload.message.senderId !== currentUserId) {
+        socket.emit("message:ack", {
+          chatId: payload.chatId,
+          messageId: payload.message.id,
+          userId: currentUserId ?? "",
+        });
+      }
     };
 
     const handleMessageUpdated = (payload: { chatId: string; message: TeplaMessage }) => {

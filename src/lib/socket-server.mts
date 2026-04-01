@@ -40,6 +40,15 @@ export const initSocketServer = (
     socket.on("typing", (payload: { chatId: string; userId: string }) => {
       socket.to(payload.chatId).emit("typing", payload);
     });
+
+    socket.on("message:ack", (payload: { chatId: string; messageId: string; userId: string }) => {
+      // Notify sender that the message was delivered to a recipient
+      socket.to(payload.chatId).emit("message:delivered" as any, {
+        chatId: payload.chatId,
+        messageId: payload.messageId,
+        userId: payload.userId,
+      });
+    });
   });
 
   setSocketServer(io);

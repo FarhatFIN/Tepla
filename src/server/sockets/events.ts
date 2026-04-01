@@ -31,4 +31,5 @@ export type ClientToServerSocketEvents = {
   "presence:join": (roomId: string) => void;
   "presence:leave": (roomId: string) => void;
   typing: (payload: { chatId: string; userId: string }) => void;
+  "message:ack": (payload: { chatId: string; messageId: string; userId: string }) => void;
 };

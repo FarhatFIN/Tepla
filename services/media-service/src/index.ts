@@ -2,11 +2,18 @@ import { BaseService, authMiddleware, createLogger } from '@tepla/common';
 import { Router, Request, Response, NextFunction } from 'express';
 import multer from 'multer';
 import sharp from 'sharp';
+import ffmpeg from 'fluent-ffmpeg';
+import { path as ffmpegPath } from '@ffmpeg-installer/ffmpeg';
 import { v4 as uuid } from 'uuid';
 import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
 import { Upload } from '@aws-sdk/lib-storage';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
-import { PassThrough } from 'stream';
+import { PassThrough, Readable } from 'stream';
+import { writeFile, unlink, mkdtemp } from 'fs/promises';
+import { tmpdir } from 'os';
+import { join } from 'path';
+
+ffmpeg.setFfmpegPath(ffmpegPath);
 
 // Stickers module (formerly sticker-service)
 import { stickerRouter } from './modules/stickers/stickers.module';
@@ -18,6 +25,123 @@ import { gifRouter } from './modules/gifs/gifs.module';
 import { storiesRouter, StoryRepository, startStoryCleanup } from './modules/stories/stories.module';
 
 const logger = createLogger('media-service');
+
+// ─── Media processing helpers ────────────────────────
+
+/** Generate multiple thumbnail sizes for images */
+async function generateImageThumbnails(
+  buffer: Buffer,
+): Promise<{ size: string; data: Buffer; width: number; height: number }[]> {
+  const sizes = [
+    { name: 'sm', width: 100, height: 100 },
+    { name: 'md', width: 320, height: 320 },
+    { name: 'lg', width: 800, height: 800 },
+  ];
+
+  const results = await Promise.all(
+    sizes.map(async (s) => {
+      const thumb = await sharp(buffer)
+        .resize(s.width, s.height, { fit: 'inside', withoutEnlargement: true })
+        .webp({ quality: 80 })
+        .toBuffer();
+      return { size: s.name, data: thumb, width: s.width, height: s.height };
+    }),
+  );
+
+  return results;
+}
+
+/** Get image metadata (dimensions, format) */
+async function getImageMetadata(buffer: Buffer) {
+  const meta = await sharp(buffer).metadata();
+  return { width: meta.width ?? 0, height: meta.height ?? 0, format: meta.format ?? 'unknown' };
+}
+
+/** Strip EXIF data from images for privacy */
+async function stripExif(buffer: Buffer): Promise<Buffer> {
+  return sharp(buffer).rotate().toBuffer(); // rotate() auto-orients and strips EXIF
+}
+
+/** Extract video thumbnail at 1s mark */
+async function extractVideoThumbnail(inputPath: string): Promise<{ path: string; width: number; height: number }> {
+  const tmpDir = await mkdtemp(join(tmpdir(), 'tepla-'));
+  const outPath = join(tmpDir, 'thumb.jpg');
+
+  return new Promise((resolve, reject) => {
+    ffmpeg(inputPath)
+      .screenshots({
+        count: 1,
+        timemarks: ['00:00:01'],
+        folder: tmpDir,
+        filename: 'thumb.jpg',
+        size: '320x?',
+      })
+      .on('end', () => resolve({ path: outPath, width: 320, height: 0 }))
+      .on('error', reject);
+  });
+}
+
+/** Probe media file for duration, dimensions, codecs */
+function probeMedia(inputPath: string): Promise<{
+  duration: number;
+  width: number;
+  height: number;
+  codec: string;
+}> {
+  return new Promise((resolve, reject) => {
+    ffmpeg.ffprobe(inputPath, (err, data) => {
+      if (err) return reject(err);
+      const video = data.streams.find((s) => s.codec_type === 'video');
+      const audio = data.streams.find((s) => s.codec_type === 'audio');
+      resolve({
+        duration: Math.round(data.format.duration ?? 0),
+        width: video?.width ?? 0,
+        height: video?.height ?? 0,
+        codec: video?.codec_name ?? audio?.codec_name ?? 'unknown',
+      });
+    });
+  });
+}
+
+/** Generate waveform data for voice/audio messages (64 bars) */
+async function generateWaveform(inputPath: string): Promise<number[]> {
+  const tmpDir = await mkdtemp(join(tmpdir(), 'tepla-wave-'));
+  const rawPath = join(tmpDir, 'raw.pcm');
+
+  await new Promise<void>((resolve, reject) => {
+    ffmpeg(inputPath)
+      .audioFrequency(8000)
+      .audioChannels(1)
+      .format('s16le')
+      .output(rawPath)
+      .on('end', () => resolve())
+      .on('error', reject)
+      .run();
+  });
+
+  const { readFile } = await import('fs/promises');
+  const raw = await readFile(rawPath);
+  const samples = new Int16Array(raw.buffer, raw.byteOffset, raw.byteLength / 2);
+
+  const bars = 64;
+  const chunkSize = Math.max(1, Math.floor(samples.length / bars));
+  const waveform: number[] = [];
+
+  for (let i = 0; i < bars; i++) {
+    let sum = 0;
+    const start = i * chunkSize;
+    const end = Math.min(start + chunkSize, samples.length);
+    for (let j = start; j < end; j++) {
+      sum += Math.abs(samples[j]);
+    }
+    waveform.push(Math.round((sum / (end - start)) / 327.67)); // normalize to 0-100
+  }
+
+  // Cleanup
+  await unlink(rawPath).catch(() => {});
+
+  return waveform;
+}
 
 class MediaService extends BaseService {
   private s3!: S3Client;
@@ -95,19 +219,76 @@ class MediaService extends BaseService {
         await s3Upload.done();
 
         let thumbnailUrl: string | null = null;
-        if (file.mimetype.startsWith('image/') && file.size < 50 * 1024 * 1024) {
-          const thumb = await sharp(file.buffer).resize(200, 200, { fit: 'cover' }).jpeg({ quality: 80 }).toBuffer();
-          const thumbKey = `thumbnails/${req.user!.sub}/${fileId}_thumb.jpg`;
-          await this.s3.send(new PutObjectCommand({
-            Bucket: bucket,
-            Key: thumbKey,
-            Body: thumb,
-            ContentType: 'image/jpeg',
-          }));
-          thumbnailUrl = thumbKey;
+        let width: number | null = null;
+        let height: number | null = null;
+        let durationSeconds: number | null = null;
+        let waveform: number[] | null = null;
+        const thumbnails: Record<string, string> = {};
+        const baseUrl = process.env.S3_PUBLIC_URL || process.env.S3_ENDPOINT;
+
+        if (file.mimetype.startsWith('image/')) {
+          // Strip EXIF for privacy, get metadata, generate multi-size thumbnails
+          const cleanBuffer = await stripExif(file.buffer);
+          const meta = await getImageMetadata(cleanBuffer);
+          width = meta.width;
+          height = meta.height;
+
+          const thumbs = await generateImageThumbnails(cleanBuffer);
+          for (const thumb of thumbs) {
+            const thumbKey = `thumbnails/${req.user!.sub}/${fileId}_${thumb.size}.webp`;
+            await this.s3.send(new PutObjectCommand({
+              Bucket: bucket,
+              Key: thumbKey,
+              Body: thumb.data,
+              ContentType: 'image/webp',
+            }));
+            thumbnails[thumb.size] = `${baseUrl}/${bucket}/${thumbKey}`;
+          }
+          thumbnailUrl = thumbnails['md'] || thumbnails['sm'] || null;
+
+        } else if (file.mimetype.startsWith('video/') || file.mimetype.startsWith('audio/')) {
+          // Write to temp file for ffmpeg processing
+          const tmpDir = await mkdtemp(join(tmpdir(), 'tepla-upload-'));
+          const tmpPath = join(tmpDir, `input.${ext}`);
+          await writeFile(tmpPath, file.buffer);
+
+          try {
+            const probe = await probeMedia(tmpPath);
+            durationSeconds = probe.duration;
+            width = probe.width || null;
+            height = probe.height || null;
+
+            if (file.mimetype.startsWith('video/')) {
+              // Extract video thumbnail
+              try {
+                const videoThumb = await extractVideoThumbnail(tmpPath);
+                const { readFile: rf } = await import('fs/promises');
+                const thumbData = await rf(videoThumb.path);
+                const thumbKey = `thumbnails/${req.user!.sub}/${fileId}_thumb.jpg`;
+                await this.s3.send(new PutObjectCommand({
+                  Bucket: bucket, Key: thumbKey, Body: thumbData, ContentType: 'image/jpeg',
+                }));
+                thumbnailUrl = `${baseUrl}/${bucket}/${thumbKey}`;
+                await unlink(videoThumb.path).catch(() => {});
+              } catch {
+                logger.warn('Failed to extract video thumbnail', { fileId });
+              }
+            }
+
+            if (file.mimetype.startsWith('audio/') || file.mimetype === 'audio/ogg' || file.mimetype === 'audio/webm') {
+              // Generate waveform for voice/audio
+              try {
+                waveform = await generateWaveform(tmpPath);
+              } catch {
+                logger.warn('Failed to generate waveform', { fileId });
+              }
+            }
+          } finally {
+            await unlink(tmpPath).catch(() => {});
+          }
         }
 
-        const url = `${process.env.S3_PUBLIC_URL || process.env.S3_ENDPOINT}/${bucket}/${key}`;
+        const url = `${baseUrl}/${bucket}/${key}`;
 
         res.status(201).json({
           success: true,
@@ -115,10 +296,15 @@ class MediaService extends BaseService {
             id: fileId,
             url,
             thumbnailUrl,
+            thumbnails,
             key,
             mimeType: file.mimetype,
             sizeBytes: file.size,
             fileName: file.originalname,
+            width,
+            height,
+            durationSeconds,
+            waveform,
           },
         });
       } catch (err) { next(err); }

@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import useSWR from "swr";
 import useSWRInfinite from "swr/infinite";
 import { v4 as uuidv4 } from "uuid";
@@ -6,7 +6,8 @@ import type { ChatId } from "@/types/chat";
 import type { MessageAttachment, MessageReaction, TeplaMessage } from "@/types/message";
 import { useChatStore, type LocalMessage } from "@/stores/chat.store";
 import { useAuthStore } from "@/stores/auth.store";
-import { getTeplaSocket } from "@/lib/socket";
+import { getTeplaSocket, onConnectionChange } from "@/lib/socket";
+import { offlineQueue } from "@/lib/offline-queue";
 import {
   buildDemoReply,
   DEMO_CURRENT_USER,
@@ -145,6 +146,47 @@ export const useMessages = (chatId: ChatId | null) => {
       pinnedData.pinnedMessages.map((message) => toLocalMessage(message, currentUserId)),
     );
   }, [applyPinnedMessages, chatId, currentUserId, demoMode, pinnedData]);
+
+  // Re-fetch messages and flush offline queue on reconnect
+  const mutateRef = useRef(mutate);
+  mutateRef.current = mutate;
+
+  useEffect(() => {
+    if (demoMode || !chatId) return;
+
+    const unsubscribe = onConnectionChange((connected) => {
+      if (!connected) return;
+
+      // Reconnected — re-fetch to catch up on missed messages
+      void mutateRef.current();
+
+      // Flush queued offline messages
+      void offlineQueue.flush(async (queued) => {
+        try {
+          const response = await fetch("/api/messages", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(queued.payload),
+          });
+
+          if (!response.ok) return false;
+
+          const data = (await response.json()) as { message: TeplaMessage };
+          const { replaceOptimistic: replace } = useChatStore.getState();
+          replace(
+            queued.chatId,
+            queued.id,
+            toLocalMessage(data.message, currentUserId, "sent"),
+          );
+          return true;
+        } catch {
+          return false;
+        }
+      });
+    });
+
+    return unsubscribe;
+  }, [chatId, currentUserId, demoMode]);
 
   const emitTyping = (targetChatId: ChatId, draft: string) => {
     if (!draft.trim()) {
@@ -294,8 +336,20 @@ export const useMessages = (chatId: ChatId | null) => {
         toLocalMessage(payload.message, currentUserId, "sent"),
       );
     } catch {
+      // Queue for retry instead of permanent failure
       updateMessageStatus(params.chatId, localId, "error");
-      throw new Error("Failed to send message.");
+      void offlineQueue.enqueue(localId, params.chatId, {
+        chatId: params.chatId,
+        senderId: currentUserId,
+        clientMessageId,
+        content: params.encryptedContent?.trim() ?? "",
+        contentIv: params.contentIv ?? null,
+        encryptedKeys: params.encryptedKeys ?? {},
+        type: params.type,
+        replyToMessageId: params.replyToMessageId ?? null,
+        entities: params.entities ?? null,
+        attachments: params.attachments ?? [],
+      });
     }
   };
 
