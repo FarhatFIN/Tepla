@@ -112,7 +112,7 @@ export function notificationRouter(): Router {
 export async function startNotificationConsumer(kafka: any): Promise<void> {
   const repo = new PushRepository();
   const consumer = new KafkaConsumer('notification-svc', 'notification-group');
-  await consumer.subscribe([EventTopic.MESSAGE_EVENTS, EventTopic.CHAT_EVENTS, EventTopic.PREMIUM_EVENTS]);
+  await consumer.subscribe([EventTopic.MESSAGE_EVENTS, EventTopic.CHAT_EVENTS]);
 
   consumer.on(EventType.MESSAGE_SENT, async (event: DomainEvent) => {
     const { chatId, senderId, content, type } = event.payload as any;
@@ -123,18 +123,6 @@ export async function startNotificationConsumer(kafka: any): Promise<void> {
         title: member.chatName || 'New message',
         body: type === 'text' ? content.substring(0, 100) : `[${type}]`,
         data: { chatId, messageId: (event.payload as any).messageId },
-      });
-    }
-  });
-
-  consumer.on(EventType.SUBSCRIPTION_CREATED, async (event: DomainEvent) => {
-    const { userId } = event.payload as any;
-    const subs = await repo.getUserSubscriptions(userId);
-    for (const sub of subs) {
-      await sendPush(sub.subscription, {
-        title: 'Welcome to Tepla Premium! \u{1F389}',
-        body: 'Enjoy all premium features',
-        data: { type: 'premium_activated' },
       });
     }
   });

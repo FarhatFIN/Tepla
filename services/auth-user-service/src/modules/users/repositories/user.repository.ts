@@ -11,7 +11,7 @@ export class UserRepository extends BaseRepository {
 
   async search(query: string, limit: number): Promise<any[]> {
     const sql = `
-      SELECT id, username, display_name, avatar_url, bio, is_online, is_verified, is_premium, last_seen
+      SELECT id, username, display_name, avatar_url, bio, is_online, is_verified, last_seen
       FROM users
       WHERE username ILIKE $1 OR display_name ILIKE $1
       ORDER BY
@@ -30,7 +30,6 @@ export class UserRepository extends BaseRepository {
       bio: r.bio,
       isOnline: r.is_online,
       isVerified: r.is_verified,
-      isPremium: r.is_premium,
       lastSeen: r.last_seen,
     }));
   }
@@ -63,7 +62,7 @@ export class UserRepository extends BaseRepository {
   async getContacts(userId: string): Promise<any[]> {
     return this.queryMany(
       `SELECT c.contact_user_id, c.is_blocked, c.nickname, c.created_at,
-              u.username, u.display_name, u.avatar_url, u.bio, u.is_online, u.last_seen, u.is_premium
+              u.username, u.display_name, u.avatar_url, u.bio, u.is_online, u.last_seen
        FROM contacts c JOIN users u ON u.id = c.contact_user_id
        WHERE c.user_id = $1 ORDER BY u.display_name, u.username`,
       [userId]

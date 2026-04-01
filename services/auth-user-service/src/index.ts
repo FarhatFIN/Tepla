@@ -28,7 +28,6 @@ class AuthUserService extends BaseService {
       contacts: true,
       e2eKeys: true,
       keyTransparency: true,
-      premium: false,
     });
   }
 }

@@ -1,12 +1,12 @@
 import { Chat, Message, ChatFolder, UserStories } from "@/types";
 
 const users = [
-  { id: "2", name: "Anna", username: "anna", status: "offline" as const, lastSeen: "yesterday 23:15", isPremium: true },
+  { id: "2", name: "Anna", username: "anna", status: "offline" as const, lastSeen: "yesterday 23:15" },
   { id: "3", name: "Dmitry", username: "dmitry_dev", status: "online" as const, bio: "Backend developer" },
   { id: "4", name: "Maria", username: "maria_design", status: "offline" as const, lastSeen: "today 09:30" },
   { id: "5", name: "Tepla Team", status: "offline" as const },
   { id: "6", name: "Sergey", username: "sergey", status: "offline" as const, lastSeen: "2 hours ago" },
-  { id: "7", name: "Ekaterina", username: "kate_qa", status: "online" as const, isPremium: true },
+  { id: "7", name: "Ekaterina", username: "kate_qa", status: "online" as const },
   { id: "8", name: "Alex Bot", username: "alex_bot", status: "online" as const },
 ];
 

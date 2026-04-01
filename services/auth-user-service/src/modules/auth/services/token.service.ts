@@ -6,7 +6,6 @@ import { RedisClient } from '@tepla/common';
 interface TokenInput {
   sub: UserId;
   username: string;
-  isPremium: boolean;
 }
 
 export class TokenService {
@@ -26,7 +25,6 @@ export class TokenService {
       {
         sub: input.sub,
         username: input.username,
-        isPremium: input.isPremium,
         jti,
       },
       this.jwtSecret,

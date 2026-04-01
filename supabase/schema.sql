@@ -28,7 +28,6 @@ create table if not exists public.users (
   last_seen timestamptz,
   is_online boolean default false,
   is_verified boolean default false,
-  is_premium boolean default false,
   password_hash text,
   public_key text not null,
   signing_public_key text not null,
@@ -331,18 +330,6 @@ create table if not exists public.folders (
   chat_ids uuid[],
   position int default 0,
   created_at timestamptz default now()
-);
-
--- PREMIUM SUBSCRIPTIONS ------------------------------------------------------
-
-create table if not exists public.subscriptions (
-  id uuid primary key default gen_random_uuid(),
-  user_id uuid references public.users(id) on delete cascade,
-  plan varchar(20) not null, -- monthly, yearly, lifetime
-  status varchar(20) default 'active',
-  stripe_subscription_id text,
-  started_at timestamptz default now(),
-  expires_at timestamptz
 );
 
 -- SPARKS ----------------------------------------------------------------------
@@ -665,10 +652,6 @@ create index if not exists idx_saved_tags_message_id on public.saved_tags (messa
 -- Folders
 create index if not exists idx_folders_user_id on public.folders (user_id);
 
--- Subscriptions
-create index if not exists idx_subscriptions_user_id on public.subscriptions (user_id);
-create index if not exists idx_subscriptions_status on public.subscriptions (status);
-
 -- Sparks
 create index if not exists idx_sparks_wallet_balance on public.sparks_wallet (balance desc);
 create index if not exists idx_sparks_transactions_from_user_id on public.sparks_transactions (from_user_id);
@@ -717,7 +700,6 @@ alter table public.scheduled_messages enable row level security;
 alter table public.saved_tags enable row level security;
 alter table public.user_settings enable row level security;
 alter table public.folders enable row level security;
-alter table public.subscriptions enable row level security;
 alter table public.sparks_wallet enable row level security;
 alter table public.sparks_transactions enable row level security;
 alter table public.payments enable row level security;
@@ -1147,13 +1129,6 @@ create policy "folders_upsert_own"
   for all
   using (user_id = auth.uid())
   with check (user_id = auth.uid());
-
--- SUBSCRIPTIONS --------------------------------------------------------------
-
-create policy "subscriptions_select_own"
-  on public.subscriptions
-  for select
-  using (user_id = auth.uid());
 
 create policy "sparks_wallet_select_own"
   on public.sparks_wallet

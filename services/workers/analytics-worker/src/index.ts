@@ -1,7 +1,7 @@
 /**
  * Analytics Worker — Kafka consumer that aggregates metrics from all event topics.
  *
- * Consumes: MESSAGE_EVENTS, USER_EVENTS, CHAT_EVENTS, PRESENCE_EVENTS, PREMIUM_EVENTS
+ * Consumes: MESSAGE_EVENTS, USER_EVENTS, CHAT_EVENTS, PRESENCE_EVENTS
  * Writes to: Redis (DAU sets, counters)
  *
  * Pure aggregation — no mutations, no HTTP endpoints.
@@ -22,7 +22,6 @@ async function start(): Promise<void> {
     EventTopic.USER_EVENTS,
     EventTopic.CHAT_EVENTS,
     EventTopic.PRESENCE_EVENTS,
-    EventTopic.PREMIUM_EVENTS,
   ]);
 
   const today = () => new Date().toISOString().slice(0, 10);
@@ -61,18 +60,6 @@ async function start(): Promise<void> {
        redis.call('EXPIRE', KEYS[1], 172800)
        return 1`,
       [`analytics:new_users:${today()}`],
-      []
-    );
-  });
-
-  // Premium activations
-  consumer.on(EventType.SUBSCRIPTION_CREATED, async (event: DomainEvent) => {
-    await trackDAU(event);
-    await redis.eval(
-      `redis.call('INCR', KEYS[1])
-       redis.call('EXPIRE', KEYS[1], 172800)
-       return 1`,
-      [`analytics:premium:${today()}`],
       []
     );
   });

@@ -13,7 +13,7 @@ export { ServiceRegistry } from './service-registry';
 export { CircuitBreaker } from './circuit-breaker';
 export { RateLimiter } from './rate-limiter';
 export { errorHandler, AppError, NotFoundError, UnauthorizedError, ForbiddenError, ValidationError, ConflictError } from './errors';
-export { authMiddleware, premiumMiddleware, correlationMiddleware, requestLoggerMiddleware, rateLimitMiddleware } from './middleware';
+export { authMiddleware, correlationMiddleware, requestLoggerMiddleware, rateLimitMiddleware } from './middleware';
 export { healthCheck } from './health';
 export { gracefulShutdown } from './shutdown';
 export { slidingWindowLimiter, RATE_LIMITS, type RateLimitConfig } from './sliding-window-limiter';

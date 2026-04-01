@@ -36,11 +36,11 @@ class WebAppRepository extends BaseRepository {
   async create(app: WebApp): Promise<WebApp> {
     await this.execute(
       `INSERT INTO webapps (id, developer_id, bot_id, name, short_name, description, icon_url,
-        url, category, screenshots, is_published, is_premium_only, permissions, created_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,NOW())`,
+        url, category, screenshots, is_published, permissions, created_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,NOW())`,
       [app.id, app.developerId, app.botId, app.name, app.shortName, app.description,
        app.iconUrl, app.url, app.category, JSON.stringify(app.screenshots),
-       app.isPublished, app.isPremiumOnly, JSON.stringify(app.permissions)]
+       app.isPublished, JSON.stringify(app.permissions)]
     );
     return app;
   }
@@ -95,7 +95,6 @@ class WebAppRepository extends BaseRepository {
     if (fields.category !== undefined) { sets.push(`category = $${i++}`); vals.push(fields.category); }
     if (fields.screenshots !== undefined) { sets.push(`screenshots = $${i++}`); vals.push(JSON.stringify(fields.screenshots)); }
     if (fields.isPublished !== undefined) { sets.push(`is_published = $${i++}`); vals.push(fields.isPublished); }
-    if (fields.isPremiumOnly !== undefined) { sets.push(`is_premium_only = $${i++}`); vals.push(fields.isPremiumOnly); }
     if (fields.permissions !== undefined) { sets.push(`permissions = $${i++}`); vals.push(JSON.stringify(fields.permissions)); }
     if (sets.length === 0) return;
     vals.push(id);
@@ -136,7 +135,6 @@ class WebAppRepository extends BaseRepository {
       category: row.category as WebAppCategory,
       screenshots: row.screenshots || [],
       isPublished: row.is_published,
-      isPremiumOnly: row.is_premium_only,
       installCount: row.install_count || 0,
       rating: parseFloat(row.rating) || 0,
       permissions: row.permissions || [],
@@ -234,7 +232,7 @@ class WebAppService {
     // ── Developer: Create webapp ──
     this.app.post('/api/webapps', authMiddleware(), async (req, res, next) => {
       try {
-        const { name, shortName, description, url, category, botId, isPremiumOnly, permissions } = req.body;
+        const { name, shortName, description, url, category, botId, permissions } = req.body;
         const existing = await this.webappRepo.findByShortName(shortName);
         if (existing) throw new AppError('Short name already taken', 409);
 
@@ -249,7 +247,6 @@ class WebAppService {
           category: category || WebAppCategory.OTHER,
           screenshots: [],
           isPublished: false,
-          isPremiumOnly: isPremiumOnly || false,
           installCount: 0,
           rating: 0,
           permissions: permissions || [],
@@ -323,7 +320,6 @@ class WebAppService {
       try {
         const app = await this.webappRepo.findById(req.params.id as WebAppId);
         if (!app) throw new AppError('Not found', 404);
-        if (app.isPremiumOnly && !req.user!.isPremium) throw new AppError('Premium required', 403);
 
         await this.webappRepo.incrementInstall(app.id);
 
@@ -333,7 +329,6 @@ class WebAppService {
           user: {
             id: req.user!.sub,
             username: req.user!.username,
-            is_premium: req.user!.isPremium,
           },
           auth_date: Math.floor(Date.now() / 1000),
           hash: crypto.createHmac('sha256', process.env.JWT_SECRET || 'dev-secret')

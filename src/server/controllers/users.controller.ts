@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 import { usersService } from "@/server/services/users.service";
-import { subscriptionsService } from "@/server/services/subscriptions.service";
 import { parseLimit } from "@/server/validation/validators";
 
 export const usersController = {
@@ -59,18 +58,4 @@ export const usersController = {
     }
   },
 
-  async activatePremium(_request: Request, context: { params: { userId: string } }) {
-    try {
-      const result = await subscriptionsService.renewSubscription({
-        userId: context.params.userId,
-        plan: "monthly",
-      });
-      return NextResponse.json(result, { status: 200 });
-    } catch (error) {
-      return NextResponse.json(
-        { error: error instanceof Error ? error.message : "Failed to activate premium." },
-        { status: 400 },
-      );
-    }
-  },
 };

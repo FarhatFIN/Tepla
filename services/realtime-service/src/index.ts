@@ -216,14 +216,10 @@ async function start() {
     io.to(`chat:${chatId}`).emit('chat:member_left', { chatId, userId });
   });
 
-  // 4. USER_EVENTS + PREMIUM_EVENTS
+  // 4. USER_EVENTS
   const userConsumer = new KafkaConsumer('rt-svc-user', 'rt-svc-users');
-  await userConsumer.subscribe([EventTopic.USER_EVENTS, EventTopic.PREMIUM_EVENTS]);
+  await userConsumer.subscribe([EventTopic.USER_EVENTS]);
 
-  userConsumer.on(EventType.SUBSCRIPTION_CREATED, async (event: DomainEvent) => {
-    const { userId } = event.payload as any;
-    io.to(`user:${userId}`).emit('premium:activated', event.payload);
-  });
   userConsumer.on(EventType.USER_UPDATED, async (event: DomainEvent) => {
     const { userId, fields } = event.payload as any;
     io.to(`user:${userId}`).emit('user:updated', event.payload);

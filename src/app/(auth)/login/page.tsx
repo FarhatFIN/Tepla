@@ -143,7 +143,6 @@ export default function LoginPage() {
           username: string;
           displayName: string | null;
           avatarUrl: string | null;
-          isPremium: boolean;
           language: string;
           birthDate: string | null;
           usernameColor: string | null;

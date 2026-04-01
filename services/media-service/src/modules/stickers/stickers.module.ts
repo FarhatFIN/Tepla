@@ -19,9 +19,9 @@ import {
 export class StickerRepository extends BaseRepository {
   async createPack(pack: StickerPack): Promise<StickerPack> {
     await this.execute(
-      `INSERT INTO sticker_packs (id, name, title, creator_id, type, thumbnail_url, is_official, is_premium, created_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,NOW())`,
-      [pack.id, pack.name, pack.title, pack.creatorId, pack.type, pack.thumbnailUrl, pack.isOfficial, pack.isPremium]
+      `INSERT INTO sticker_packs (id, name, title, creator_id, type, thumbnail_url, is_official, created_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,NOW())`,
+      [pack.id, pack.name, pack.title, pack.creatorId, pack.type, pack.thumbnailUrl, pack.isOfficial]
     );
     return pack;
   }
@@ -174,7 +174,6 @@ export class StickerRepository extends BaseRepository {
       thumbnailUrl: row.thumbnail_url,
       stickers: stickerRows.map(s => this.mapSticker(s)),
       isOfficial: row.is_official,
-      isPremium: row.is_premium,
       installCount: row.install_count || 0,
       createdAt: row.created_at,
     };
@@ -214,7 +213,6 @@ export function stickerRouter(redis: RedisClient): Router {
         thumbnailUrl: thumbnailUrl || null,
         stickers: [],
         isOfficial: false,
-        isPremium: false,
         installCount: 0,
         createdAt: new Date().toISOString(),
       });

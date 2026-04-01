@@ -8,7 +8,7 @@ export type UserId = string & { readonly __brand: 'UserId' };
 export type ChatId = string & { readonly __brand: 'ChatId' };
 export type MessageId = string & { readonly __brand: 'MessageId' };
 export type FileId = string & { readonly __brand: 'FileId' };
-export type SubscriptionId = string & { readonly __brand: 'SubscriptionId' };
+
 export type SessionId = string & { readonly __brand: 'SessionId' };
 export type CallId = string & { readonly __brand: 'CallId' };
 export type BotId = string & { readonly __brand: 'BotId' };
@@ -57,21 +57,6 @@ export enum MessageType {
   SCHEDULED = 'scheduled',
 }
 
-export enum SubscriptionPlan {
-  FREE = 'free',
-  MONTHLY = 'monthly',
-  QUARTERLY = 'quarterly',
-  SEMIANNUAL = 'semiannual',
-  YEARLY = 'yearly',
-}
-
-export enum SubscriptionStatus {
-  ACTIVE = 'active',
-  CANCELLED = 'cancelled',
-  EXPIRED = 'expired',
-  PAST_DUE = 'past_due',
-  TRIALING = 'trialing',
-}
 
 export enum DeliveryStatus {
   SENDING = 'sending',
@@ -106,7 +91,6 @@ export interface User {
   lastSeen: string | null;
   isOnline: boolean;
   isVerified: boolean;
-  isPremium: boolean;
   publicKey: string;
   signingPublicKey: string;
   language: string;
@@ -121,7 +105,6 @@ export interface UserProfile {
   bio: string | null;
   isOnline: boolean;
   isVerified: boolean;
-  isPremium: boolean;
   lastSeen: string | null;
 }
 
@@ -233,67 +216,6 @@ export interface MessageReaction {
   reacted: boolean;
 }
 
-// ─── Premium / Subscription ─────────────────
-export interface Subscription {
-  id: SubscriptionId;
-  userId: UserId;
-  plan: SubscriptionPlan;
-  status: SubscriptionStatus;
-  paddleSubscriptionId: string | null;
-  startedAt: string;
-  expiresAt: string | null;
-  cancelledAt: string | null;
-  createdAt: string;
-}
-
-export interface PremiumLimits {
-  maxFileSize: number;          // bytes
-  cloudStorageTotal: number;    // bytes
-  maxPinnedChats: number;
-  maxBioLength: number;
-  maxCaptionLength: number;
-  customEmoji: boolean;
-  premiumStickers: boolean;
-  advancedSearch: boolean;
-  priorityServers: boolean;
-  uniqueProfiles: boolean;
-  animatedAvatars: boolean;
-  voiceStatuses: boolean;
-  translationLimit: number;     // per day
-}
-
-export const FREE_LIMITS: PremiumLimits = {
-  maxFileSize: 50 * 1024 * 1024,          // 50 MB
-  cloudStorageTotal: 1024 * 1024 * 1024,  // 1 GB
-  maxPinnedChats: 5,
-  maxBioLength: 140,
-  maxCaptionLength: 1024,
-  customEmoji: false,
-  premiumStickers: false,
-  advancedSearch: false,
-  priorityServers: false,
-  uniqueProfiles: false,
-  animatedAvatars: false,
-  voiceStatuses: false,
-  translationLimit: 5,
-};
-
-export const PREMIUM_LIMITS: PremiumLimits = {
-  maxFileSize: 4 * 1024 * 1024 * 1024,     // 4 GB
-  cloudStorageTotal: 100 * 1024 * 1024 * 1024, // 100 GB
-  maxPinnedChats: 100,
-  maxBioLength: 500,
-  maxCaptionLength: 4096,
-  customEmoji: true,
-  premiumStickers: true,
-  advancedSearch: true,
-  priorityServers: true,
-  uniqueProfiles: true,
-  animatedAvatars: true,
-  voiceStatuses: true,
-  translationLimit: -1, // unlimited
-};
-
 // ─── Sparks (Virtual Currency) ──────────────
 export interface SparksWallet {
   userId: UserId;
@@ -329,7 +251,7 @@ export enum EventTopic {
   MESSAGE_EVENTS = 'tepla.message.events',
   PRESENCE_EVENTS = 'tepla.presence.events',
   NOTIFICATION_EVENTS = 'tepla.notification.events',
-  PREMIUM_EVENTS = 'tepla.premium.events',
+
   MEDIA_EVENTS = 'tepla.media.events',
   ANALYTICS_EVENTS = 'tepla.analytics.events',
   MODERATION_EVENTS = 'tepla.moderation.events',
@@ -346,7 +268,6 @@ export enum EventType {
   USER_DELETED = 'user.deleted',
   USER_LOGGED_IN = 'user.logged_in',
   USER_LOGGED_OUT = 'user.logged_out',
-  USER_PREMIUM_CHANGED = 'user.premium_changed',
 
   // Chat
   CHAT_CREATED = 'chat.created',
@@ -372,12 +293,6 @@ export enum EventType {
   USER_ONLINE = 'presence.online',
   USER_OFFLINE = 'presence.offline',
   USER_TYPING = 'presence.typing',
-
-  // Premium
-  SUBSCRIPTION_CREATED = 'premium.subscription_created',
-  SUBSCRIPTION_RENEWED = 'premium.subscription_renewed',
-  SUBSCRIPTION_CANCELLED = 'premium.subscription_cancelled',
-  SUBSCRIPTION_EXPIRED = 'premium.subscription_expired',
 
   // Media
   MEDIA_UPLOADED = 'media.uploaded',
@@ -470,7 +385,6 @@ export interface AuthTokens {
 export interface JwtPayload {
   sub: UserId;
   username: string;
-  isPremium: boolean;
   iat: number;
   exp: number;
   jti: string;
@@ -730,7 +644,6 @@ export interface StickerPack {
   thumbnailUrl: string | null;
   stickers: Sticker[];
   isOfficial: boolean;
-  isPremium: boolean;
   installCount: number;
   createdAt: string;
 }
@@ -794,7 +707,6 @@ export interface WebApp {
   category: WebAppCategory;
   screenshots: string[];
   isPublished: boolean;
-  isPremiumOnly: boolean;
   installCount: number;
   rating: number;
   permissions: WebAppPermission[];

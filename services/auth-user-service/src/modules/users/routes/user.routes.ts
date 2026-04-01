@@ -99,14 +99,6 @@ export function userRouter(redis: RedisClient, kafka: KafkaProducer): Router {
         }
       }
 
-      // Premium-only fields
-      const premiumFields = ['usernameColor', 'animatedAvatarEnabled', 'voiceStatusUrl'];
-      for (const field of premiumFields) {
-        if (req.body[field] !== undefined && !req.user!.isPremium) {
-          throw new ForbiddenError(`${field} requires Premium subscription`);
-        }
-      }
-
       if (Object.keys(updates).length === 0) {
         throw new ValidationError('No valid fields to update');
       }
@@ -219,7 +211,6 @@ function mapProfile(row: any) {
     statusText: row.status_text,
     isOnline: row.is_online,
     isVerified: row.is_verified,
-    isPremium: row.is_premium,
     lastSeen: row.last_seen,
     language: row.language,
     publicKey: row.public_key,

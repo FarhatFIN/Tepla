@@ -10,9 +10,6 @@ export type MessageId = string & {
 export type FileId = string & {
     readonly __brand: 'FileId';
 };
-export type SubscriptionId = string & {
-    readonly __brand: 'SubscriptionId';
-};
 export type SessionId = string & {
     readonly __brand: 'SessionId';
 };
@@ -74,20 +71,6 @@ export declare enum MessageType {
     STORY_REPLY = "story_reply",
     SCHEDULED = "scheduled"
 }
-export declare enum SubscriptionPlan {
-    FREE = "free",
-    MONTHLY = "monthly",
-    QUARTERLY = "quarterly",
-    SEMIANNUAL = "semiannual",
-    YEARLY = "yearly"
-}
-export declare enum SubscriptionStatus {
-    ACTIVE = "active",
-    CANCELLED = "cancelled",
-    EXPIRED = "expired",
-    PAST_DUE = "past_due",
-    TRIALING = "trialing"
-}
 export declare enum DeliveryStatus {
     SENDING = "sending",
     SENT = "sent",
@@ -118,7 +101,6 @@ export interface User {
     lastSeen: string | null;
     isOnline: boolean;
     isVerified: boolean;
-    isPremium: boolean;
     publicKey: string;
     signingPublicKey: string;
     language: string;
@@ -132,7 +114,6 @@ export interface UserProfile {
     bio: string | null;
     isOnline: boolean;
     isVerified: boolean;
-    isPremium: boolean;
     lastSeen: string | null;
 }
 export interface Chat {
@@ -234,34 +215,6 @@ export interface MessageReaction {
     userIds: UserId[];
     reacted: boolean;
 }
-export interface Subscription {
-    id: SubscriptionId;
-    userId: UserId;
-    plan: SubscriptionPlan;
-    status: SubscriptionStatus;
-    paddleSubscriptionId: string | null;
-    startedAt: string;
-    expiresAt: string | null;
-    cancelledAt: string | null;
-    createdAt: string;
-}
-export interface PremiumLimits {
-    maxFileSize: number;
-    cloudStorageTotal: number;
-    maxPinnedChats: number;
-    maxBioLength: number;
-    maxCaptionLength: number;
-    customEmoji: boolean;
-    premiumStickers: boolean;
-    advancedSearch: boolean;
-    priorityServers: boolean;
-    uniqueProfiles: boolean;
-    animatedAvatars: boolean;
-    voiceStatuses: boolean;
-    translationLimit: number;
-}
-export declare const FREE_LIMITS: PremiumLimits;
-export declare const PREMIUM_LIMITS: PremiumLimits;
 export interface SparksWallet {
     userId: UserId;
     balance: number;
@@ -292,7 +245,6 @@ export declare enum EventTopic {
     MESSAGE_EVENTS = "tepla.message.events",
     PRESENCE_EVENTS = "tepla.presence.events",
     NOTIFICATION_EVENTS = "tepla.notification.events",
-    PREMIUM_EVENTS = "tepla.premium.events",
     MEDIA_EVENTS = "tepla.media.events",
     ANALYTICS_EVENTS = "tepla.analytics.events",
     MODERATION_EVENTS = "tepla.moderation.events",
@@ -307,7 +259,6 @@ export declare enum EventType {
     USER_DELETED = "user.deleted",
     USER_LOGGED_IN = "user.logged_in",
     USER_LOGGED_OUT = "user.logged_out",
-    USER_PREMIUM_CHANGED = "user.premium_changed",
     CHAT_CREATED = "chat.created",
     CHAT_UPDATED = "chat.updated",
     CHAT_DELETED = "chat.deleted",
@@ -327,10 +278,6 @@ export declare enum EventType {
     USER_ONLINE = "presence.online",
     USER_OFFLINE = "presence.offline",
     USER_TYPING = "presence.typing",
-    SUBSCRIPTION_CREATED = "premium.subscription_created",
-    SUBSCRIPTION_RENEWED = "premium.subscription_renewed",
-    SUBSCRIPTION_CANCELLED = "premium.subscription_cancelled",
-    SUBSCRIPTION_EXPIRED = "premium.subscription_expired",
     MEDIA_UPLOADED = "media.uploaded",
     MEDIA_PROCESSED = "media.processed",
     MEDIA_DELETED = "media.deleted",
@@ -397,7 +344,6 @@ export interface AuthTokens {
 export interface JwtPayload {
     sub: UserId;
     username: string;
-    isPremium: boolean;
     iat: number;
     exp: number;
     jti: string;
@@ -600,7 +546,6 @@ export interface StickerPack {
     thumbnailUrl: string | null;
     stickers: Sticker[];
     isOfficial: boolean;
-    isPremium: boolean;
     installCount: number;
     createdAt: string;
 }
@@ -651,7 +596,6 @@ export interface WebApp {
     category: WebAppCategory;
     screenshots: string[];
     isPublished: boolean;
-    isPremiumOnly: boolean;
     installCount: number;
     rating: number;
     permissions: WebAppPermission[];

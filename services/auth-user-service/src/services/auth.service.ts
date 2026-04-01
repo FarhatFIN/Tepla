@@ -44,7 +44,6 @@ export interface AuthenticatedUser {
   phone: string | null;
   email: string | null;
   isVerified: boolean;
-  isPremium: boolean;
   language: string;
   birthDate: string | null;
   publicKey: string;
@@ -296,7 +295,6 @@ export class AuthService {
     const tokens = this.tokenService.generateTokens({
       sub: user.id as UserId,
       username: user.username,
-      isPremium: user.is_premium,
       sessionId: stored.sessionId,
     });
 
@@ -470,7 +468,6 @@ export class AuthService {
     const tokens = this.tokenService.generateTokens({
       sub: user.id as UserId,
       username: user.username,
-      isPremium: user.is_premium,
       sessionId: session.id,
     });
 
@@ -534,7 +531,6 @@ export class AuthService {
       phone: user.phone,
       email: user.email,
       isVerified: user.is_verified,
-      isPremium: user.is_premium,
       language: user.language,
       birthDate: this.toDateOnly(user.birth_date),
       publicKey: user.public_key,

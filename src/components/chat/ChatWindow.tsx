@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Crown, Phone, Search, ShieldCheck, Sparkles, Video, X } from "lucide-react";
+import { Phone, Search, ShieldCheck, Sparkles, Video, X } from "lucide-react";
 import { Virtuoso } from "react-virtuoso";
 import type { SparksPackageAmount } from "@/lib/sparks";
 import type { TeplaChat } from "@/types/chat";
@@ -25,10 +25,10 @@ type ChatWindowProps = {
   chat: TeplaChat | null;
 };
 
-type PremiumSearchMode = "text" | "media" | "pinned" | "mine";
+type SearchMode = "text" | "media" | "pinned" | "mine";
 
-const premiumSearchModes: Array<{
-  id: PremiumSearchMode;
+const searchModes: Array<{
+  id: SearchMode;
   label: string;
 }> = [
   { id: "text", label: "Text" },
@@ -50,7 +50,6 @@ const targetCanReceiveSparks = (message: LocalMessage, currentUserId: string) =>
 export const ChatWindow = ({ chat }: ChatWindowProps) => {
   const chatId = chat?.id ?? null;
   const authUser = useAuthStore((state) => state.user);
-  const isPremium = Boolean(authUser?.isPremium);
   const setMessageSparks = useChatStore((state) => state.setMessageSparks);
   const {
     messages,
@@ -75,7 +74,7 @@ export const ChatWindow = ({ chat }: ChatWindowProps) => {
   const [isWalletOpen, setWalletOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [isSearchOpen, setSearchOpen] = useState(false);
-  const [searchMode, setSearchMode] = useState<PremiumSearchMode>("text");
+  const [searchMode, setSearchMode] = useState<SearchMode>("text");
   const [actionError, setActionError] = useState<string | null>(null);
   const chatMeta = chatId ? DEMO_CHAT_META[chatId] : null;
   const canManagePins =
@@ -223,8 +222,7 @@ export const ChatWindow = ({ chat }: ChatWindowProps) => {
   const normalizedSearchQuery = searchQuery.trim().toLowerCase();
 
   const visibleMessages = messages.filter((message) => {
-    const matchesPremiumMode =
-      !isPremium ||
+    const matchesSearchMode =
       (searchMode === "media"
         ? message.attachments.length > 0 ||
           ["image", "video", "audio", "voice", "file", "sticker", "gif"].includes(message.type)
@@ -234,7 +232,7 @@ export const ChatWindow = ({ chat }: ChatWindowProps) => {
             ? message.senderId === currentUserId
             : true);
 
-    if (!matchesPremiumMode) {
+    if (!matchesSearchMode) {
       return false;
     }
 
@@ -243,9 +241,6 @@ export const ChatWindow = ({ chat }: ChatWindowProps) => {
     }
 
     const textMatch = message.content.toLowerCase().includes(normalizedSearchQuery);
-    if (!isPremium) {
-      return textMatch;
-    }
 
     const attachmentNames = message.attachments
       .map((attachment) => attachment.fileName ?? "")
@@ -356,11 +351,7 @@ export const ChatWindow = ({ chat }: ChatWindowProps) => {
             <Input
               value={searchQuery}
               onChange={(event) => setSearchQuery(event.target.value)}
-              placeholder={
-                isPremium
-                  ? "Search messages, files, pinned notes, and replies"
-                  : "Search messages in this chat"
-              }
+              placeholder="Search messages, files, pinned notes, and replies"
               leftIcon={<Search className="h-4 w-4" />}
             />
             <Button
@@ -375,32 +366,23 @@ export const ChatWindow = ({ chat }: ChatWindowProps) => {
               <X className="h-4 w-4" />
             </Button>
           </div>
-          {isPremium ? (
-            <div className="mt-3 flex flex-wrap gap-2">
-              {premiumSearchModes.map((mode) => (
-                <Button
-                  key={mode.id}
-                  type="button"
-                  size="sm"
-                  variant={searchMode === mode.id ? "primary" : "ghost"}
-                  onClick={() => setSearchMode(mode.id)}
-                >
-                  {mode.label}
-                </Button>
-              ))}
-            </div>
-          ) : (
-            <div className="mt-3 inline-flex items-center gap-1 rounded-full border border-amber-400/20 bg-amber-500/10 px-3 py-1 text-[11px] text-amber-100">
-              <Crown className="h-3.5 w-3.5" />
-              Premium unlocks media, pinned, and author filters plus attachment-aware search.
-            </div>
-          )}
+          <div className="mt-3 flex flex-wrap gap-2">
+            {searchModes.map((mode) => (
+              <Button
+                key={mode.id}
+                type="button"
+                size="sm"
+                variant={searchMode === mode.id ? "primary" : "ghost"}
+                onClick={() => setSearchMode(mode.id)}
+              >
+                {mode.label}
+              </Button>
+            ))}
+          </div>
           <p className="mt-2 text-xs text-tepla-text-muted">
             {searchQuery.trim()
               ? `Found ${visibleMessages.length} matching message${visibleMessages.length === 1 ? "" : "s"} in this conversation.`
-              : isPremium
-                ? "Search by text, attachment name, message type, reply context, or premium filters."
-                : "Search by message text."}
+              : "Search by text, attachment name, message type, reply context, or filters."}
           </p>
         </div>
       ) : null}
@@ -527,7 +509,7 @@ export const ChatWindow = ({ chat }: ChatWindowProps) => {
         }
         description={
           sparkTargetMessage
-            ? "Support this message with sparks or send a premium gift."
+            ? "Support this message with sparks or send a gift."
             : isChannelDonationOpen
               ? "Donate sparks straight to the channel owner and support future posts."
               : "Top up your wallet and get ready to support conversations."

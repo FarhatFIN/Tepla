@@ -40,7 +40,6 @@ CREATE TABLE IF NOT EXISTS users (
   is_online BOOLEAN DEFAULT false,
   is_verified BOOLEAN DEFAULT false,
   email_verified_at TIMESTAMPTZ,
-  is_premium BOOLEAN DEFAULT false,
   public_key TEXT DEFAULT '',
   signing_public_key TEXT DEFAULT '',
   password_hash TEXT,
@@ -485,7 +484,6 @@ CREATE TABLE IF NOT EXISTS sticker_packs (
   type TEXT DEFAULT 'static',
   thumbnail_url TEXT,
   is_official BOOLEAN DEFAULT false,
-  is_premium BOOLEAN DEFAULT false,
   install_count INTEGER DEFAULT 0,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -532,7 +530,6 @@ CREATE TABLE IF NOT EXISTS webapps (
   category TEXT DEFAULT 'other',
   screenshots JSONB DEFAULT '[]',
   is_published BOOLEAN DEFAULT false,
-  is_premium_only BOOLEAN DEFAULT false,
   install_count INTEGER DEFAULT 0,
   rating NUMERIC(3,2) DEFAULT 0,
   permissions JSONB DEFAULT '[]',

@@ -1,5 +1,4 @@
 import { BaseService, authMiddleware, createLogger } from '@tepla/common';
-import { FREE_LIMITS, PREMIUM_LIMITS } from '@tepla/types';
 import { Router, Request, Response, NextFunction } from 'express';
 import multer from 'multer';
 import sharp from 'sharp';
@@ -48,8 +47,7 @@ class MediaService extends BaseService {
     // POST /api/media/upload
     router.post('/upload', auth, async (req: Request, res: Response, next: NextFunction) => {
       try {
-        const isPremium = req.user!.isPremium;
-        const maxSize = isPremium ? PREMIUM_LIMITS.maxFileSize : FREE_LIMITS.maxFileSize;
+        const maxSize = 4 * 1024 * 1024 * 1024; // 4 GB
 
         const contentLength = parseInt(req.headers['content-length'] || '0');
         if (contentLength > maxSize) {
@@ -155,8 +153,7 @@ class MediaService extends BaseService {
     // GET /api/media/storage-usage
     router.get('/storage-usage', auth, async (req: Request, res: Response, next: NextFunction) => {
       try {
-        const isPremium = req.user!.isPremium;
-        const limit = isPremium ? PREMIUM_LIMITS.cloudStorageTotal : FREE_LIMITS.cloudStorageTotal;
+        const limit = 100 * 1024 * 1024 * 1024; // 100 GB
         res.json({ success: true, data: { used: 0, limit, remaining: limit } });
       } catch (err) { next(err); }
     });

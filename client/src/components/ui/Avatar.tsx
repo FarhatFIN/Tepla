@@ -5,7 +5,6 @@ interface AvatarProps {
   src?: string;
   status?: "online" | "offline" | "away" | "dnd";
   size?: "xs" | "sm" | "md" | "lg" | "xl";
-  isPremium?: boolean;
   showStatus?: boolean;
   onClick?: () => void;
   storyRing?: boolean;
@@ -38,7 +37,7 @@ function hashColor(name: string): string {
 
 const statusColors: Record<string, string> = { online: "bg-[#00D46A]", offline: "bg-[#5C4D87]", away: "bg-amber-400", dnd: "bg-red-400" };
 
-export default function Avatar({ name, src, status, size = "md", isPremium, showStatus = true, onClick, storyRing, storyViewed }: AvatarProps) {
+export default function Avatar({ name, src, status, size = "md", showStatus = true, onClick, storyRing, storyViewed }: AvatarProps) {
   const initial = name.charAt(0).toUpperCase();
   const ringClass = storyRing
     ? storyViewed
@@ -57,9 +56,6 @@ export default function Avatar({ name, src, status, size = "md", isPremium, show
       )}
       {showStatus && status && (
         <span className={`absolute right-0 bottom-0 block ${statusDots[size]} rounded-full ring-[var(--bg-sidebar)] ${statusColors[status]}`} />
-      )}
-      {isPremium && (
-        <span className="absolute -top-0.5 -right-0.5 flex h-3.5 w-3.5 items-center justify-center rounded-full text-[8px] text-white" style={{ background: "linear-gradient(135deg, #6C3DE8, #00D46A)" }}>&#x2B50;</span>
       )}
     </div>
   );

@@ -11,7 +11,6 @@ import {
   RedisClient,
   createLogger,
   authMiddleware,
-  premiumMiddleware,
   errorHandler,
   AppError,
 } from '@tepla/common';
@@ -28,8 +27,7 @@ import {
 
 const logger = createLogger('stories-module');
 const STORY_TTL_HOURS = 24;
-const MAX_STORIES_FREE = 10;
-const MAX_STORIES_PREMIUM = 50;
+const MAX_STORIES = 50;
 
 // ─── Repository ────────────────────────────
 export class StoryRepository extends BaseRepository {
@@ -168,12 +166,10 @@ export function storiesRouter(redis: RedisClient, kafka: KafkaProducer): Router 
   router.post('/', authMiddleware(), async (req, res, next) => {
     try {
       const userId = req.user!.sub;
-      const isPremium = req.user!.isPremium;
       const { type, mediaUrl, thumbnailUrl, caption, duration, backgroundColor, textStyle, privacy } = req.body;
 
       const count = await repo.getUserStoryCount(userId);
-      const maxStories = isPremium ? MAX_STORIES_PREMIUM : MAX_STORIES_FREE;
-      if (count >= maxStories) throw new AppError(`Max ${maxStories} active stories`, 429);
+      if (count >= MAX_STORIES) throw new AppError(`Max ${MAX_STORIES} active stories`, 429);
 
       const storyId = crypto.randomUUID() as StoryId;
       const expiresAt = new Date(Date.now() + STORY_TTL_HOURS * 60 * 60 * 1000).toISOString();

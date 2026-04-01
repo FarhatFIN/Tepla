@@ -19,7 +19,6 @@ export const config = {
     notification: realtimeServiceUrl || process.env.NOTIFICATION_SERVICE_URL || 'http://localhost:3006',
     media: mediaServiceUrl || process.env.MEDIA_SERVICE_URL || 'http://localhost:3007',
     search: messagingServiceUrl || process.env.SEARCH_SERVICE_URL || 'http://localhost:3008',
-    premium: process.env.PREMIUM_SERVICE_URL || 'http://localhost:3009',
     moderation: messagingServiceUrl || process.env.MODERATION_SERVICE_URL || 'http://localhost:3010',
     analytics: process.env.ANALYTICS_SERVICE_URL || 'http://localhost:3011',
     calls: realtimeServiceUrl || process.env.CALLS_SERVICE_URL || 'http://localhost:3012',

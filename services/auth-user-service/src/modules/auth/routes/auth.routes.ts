@@ -137,7 +137,6 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
       const tokens = tokenService.generateTokens({
         sub: user.id as UserId,
         username: user.username,
-        isPremium: user.is_premium,
       });
 
       // Create secure session (tracked in SessionManager)
@@ -240,7 +239,6 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
       const tokens = tokenService.generateTokens({
         sub: user.id as UserId,
         username: user.username,
-        isPremium: false,
       });
 
       // Create secure session
@@ -369,7 +367,6 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
       const tokens = tokenService.generateTokens({
         sub: user.id as UserId,
         username: user.username,
-        isPremium: user.is_premium,
       });
 
       const deviceFingerprint = DeviceSecurity.fingerprint(
@@ -524,7 +521,6 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
       const tokens = tokenService.generateTokens({
         sub: user.id as UserId,
         username: user.username,
-        isPremium: user.is_premium,
       });
 
       const deviceFingerprint = DeviceSecurity.fingerprint(
@@ -571,7 +567,6 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
       const tokens = tokenService.generateTokens({
         sub: user.id as UserId,
         username: user.username,
-        isPremium: user.is_premium,
       });
       await redis.set(`session:${tokens.refreshToken}`, user.id, 30 * 24 * 3600);
 
@@ -774,7 +769,6 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
       const tokens = tokenService.generateTokens({
         sub: user.id as UserId,
         username: user.username,
-        isPremium: user.is_premium,
       });
 
       const deviceFingerprint = DeviceSecurity.fingerprint(
@@ -844,7 +838,6 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
       const tokens = tokenService.generateTokens({
         sub: user.id as UserId,
         username: user.username,
-        isPremium: user.is_premium,
       });
       await redis.set(`session:${tokens.refreshToken}`, user.id, 30 * 24 * 3600);
 
@@ -925,7 +918,6 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
       const tokens = tokenService.generateTokens({
         sub: user.id as UserId,
         username: user.username,
-        isPremium: user.is_premium,
       });
       await redis.set(`session:${tokens.refreshToken}`, user.id, 30 * 24 * 3600);
 
@@ -1024,7 +1016,6 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
       const tokens = tokenService.generateTokens({
         sub: user.id as UserId,
         username: user.username,
-        isPremium: user.is_premium,
       });
 
       await redis.set(`session:${tokens.refreshToken}`, user.id, 30 * 24 * 3600);
@@ -1088,7 +1079,6 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
       const tokens = tokenService.generateTokens({
         sub: user.id as UserId,
         username: user.username,
-        isPremium: user.is_premium,
       });
       await redis.set(`session:${tokens.refreshToken}`, user.id, 30 * 24 * 3600);
 
@@ -1200,7 +1190,6 @@ function mapUser(row: any) {
     avatarUrl: row.avatar_url,
     bio: row.bio,
     isOnline: row.is_online,
-    isPremium: row.is_premium,
     isVerified: row.is_verified,
     language: row.language,
     publicKey: row.public_key,

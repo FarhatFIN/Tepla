@@ -31,8 +31,7 @@ const logger = createLogger('calls-module');
 const LIVEKIT_API_URL = process.env.LIVEKIT_API_URL || 'http://livekit:7880';
 const LIVEKIT_API_KEY = process.env.LIVEKIT_API_KEY || 'devkey';
 const LIVEKIT_API_SECRET = process.env.LIVEKIT_API_SECRET || 'devsecret';
-const MAX_GROUP_CALL_FREE = 8;
-const MAX_GROUP_CALL_PREMIUM = 100;
+const MAX_GROUP_CALL_PARTICIPANTS = 100;
 
 // ─── Repository ────────────────────────────
 export class CallRepository extends BaseRepository {
@@ -243,8 +242,7 @@ export function callsRouter(redis: RedisClient, kafka: KafkaProducer): Router {
       }
 
       const participantCount = await repo.getActiveParticipantCount(callId);
-      const maxParticipants = req.user!.isPremium ? MAX_GROUP_CALL_PREMIUM : MAX_GROUP_CALL_FREE;
-      if (call.isGroup && participantCount >= maxParticipants) {
+      if (call.isGroup && participantCount >= MAX_GROUP_CALL_PARTICIPANTS) {
         throw new AppError('Call is full', 403);
       }
 

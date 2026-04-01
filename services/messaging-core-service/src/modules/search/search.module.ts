@@ -14,18 +14,15 @@ export function searchRouter(elastic: ElasticClient): Router {
   // GET /api/search/messages?q=...&chatId=...&type=...&author=...
   router.get('/messages', auth, async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const { q, chatId, type, author, limit = '20', offset = '0' } = req.query;
-      const isPremium = req.user!.isPremium;
+      const { q, chatId, type, author, limit = '50', offset = '0' } = req.query;
 
-      // Non-premium: basic text search only
-      // Premium: filters by type, author, pinned, attachments
       const must: any[] = [];
       const filter: any[] = [];
 
       if (q) must.push({ match: { content: { query: q, fuzziness: 'AUTO' } } });
       if (chatId) filter.push({ term: { chatId } });
-      if (type && isPremium) filter.push({ term: { type } });
-      if (author && isPremium) filter.push({ term: { senderId: author } });
+      if (type) filter.push({ term: { type } });
+      if (author) filter.push({ term: { senderId: author } });
 
       const result = await elastic.search({
         index: 'tepla-messages',
@@ -33,7 +30,7 @@ export function searchRouter(elastic: ElasticClient): Router {
           query: { bool: { must, filter } },
           sort: [{ createdAt: 'desc' }],
           from: parseInt(offset as string),
-          size: Math.min(parseInt(limit as string), isPremium ? 100 : 20),
+          size: Math.min(parseInt(limit as string), 100),
           highlight: { fields: { content: {} } },
         },
       });

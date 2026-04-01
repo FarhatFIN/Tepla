@@ -79,7 +79,7 @@ export function folderRouter(redis: RedisClient, kafka: KafkaProducer): Router {
   router.post('/', auth, async (req: Request, res: Response, next: NextFunction) => {
     try {
       const existing = await repo.findByUser(req.user!.sub);
-      const maxFolders = req.user!.isPremium ? 20 : 5;
+      const maxFolders = 20;
       if (existing.length >= maxFolders) throw new ValidationError(`Max ${maxFolders} folders`);
 
       const folder = await repo.create({

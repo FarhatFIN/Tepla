@@ -13,8 +13,6 @@ Tepla should run with no more than five core application services, plus one opti
 5. `services/realtime-service`
 6. `services/bot-platform-service` (optional, only when ElevenBot or mini apps are enabled)
 
-Premium is intentionally excluded from the current consolidation wave.
-
 ## Service Boundaries
 
 ### 1. Gateway/API Service
@@ -161,7 +159,6 @@ Premium is intentionally excluded from the current consolidation wave.
 | --- | --- |
 | `services/auth-service` | `services/auth-user-service` |
 | `services/user-service` | `services/auth-user-service` |
-| `services/premium-service` | out of current core scope |
 | `services/chat-service` | `services/messaging-service` |
 | `services/message-service` | `services/messaging-service` |
 | `services/search-service` | `services/messaging-service` |

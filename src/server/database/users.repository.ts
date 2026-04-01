@@ -19,7 +19,6 @@ export type UserProfileRow = {
   last_seen: string | null;
   is_online: boolean | null;
   is_verified: boolean | null;
-  is_premium: boolean | null;
   public_key: string;
   signing_public_key: string;
   language: string | null;
@@ -183,19 +182,4 @@ export const usersRepository = {
     return data as UserProfileRow;
   },
 
-  async activatePremium(userId: string) {
-    const supabase = getServiceSupabaseClient();
-    const { data, error } = await supabase
-      .from("users")
-      .update({ is_premium: true })
-      .eq("id", userId)
-      .select("*")
-      .maybeSingle();
-
-    if (error || !data) {
-      throw new Error("Failed to activate premium.");
-    }
-
-    return data as UserProfileRow;
-  },
 };

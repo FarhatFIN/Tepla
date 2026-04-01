@@ -27,8 +27,7 @@ const LIBRETRANSLATE_API_KEY = process.env.LIBRETRANSLATE_API_KEY || '';
 const DEEPL_API_KEY = process.env.DEEPL_API_KEY || '';
 const GOOGLE_TRANSLATE_API_KEY = process.env.GOOGLE_TRANSLATE_API_KEY || '';
 
-const FREE_DAILY_LIMIT = 5;
-const PREMIUM_DAILY_LIMIT = -1; // unlimited
+const DAILY_LIMIT = -1; // unlimited
 const CACHE_TTL = 86400; // 24h cache for translations
 
 // ─── Translation Providers ─────────────────
@@ -116,19 +115,10 @@ export function translationRouter(redis: RedisClient, kafka: KafkaProducer): Rou
   router.post('/', authMiddleware(), async (req, res, next) => {
     try {
       const userId = req.user!.sub;
-      const isPremium = req.user!.isPremium;
       const { text, sourceLang, targetLang, messageId, chatId } = req.body as TranslationRequest;
 
       if (!text || !targetLang) throw new AppError('text and targetLang required', 400);
       if (text.length > 5000) throw new AppError('Text too long (max 5000 chars)', 400);
-
-      // Check daily limit
-      const dailyKey = `translate:daily:${userId}:${new Date().toISOString().slice(0, 10)}`;
-      const dailyCount = parseInt(await redis.get(dailyKey) || '0', 10);
-      const limit = isPremium ? PREMIUM_DAILY_LIMIT : FREE_DAILY_LIMIT;
-      if (limit !== -1 && dailyCount >= limit) {
-        throw new AppError(`Daily translation limit reached (${limit}). Upgrade to Premium for unlimited.`, 429);
-      }
 
       // Check cache
       const source = sourceLang || 'auto';
@@ -194,19 +184,10 @@ export function translationRouter(redis: RedisClient, kafka: KafkaProducer): Rou
   router.post('/batch', authMiddleware(), async (req, res, next) => {
     try {
       const userId = req.user!.sub;
-      const isPremium = req.user!.isPremium;
       const { messages, targetLang } = req.body as { messages: { id: string; text: string }[]; targetLang: string };
 
       if (!messages?.length || !targetLang) throw new AppError('messages and targetLang required', 400);
       if (messages.length > 20) throw new AppError('Max 20 messages per batch', 400);
-
-      // Check daily limit
-      const dailyKey = `translate:daily:${userId}:${new Date().toISOString().slice(0, 10)}`;
-      const dailyCount = parseInt(await redis.get(dailyKey) || '0', 10);
-      const limit = isPremium ? PREMIUM_DAILY_LIMIT : FREE_DAILY_LIMIT;
-      if (limit !== -1 && dailyCount + messages.length > limit) {
-        throw new AppError(`Daily limit would be exceeded. ${limit - dailyCount} translations remaining.`, 429);
-      }
 
       const results: Record<string, TranslationResult> = {};
 
@@ -306,8 +287,7 @@ export function translationRouter(redis: RedisClient, kafka: KafkaProducer): Rou
       const userId = req.user!.sub;
       const dailyKey = `translate:daily:${userId}:${new Date().toISOString().slice(0, 10)}`;
       const used = parseInt(await redis.get(dailyKey) || '0', 10);
-      const limit = req.user!.isPremium ? PREMIUM_DAILY_LIMIT : FREE_DAILY_LIMIT;
-      res.json({ success: true, data: { used, limit, remaining: limit === -1 ? -1 : Math.max(0, limit - used) } });
+      res.json({ success: true, data: { used, limit: DAILY_LIMIT, remaining: DAILY_LIMIT === -1 ? -1 : Math.max(0, DAILY_LIMIT - used) } });
     } catch (err) { next(err); }
   });
 

@@ -8,7 +8,6 @@ import Sidebar from "@/components/layout/Sidebar";
 import ChatArea from "@/components/layout/ChatArea";
 import EmptyChat from "@/components/chat/EmptyChat";
 import SettingsPanel from "@/components/layout/SettingsPanel";
-import PremiumPanel from "@/components/layout/PremiumPanel";
 import WalletPanel from "@/components/layout/WalletPanel";
 import WBITPanel from "@/components/layout/WBITPanel";
 import CallOverlay from "@/components/calls/CallOverlay";
@@ -78,7 +77,6 @@ export default function Home() {
 
       {/* Overlays */}
       <SettingsPanel />
-      <PremiumPanel />
       <WalletPanel />
       <WBITPanel />
       <CallOverlay />
