@@ -134,11 +134,4 @@ export const usersService = {
     };
   },
 
-  async activatePremium(userId: string) {
-    const row = await usersRepository.activatePremium(userId);
-    return {
-      user: mapAuthUser(row),
-      profile: mapUserProfile(row),
-    };
-  },
 };

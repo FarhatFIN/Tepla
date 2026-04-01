@@ -120,8 +120,8 @@ export const useSocket = (activeChatId: string | null) => {
     socket.on("reaction:changed", handleReactionChanged);
     socket.on("message:sparks", handleMessageSparks);
     socket.on("sparks:balance", handleSparksBalance);
-    socket.on("user:updated" as any, handleUserUpdated);
-    socket.on("user:profile_changed" as any, handleProfileChanged);
+    socket.on("user:updated", handleUserUpdated);
+    socket.on("user:profile_changed", handleProfileChanged);
 
     return () => {
       socket.off("connect", handleConnect);
@@ -134,8 +134,8 @@ export const useSocket = (activeChatId: string | null) => {
       socket.off("reaction:changed", handleReactionChanged);
       socket.off("message:sparks", handleMessageSparks);
       socket.off("sparks:balance", handleSparksBalance);
-      socket.off("user:updated" as any, handleUserUpdated);
-      socket.off("user:profile_changed" as any, handleProfileChanged);
+      socket.off("user:updated", handleUserUpdated);
+      socket.off("user:profile_changed", handleProfileChanged);
     };
   }, [currentUserId, setOnline, setTyping]);
 

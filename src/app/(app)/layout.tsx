@@ -2,6 +2,7 @@
 
 import { useEffect, type ReactNode } from "react";
 import { usePathname } from "next/navigation";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { Sidebar } from "@/components/sidebar/Sidebar";
 import { ChatWindow } from "@/components/chat/ChatWindow";
 import { useSocket } from "@/hooks/useSocket";
@@ -91,9 +92,11 @@ export default function AppLayout({ children }: AppLayoutProps) {
         }}
         onToggleFavoriteChat={toggleFavoriteChat}
       />
-      <div className="flex h-full flex-1 flex-col overflow-hidden">
-        {isSettings ? children : <ChatWindow chat={activeChat} />}
-      </div>
+      <ErrorBoundary>
+        <div className="flex h-full flex-1 flex-col overflow-hidden">
+          {isSettings ? children : <ChatWindow chat={activeChat} />}
+        </div>
+      </ErrorBoundary>
     </div>
   );
 }
