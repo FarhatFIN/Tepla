@@ -57,9 +57,10 @@ function proxy(target: string, rewrite?: Record<string, string>) {
 const auth = authMiddleware(config.jwtSecret);
 
 // ─── Auth & Users (auth-user-service) ─────
+// NOTE: Do NOT use express.json() before proxy — it consumes the body stream
+// and fixRequestBody is broken with Express v5. Rate limit by IP only.
 app.use('/api/v2/auth',
-  express.json({ limit: '1mb' }),
-  securityMiddleware.authRateLimit(),
+  securityMiddleware.ipRateLimit(10),
   proxy(config.services.auth, { '^/': '/api/auth/' })
 );
 
