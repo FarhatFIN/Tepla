@@ -12,6 +12,8 @@ import { useSparks } from "@/hooks/useSparks";
 import { usePresenceStore } from "@/stores/presence.store";
 import { useAuthStore } from "@/stores/auth.store";
 import { useChatStore } from "@/stores/chat.store";
+import { useCallStore } from "@/stores/call.store";
+import { getTeplaSocket } from "@/lib/socket";
 import { Avatar } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -303,7 +305,15 @@ export const ChatWindow = ({ chat }: ChatWindowProps) => {
                 ) : null}
               </div>
               <p className="truncate text-xs text-tepla-text-muted">
-                {chat.username ? `@${chat.username}` : chat.description ?? "Encrypted conversation"}
+                {typingLabel
+                  ? typingLabel
+                  : chat.type === "direct" && chat.user?.id
+                    ? usePresenceStore.getState().isOnline(chat.user.id)
+                      ? "online"
+                      : usePresenceStore.getState().getLastSeen(chat.user.id)
+                        ? `last seen ${new Intl.DateTimeFormat("en", { hour: "numeric", minute: "numeric" }).format(new Date(usePresenceStore.getState().getLastSeen(chat.user.id)!))}`
+                        : chat.username ? `@${chat.username}` : chat.description ?? "Encrypted conversation"
+                    : chat.username ? `@${chat.username}` : chat.description ?? "Encrypted conversation"
               </p>
             </div>
           </div>
@@ -351,10 +361,74 @@ export const ChatWindow = ({ chat }: ChatWindowProps) => {
               >
                 <Search className="h-4 w-4" />
               </Button>
-              <Button type="button" variant="ghost" size="icon" aria-label="Start voice call">
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                aria-label="Start voice call"
+                onClick={() => {
+                  if (!chatId) return;
+                  const socket = getTeplaSocket();
+                  socket.emit("call:start", { chatId, callType: "audio" });
+                  const { startCall } = useCallStore.getState();
+                  void fetch("/api/calls", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                      roomName: `tepla-${chatId}-${Date.now()}`,
+                      participantName: currentUserId,
+                      callType: "audio",
+                      chatId,
+                    }),
+                  })
+                    .then((r) => r.json())
+                    .then((data) => {
+                      startCall({
+                        callId: data.roomName ?? `call-${Date.now()}`,
+                        chatId,
+                        callType: "audio",
+                        token: data.token ?? null,
+                        livekitUrl: null,
+                      });
+                    })
+                    .catch(() => {});
+                }}
+              >
                 <Phone className="h-4 w-4" />
               </Button>
-              <Button type="button" variant="ghost" size="icon" aria-label="Start video call">
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                aria-label="Start video call"
+                onClick={() => {
+                  if (!chatId) return;
+                  const socket = getTeplaSocket();
+                  socket.emit("call:start", { chatId, callType: "video" });
+                  const { startCall } = useCallStore.getState();
+                  void fetch("/api/calls", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                      roomName: `tepla-${chatId}-${Date.now()}`,
+                      participantName: currentUserId,
+                      callType: "video",
+                      chatId,
+                    }),
+                  })
+                    .then((r) => r.json())
+                    .then((data) => {
+                      startCall({
+                        callId: data.roomName ?? `call-${Date.now()}`,
+                        chatId,
+                        callType: "video",
+                        token: data.token ?? null,
+                        livekitUrl: null,
+                      });
+                    })
+                    .catch(() => {});
+                }}
+              >
                 <Video className="h-4 w-4" />
               </Button>
             </div>

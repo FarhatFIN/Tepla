@@ -2,6 +2,7 @@
 
 import { useEffect, type ReactNode } from "react";
 import { usePathname } from "next/navigation";
+import { CallOverlay } from "@/components/calls/CallOverlay";
 import { ConnectionStatus } from "@/components/ConnectionStatus";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { Sidebar } from "@/components/sidebar/Sidebar";
@@ -78,6 +79,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
 
   return (
     <div className="flex h-full w-full">
+      <CallOverlay />
       {notifPermission === "default" && backendEnabled ? (
         <div className="fixed left-1/2 top-4 z-50 -translate-x-1/2 animate-in fade-in slide-in-from-top-2">
           <div className="flex items-center gap-3 rounded-2xl border border-white/10 bg-tepla-bg/95 px-4 py-3 shadow-lg backdrop-blur-sm">
