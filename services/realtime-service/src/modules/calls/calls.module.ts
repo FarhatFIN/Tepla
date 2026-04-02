@@ -216,7 +216,7 @@ export function callsRouter(redis: RedisClient, kafka: KafkaProducer): Router {
 
       const token = await generateLiveKitToken(roomName, userId);
 
-      await kafka.send(EventTopic.CALL_EVENTS, {
+      await kafka.publish( {
         id: crypto.randomUUID(),
         type: EventType.CALL_STARTED,
         topic: EventTopic.CALL_EVENTS,
@@ -253,7 +253,7 @@ export function callsRouter(redis: RedisClient, kafka: KafkaProducer): Router {
       await repo.addParticipant(callId, userId);
       const token = await generateLiveKitToken(call.livekitRoom!, userId);
 
-      await kafka.send(EventTopic.CALL_EVENTS, {
+      await kafka.publish( {
         id: crypto.randomUUID(),
         type: EventType.CALL_PARTICIPANT_JOINED,
         topic: EventTopic.CALL_EVENTS,
@@ -281,7 +281,7 @@ export function callsRouter(redis: RedisClient, kafka: KafkaProducer): Router {
       const remaining = await repo.getActiveParticipantCount(callId);
       if (remaining === 0 || (!call.isGroup && remaining <= 1)) {
         await repo.updateCallStatus(callId, CallStatus.ENDED);
-        await kafka.send(EventTopic.CALL_EVENTS, {
+        await kafka.publish( {
           id: crypto.randomUUID(),
           type: EventType.CALL_ENDED,
           topic: EventTopic.CALL_EVENTS,
@@ -292,7 +292,7 @@ export function callsRouter(redis: RedisClient, kafka: KafkaProducer): Router {
           payload: { callId, chatId: call.chatId, duration: call.duration },
         });
       } else {
-        await kafka.send(EventTopic.CALL_EVENTS, {
+        await kafka.publish( {
           id: crypto.randomUUID(),
           type: EventType.CALL_PARTICIPANT_LEFT,
           topic: EventTopic.CALL_EVENTS,

@@ -56,32 +56,45 @@ function proxy(target: string, rewrite?: Record<string, string>) {
 
 const auth = authMiddleware(config.jwtSecret);
 
+// ─── Auth & Users (auth-user-service) ─────
 app.use('/api/v2/auth',
   express.json({ limit: '1mb' }),
   securityMiddleware.authRateLimit(),
-  proxy(config.services.authUser, { '^/': '/api/auth/' })
+  proxy(config.services.auth, { '^/': '/api/auth/' })
 );
 
-app.use('/api/v2/users', auth, proxy(config.services.authUser, { '^/': '/api/users/' }));
-app.use('/api/v2/e2e', auth, proxy(config.services.authUser, { '^/': '/api/e2e/' }));
-app.use('/api/v2/kt', auth, proxy(config.services.authUser, { '^/': '/api/kt/' }));
+app.use('/api/v2/users', auth, proxy(config.services.auth, { '^/': '/api/users/' }));
+app.use('/api/v2/e2e', auth, proxy(config.services.auth, { '^/': '/api/e2e/' }));
+app.use('/api/v2/kt', auth, proxy(config.services.auth, { '^/': '/api/kt/' }));
 
-app.use('/api/v2/chats', auth, proxy(config.services.messaging, { '^/': '/api/chats/' }));
-app.use('/api/v2/messages', auth, proxy(config.services.messaging, { '^/': '/api/messages/' }));
-app.use('/api/v2/search', auth, proxy(config.services.messaging, { '^/': '/api/search/' }));
-app.use('/api/v2/moderation', auth, proxy(config.services.messaging, { '^/': '/api/moderation/' }));
-app.use('/api/v2/reactions', auth, proxy(config.services.messaging, { '^/': '/api/reactions/' }));
-app.use('/api/v2/threads', auth, proxy(config.services.messaging, { '^/': '/api/threads/' }));
-app.use('/api/v2/sparks', auth, proxy(config.services.messaging, { '^/': '/api/sparks/' }));
+// ─── Messaging (messaging-core-service) ───
+app.use('/api/v2/chats', auth, proxy(config.services.message, { '^/': '/api/chats/' }));
+app.use('/api/v2/messages', auth, proxy(config.services.message, { '^/': '/api/messages/' }));
+app.use('/api/v2/search', auth, proxy(config.services.search, { '^/': '/api/search/' }));
+app.use('/api/v2/moderation', auth, proxy(config.services.moderation, { '^/': '/api/moderation/' }));
+app.use('/api/v2/reactions', auth, proxy(config.services.message, { '^/': '/api/reactions/' }));
+app.use('/api/v2/threads', auth, proxy(config.services.message, { '^/': '/api/threads/' }));
+app.use('/api/v2/sparks', auth, proxy(config.services.message, { '^/': '/api/sparks/' }));
+app.use('/api/v2/translate', auth, proxy(config.services.translation, { '^/': '/api/translate/' }));
 
+// ─── Media (media-service) ────────────────
 app.use('/api/v2/media', auth, proxy(config.services.media, { '^/': '/api/media/' }));
+app.use('/api/v2/stories', auth, proxy(config.services.stories, { '^/': '/api/stories/' }));
+app.use('/api/v2/stickers', auth, proxy(config.services.sticker, { '^/': '/api/stickers/' }));
 
-app.use('/api/v2/presence', auth, proxy(config.services.realtime, { '^/': '/api/presence/' }));
-app.use('/api/v2/notifications', auth, proxy(config.services.realtime, { '^/': '/api/notifications/' }));
-app.use('/api/v2/calls', auth, proxy(config.services.realtime, { '^/': '/api/calls/' }));
+// ─── Real-time (realtime-service) ─────────
+app.use('/api/v2/presence', auth, proxy(config.services.presence, { '^/': '/api/presence/' }));
+app.use('/api/v2/notifications', auth, proxy(config.services.notification, { '^/': '/api/notifications/' }));
+app.use('/api/v2/calls', auth, proxy(config.services.calls, { '^/': '/api/calls/' }));
 
+// ─── Bots & Webapp ───────────────────────
 app.use('/api/v2/bots', auth, proxy(config.services.bot, { '^/': '/api/bots/' }));
 app.use('/api/v2/bot-api', proxy(config.services.bot, { '^/': '/api/bot-api/' }));
+app.use('/api/v2/webapp', auth, proxy(config.services.webapp, { '^/': '/api/webapp/' }));
+
+// ─── Wallet & WBIT ───────────────────────
+app.use('/api/v2/wallet', auth, proxy(config.services.wallet, { '^/': '/api/wallet/' }));
+app.use('/api/v2/wbit', auth, proxy(config.services.wbit, { '^/': '/api/wbit/' }));
 
 app.use(errorHandler);
 

@@ -39,10 +39,11 @@ const fetcher = async (url: string): Promise<SearchResult> => {
 export const useMessageSearch = (params: {
   query: string;
   chatId: string | null;
+  userId?: string | null;
   type?: string;
   enabled?: boolean;
 }) => {
-  const { query, chatId, type, enabled = true } = params;
+  const { query, chatId, userId, type, enabled = true } = params;
   const trimmed = query.trim();
 
   const swrKey = useMemo(() => {
@@ -53,6 +54,10 @@ export const useMessageSearch = (params: {
       chatId,
       limit: "50",
     });
+
+    if (userId) {
+      searchParams.set("userId", userId);
+    }
 
     if (type && type !== "text") {
       searchParams.set("type", type);

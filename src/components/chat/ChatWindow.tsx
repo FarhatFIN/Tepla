@@ -83,9 +83,14 @@ export const ChatWindow = ({ chat }: ChatWindowProps) => {
     useMessageSearch({
       query: searchQuery,
       chatId,
+      userId: currentUserId,
       type: searchMode !== "text" ? searchMode : undefined,
       enabled: isSearchOpen && !demoMode && searchQuery.trim().length >= 2,
     });
+  // Subscribe to presence reactively (not via getState in render)
+  const companionUserId = chat?.type === "direct" && chat.user?.id ? chat.user.id : null;
+  const isCompanionOnline = usePresenceStore((s) => companionUserId ? s.onlineUserIds.has(companionUserId) : false);
+  const companionLastSeen = usePresenceStore((s) => companionUserId ? s.lastSeenByUser[companionUserId] ?? null : null);
   const chatMeta = chatId ? DEMO_CHAT_META[chatId] : null;
   const canManagePins =
     demoMode ||
@@ -307,13 +312,11 @@ export const ChatWindow = ({ chat }: ChatWindowProps) => {
               <p className="truncate text-xs text-tepla-text-muted">
                 {typingLabel
                   ? typingLabel
-                  : chat.type === "direct" && chat.user?.id
-                    ? usePresenceStore.getState().isOnline(chat.user.id)
-                      ? "online"
-                      : usePresenceStore.getState().getLastSeen(chat.user.id)
-                        ? `last seen ${new Intl.DateTimeFormat("en", { hour: "numeric", minute: "numeric" }).format(new Date(usePresenceStore.getState().getLastSeen(chat.user.id)!))}`
-                        : chat.username ? `@${chat.username}` : chat.description ?? "Encrypted conversation"
-                    : chat.username ? `@${chat.username}` : chat.description ?? "Encrypted conversation"
+                  : isCompanionOnline
+                    ? "online"
+                    : companionLastSeen
+                      ? `last seen ${new Intl.DateTimeFormat("en", { hour: "numeric", minute: "numeric" }).format(new Date(companionLastSeen))}`
+                      : chat.username ? `@${chat.username}` : chat.description ?? "Encrypted conversation"
               </p>
             </div>
           </div>

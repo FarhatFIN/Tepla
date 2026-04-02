@@ -105,7 +105,8 @@ export const initSocketServer = (
         const userId = findUserIdBySocket(socket.id);
         if (!userId) return;
 
-        const response = await fetch(`http://localhost:${process.env.PORT ?? 3000}/api/calls`, {
+        const baseUrl = process.env.NEXT_PUBLIC_APP_URL || `http://localhost:${process.env.PORT ?? 3000}`;
+        const response = await fetch(`${baseUrl}/api/calls`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({

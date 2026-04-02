@@ -4,7 +4,7 @@ import { chatsRepository } from "@/server/database/chats.repository";
 import { hydrateMessages } from "@/server/services/messages.service";
 
 /**
- * GET /api/search/messages?q=...&chatId=...&type=...&limit=...
+ * GET /api/search/messages?q=...&chatId=...&userId=...&type=...&limit=...
  * Searches messages within a chat. Uses database ILIKE as fallback
  * when Elasticsearch is not available.
  */
@@ -12,6 +12,7 @@ export async function GET(request: Request) {
   const url = new URL(request.url);
   const query = url.searchParams.get("q")?.trim();
   const chatId = url.searchParams.get("chatId");
+  const userId = url.searchParams.get("userId");
   const type = url.searchParams.get("type");
   const limit = Math.min(parseInt(url.searchParams.get("limit") ?? "50", 10), 100);
 
@@ -26,7 +27,23 @@ export async function GET(request: Request) {
     );
   }
 
+  if (!userId) {
+    return NextResponse.json(
+      { error: "userId is required." },
+      { status: 400 },
+    );
+  }
+
   try {
+    // Verify user is a member of this chat before allowing search
+    const memberIds = await chatsRepository.listMemberIds(chatId);
+    if (!memberIds.includes(userId)) {
+      return NextResponse.json(
+        { error: "Access denied." },
+        { status: 403 },
+      );
+    }
+
     // Try Elasticsearch first via messaging-core-service
     const esUrl = process.env.MESSAGING_CORE_URL ?? process.env.NEXT_PUBLIC_API_URL;
     if (esUrl) {
@@ -50,7 +67,7 @@ export async function GET(request: Request) {
 
     // Fallback: database search via ILIKE
     const rows = await messagesRepository.searchByContent(chatId, query, limit);
-    const hydrated = await hydrateMessages(rows);
+    const hydrated = await hydrateMessages(rows, userId);
 
     return NextResponse.json({
       messages: hydrated,
