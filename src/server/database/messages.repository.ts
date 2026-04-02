@@ -163,6 +163,24 @@ export const messagesRepository = {
     return data as MessageRow;
   },
 
+  async searchByContent(chatId: string, query: string, limit = 50) {
+    const supabase = getServiceSupabaseClient();
+    const { data, error } = await supabase
+      .from("messages")
+      .select("*")
+      .eq("chat_id", chatId)
+      .eq("is_deleted", false)
+      .ilike("content", `%${query}%`)
+      .order("created_at", { ascending: false })
+      .limit(limit);
+
+    if (error) {
+      throw new Error("Failed to search messages.");
+    }
+
+    return (data ?? []) as MessageRow[];
+  },
+
   async listPinnedMessages(chatId: string, limit = 10) {
     const supabase = getServiceSupabaseClient();
     const { data, error } = await supabase

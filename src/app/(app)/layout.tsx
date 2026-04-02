@@ -2,6 +2,7 @@
 
 import { useEffect, type ReactNode } from "react";
 import { usePathname } from "next/navigation";
+import { ConnectionStatus } from "@/components/ConnectionStatus";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { Sidebar } from "@/components/sidebar/Sidebar";
 import { ChatWindow } from "@/components/chat/ChatWindow";
@@ -110,6 +111,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
       />
       <ErrorBoundary>
         <div className="flex h-full flex-1 flex-col overflow-hidden">
+          <ConnectionStatus />
           {isSettings ? children : <ChatWindow chat={activeChat} />}
         </div>
       </ErrorBoundary>

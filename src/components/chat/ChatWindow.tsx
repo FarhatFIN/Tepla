@@ -7,6 +7,7 @@ import type { SparksPackageAmount } from "@/lib/sparks";
 import type { TeplaChat } from "@/types/chat";
 import type { SparksGiftId } from "@/types/sparks";
 import { useMessages } from "@/hooks/useMessages";
+import { useMessageSearch } from "@/hooks/useMessageSearch";
 import { useSparks } from "@/hooks/useSparks";
 import { usePresenceStore } from "@/stores/presence.store";
 import { useAuthStore } from "@/stores/auth.store";
@@ -76,6 +77,13 @@ export const ChatWindow = ({ chat }: ChatWindowProps) => {
   const [isSearchOpen, setSearchOpen] = useState(false);
   const [searchMode, setSearchMode] = useState<SearchMode>("text");
   const [actionError, setActionError] = useState<string | null>(null);
+  const { results: serverSearchResults, total: serverSearchTotal, isSearching, isServerSearch } =
+    useMessageSearch({
+      query: searchQuery,
+      chatId,
+      type: searchMode !== "text" ? searchMode : undefined,
+      enabled: isSearchOpen && !demoMode && searchQuery.trim().length >= 2,
+    });
   const chatMeta = chatId ? DEMO_CHAT_META[chatId] : null;
   const canManagePins =
     demoMode ||
@@ -221,40 +229,49 @@ export const ChatWindow = ({ chat }: ChatWindowProps) => {
 
   const normalizedSearchQuery = searchQuery.trim().toLowerCase();
 
-  const visibleMessages = messages.filter((message) => {
-    const matchesSearchMode =
-      (searchMode === "media"
-        ? message.attachments.length > 0 ||
-          ["image", "video", "audio", "voice", "file", "sticker", "gif"].includes(message.type)
-        : searchMode === "pinned"
-          ? message.isPinned
-          : searchMode === "mine"
-            ? message.senderId === currentUserId
-            : true);
+  // Use server search results when available, fall back to client-side filter
+  const useServerResults = isServerSearch && serverSearchResults.length > 0;
 
-    if (!matchesSearchMode) {
-      return false;
-    }
+  const visibleMessages = useServerResults
+    ? serverSearchResults.map((msg) => ({
+        ...msg,
+        localId: msg.id,
+        status: "delivered" as const,
+      }))
+    : messages.filter((message) => {
+        const matchesSearchMode =
+          (searchMode === "media"
+            ? message.attachments.length > 0 ||
+              ["image", "video", "audio", "voice", "file", "sticker", "gif"].includes(message.type)
+            : searchMode === "pinned"
+              ? message.isPinned
+              : searchMode === "mine"
+                ? message.senderId === currentUserId
+                : true);
 
-    if (!normalizedSearchQuery) {
-      return true;
-    }
+        if (!matchesSearchMode) {
+          return false;
+        }
 
-    const textMatch = message.content.toLowerCase().includes(normalizedSearchQuery);
+        if (!normalizedSearchQuery) {
+          return true;
+        }
 
-    const attachmentNames = message.attachments
-      .map((attachment) => attachment.fileName ?? "")
-      .join(" ")
-      .toLowerCase();
-    const replyPreview = message.replyToMessage?.content?.toLowerCase() ?? "";
+        const textMatch = message.content.toLowerCase().includes(normalizedSearchQuery);
 
-    return (
-      textMatch ||
-      attachmentNames.includes(normalizedSearchQuery) ||
-      message.type.toLowerCase().includes(normalizedSearchQuery) ||
-      replyPreview.includes(normalizedSearchQuery)
-    );
-  });
+        const attachmentNames = message.attachments
+          .map((attachment) => attachment.fileName ?? "")
+          .join(" ")
+          .toLowerCase();
+        const replyPreview = message.replyToMessage?.content?.toLowerCase() ?? "";
+
+        return (
+          textMatch ||
+          attachmentNames.includes(normalizedSearchQuery) ||
+          message.type.toLowerCase().includes(normalizedSearchQuery) ||
+          replyPreview.includes(normalizedSearchQuery)
+        );
+      });
 
   return (
     <div className="flex h-full flex-1 flex-col bg-[radial-gradient(circle_at_top,rgba(59,130,246,0.14),transparent_40%),radial-gradient(circle_at_bottom,rgba(108,99,255,0.12),transparent_46%),linear-gradient(180deg,#050816,#020617_48%,#02040a)]">
@@ -380,9 +397,11 @@ export const ChatWindow = ({ chat }: ChatWindowProps) => {
             ))}
           </div>
           <p className="mt-2 text-xs text-tepla-text-muted">
-            {searchQuery.trim()
-              ? `Found ${visibleMessages.length} matching message${visibleMessages.length === 1 ? "" : "s"} in this conversation.`
-              : "Search by text, attachment name, message type, reply context, or filters."}
+            {isSearching
+              ? "Searching..."
+              : searchQuery.trim()
+                ? `Found ${useServerResults ? serverSearchTotal : visibleMessages.length} matching message${visibleMessages.length === 1 ? "" : "s"}${useServerResults ? " (full-text search)" : ""}`
+                : "Search by text, attachment name, message type, reply context, or filters."}
           </p>
         </div>
       ) : null}

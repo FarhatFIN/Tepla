@@ -8,6 +8,7 @@ import { useChatStore, type LocalMessage } from "@/stores/chat.store";
 import { useAuthStore } from "@/stores/auth.store";
 import { getTeplaSocket, onConnectionChange } from "@/lib/socket";
 import { offlineQueue } from "@/lib/offline-queue";
+import { messageCache } from "@/lib/message-cache";
 import {
   buildDemoReply,
   DEMO_CURRENT_USER,
@@ -107,6 +108,19 @@ export const useMessages = (chatId: ChatId | null) => {
     fetcher,
   );
 
+  // Load cached messages instantly on chat open (before API responds)
+  useEffect(() => {
+    if (!chatId || demoMode) return;
+    const existing = messagesByChat[chatId];
+    if (existing && existing.length > 0) return; // already have data
+
+    void messageCache.load(chatId).then((cached) => {
+      if (cached.length > 0) {
+        syncMessages(chatId, cached);
+      }
+    });
+  }, [chatId, demoMode]); // intentionally minimal deps — only on chat switch
+
   useEffect(() => {
     if (!chatId) {
       return;
@@ -134,6 +148,9 @@ export const useMessages = (chatId: ChatId | null) => {
       .map((message) => toLocalMessage(message, currentUserId));
 
     syncMessages(chatId, flattened);
+
+    // Persist to IndexedDB cache for instant load next time
+    void messageCache.save(chatId, flattened);
   }, [applyPinnedMessages, chatId, currentUserId, data, demoMode, syncMessages]);
 
   useEffect(() => {
