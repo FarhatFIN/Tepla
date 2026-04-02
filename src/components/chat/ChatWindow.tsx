@@ -316,7 +316,7 @@ export const ChatWindow = ({ chat }: ChatWindowProps) => {
                     ? "online"
                     : companionLastSeen
                       ? `last seen ${new Intl.DateTimeFormat("en", { hour: "numeric", minute: "numeric" }).format(new Date(companionLastSeen))}`
-                      : chat.username ? `@${chat.username}` : chat.description ?? "Encrypted conversation"
+                      : chat.username ? `@${chat.username}` : chat.description ?? "Encrypted conversation"}
               </p>
             </div>
           </div>

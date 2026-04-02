@@ -1,10 +1,10 @@
 import { Server as IOServer } from "socket.io";
 import type { Server as HTTPServer } from "http";
-import { setSocketServer } from "../server/sockets/emitter.ts";
+import { setSocketServer } from "../server/sockets/emitter";
 import type {
   ClientToServerSocketEvents,
   ServerToClientSocketEvents,
-} from "../server/sockets/events.ts";
+} from "../server/sockets/events";
 
 let io:
   | IOServer<ClientToServerSocketEvents, ServerToClientSocketEvents>
