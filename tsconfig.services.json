@@ -20,7 +20,9 @@
       "@tepla/types": ["./shared/types/src/index.ts"],
       "@tepla/types/*": ["./shared/types/src/*"],
       "@tepla/security": ["./shared/security/src/index.ts"],
-      "@tepla/security/*": ["./shared/security/src/*"]
+      "@tepla/security/*": ["./shared/security/src/*"],
+      "@tepla/crypto": ["./shared/crypto/src/index.ts"],
+      "@tepla/crypto/*": ["./shared/crypto/src/*"]
     }
   },
   "include": [
