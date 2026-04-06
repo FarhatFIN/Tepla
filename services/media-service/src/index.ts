@@ -315,10 +315,16 @@ class MediaService extends BaseService {
       try {
         const { key } = req.query;
         if (!key) return res.status(400).json({ success: false, error: { code: 'MISSING_KEY', message: 'key required' } });
+        const keyStr = key as string;
+        // Ownership check: key must belong to requesting user (uploads/{userId}/...)
+        const userId = req.user!.sub;
+        if (!keyStr.startsWith(`uploads/${userId}/`) && !keyStr.startsWith(`thumbnails/${userId}/`)) {
+          return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'Access denied to this resource' } });
+        }
 
         const signedUrl = await getSignedUrl(this.s3, new GetObjectCommand({
           Bucket: bucket,
-          Key: key as string,
+          Key: keyStr,
         }), { expiresIn: 3600 });
 
         res.json({ success: true, data: { url: signedUrl } });
@@ -330,6 +336,11 @@ class MediaService extends BaseService {
       try {
         const key = req.query.key as string;
         if (key) {
+          // Ownership check: only allow deleting own uploads
+          const userId = req.user!.sub;
+          if (!key.startsWith(`uploads/${userId}/`) && !key.startsWith(`thumbnails/${userId}/`)) {
+            return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'Access denied to this resource' } });
+          }
           await this.s3.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
         }
         res.json({ success: true });

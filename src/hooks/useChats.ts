@@ -1,7 +1,7 @@
 import useSWR from "swr";
 import { useAuthStore } from "@/stores/auth.store";
 import type { TeplaChat } from "@/types/chat";
-import { DEMO_CHATS, DEMO_CURRENT_USER } from "@/lib/demo-data";
+// Demo data removed — all chats come from the backend
 
 type ChatsResponse = {
   chats: TeplaChat[];
@@ -18,7 +18,7 @@ const fetcher = async (url: string) => {
 
 export const useChats = () => {
   const authUser = useAuthStore((state) => state.user);
-  const currentUserId = authUser?.id ?? DEMO_CURRENT_USER.id;
+  const currentUserId = authUser?.id ?? '';
   const backendEnabled = Boolean(authUser?.id);
   const swrKey = backendEnabled
     ? `/api/chats?userId=${encodeURIComponent(currentUserId)}`
@@ -135,7 +135,7 @@ export const useChats = () => {
   };
 
   return {
-    chats: backendEnabled ? data?.chats ?? [] : DEMO_CHATS,
+    chats: data?.chats ?? [],
     currentUserId,
     backendEnabled,
     isLoading: backendEnabled ? isLoading : false,

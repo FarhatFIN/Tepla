@@ -121,9 +121,31 @@ class BotRepository extends BaseRepository {
   }
 }
 
+// ─── Webhook URL Validation (SSRF protection) ────
+function isAllowedWebhookUrl(urlStr: string): boolean {
+  try {
+    const url = new URL(urlStr);
+    if (url.protocol !== 'https:') return false;
+    const host = url.hostname.toLowerCase();
+    // Block internal/private IP ranges and metadata endpoints
+    const blocked = [
+      /^localhost$/i, /^127\./, /^10\./, /^172\.(1[6-9]|2\d|3[01])\./, /^192\.168\./,
+      /^0\./, /^169\.254\./, /^\[::1\]$/, /^\[fc/, /^\[fd/, /^\[fe80/,
+      /^metadata\.google\.internal$/, /^169\.254\.169\.254$/,
+    ];
+    return !blocked.some(re => re.test(host));
+  } catch {
+    return false;
+  }
+}
+
 // ─── Webhook Dispatcher ────────────────────
 async function dispatchWebhook(bot: Bot, update: BotUpdate): Promise<void> {
   if (!bot.webhookUrl) return;
+  if (!isAllowedWebhookUrl(bot.webhookUrl)) {
+    logger.warn('Blocked webhook to disallowed URL', { botId: bot.id, url: bot.webhookUrl });
+    return;
+  }
   try {
     const body = JSON.stringify(update);
     const signature = crypto.createHmac('sha256', bot.webhookSecret || '').update(body).digest('hex');
@@ -157,10 +179,10 @@ class BotService {
 
     await Promise.all([this.redis.connect(), this.kafka.connect()]);
 
-    // Listen for messages to route to bots
+    // Listen for messages to route to bots (skip bot messages to prevent infinite loops)
     this.consumer.on(EventType.MESSAGE_SENT, async (event) => {
-      const { chatId, content, senderId } = event.payload as any;
-      if (!content) return;
+      const { chatId, content, senderId, isBot } = event.payload as any;
+      if (!content || isBot) return;
 
       // ─── ElevenBot Handler ─────────────────────
       const elevenBotState = await this.redis.getJson<any>(`elevenbot:state:${senderId}`) || {};
@@ -241,8 +263,9 @@ class BotService {
           if (!bot) { reply = 'Invalid selection.'; newState = null; }
           else { reply = `Send webhook URL for @${bot.username} (must start with https):`; newState = { waiting: 'webhook_url', botId: bot.id }; }
         } else if (elevenBotState.waiting === 'webhook_url') {
-          if (!content.startsWith('https://')) { reply = 'URL must start with https://. Try again:'; newState = elevenBotState; }
-          else {
+          if (!content.startsWith('https://') || !isAllowedWebhookUrl(content.trim())) {
+            reply = 'URL must start with https:// and not point to internal addresses. Try again:'; newState = elevenBotState;
+          } else {
             await this.repo.update(elevenBotState.botId, { webhookUrl: content.trim() } as any);
             reply = `✅ Webhook set to ${content.trim()}`;
             newState = null;
@@ -362,6 +385,10 @@ class BotService {
       try {
         const bot = await this.repo.findById(req.params.botId as BotId);
         if (!bot || bot.ownerId !== req.user!.sub) throw new AppError('Not found', 404);
+        // Validate webhook URL if being updated
+        if (req.body.webhookUrl && !isAllowedWebhookUrl(req.body.webhookUrl)) {
+          throw new AppError('Invalid webhook URL: must be HTTPS and not point to internal addresses', 400);
+        }
         await this.repo.update(bot.id, req.body);
         const updated = await this.repo.findById(bot.id);
         res.json({ success: true, data: updated });

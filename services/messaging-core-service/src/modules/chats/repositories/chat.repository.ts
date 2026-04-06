@@ -16,12 +16,12 @@ export class ChatRepository extends BaseRepository {
         (SELECT json_build_object(
           'id', m.id, 'senderId', m.sender_id, 'content', m.content,
           'type', m.type, 'createdAt', m.created_at
-        ) FROM messages m WHERE m.chat_id = c.id ORDER BY m.created_at DESC LIMIT 1) AS last_message
+        ) FROM messages m WHERE m.chat_id = c.id AND m.is_deleted = false ORDER BY m.created_at DESC LIMIT 1) AS last_message
       FROM chats c
       JOIN chat_members cm ON cm.chat_id = c.id AND cm.user_id = $1
       WHERE cm.role != 'banned'
       ORDER BY COALESCE(
-        (SELECT m.created_at FROM messages m WHERE m.chat_id = c.id ORDER BY m.created_at DESC LIMIT 1),
+        (SELECT m.created_at FROM messages m WHERE m.chat_id = c.id AND m.is_deleted = false ORDER BY m.created_at DESC LIMIT 1),
         c.created_at
       ) DESC
     `;

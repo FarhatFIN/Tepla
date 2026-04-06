@@ -147,6 +147,10 @@ export const MessageInput = ({
       if (editingMessage) {
         await editMessage(editingMessage.id, plaintext);
       } else {
+        // TODO(security): E2E encryption is not yet active. The field is named
+        // encryptedContent but currently transmits plaintext. Wire up the X3DH /
+        // Double Ratchet crypto layer from src/lib/crypto/ before launching to
+        // production. Until then, the server can read all message content.
         await sendMessage({
           chatId,
           encryptedContent: plaintext,

@@ -9,13 +9,8 @@ import { useAuthStore } from "@/stores/auth.store";
 import { getTeplaSocket, onConnectionChange } from "@/lib/socket";
 import { offlineQueue } from "@/lib/offline-queue";
 import { messageCache } from "@/lib/message-cache";
-import {
-  buildDemoReply,
-  DEMO_CURRENT_USER,
-  getDemoMessages,
-  isDemoChat,
-} from "@/lib/demo-data";
-import { usePresenceStore } from "@/stores/presence.store";
+// Demo data removed — all messages come from the backend or are empty
+// Presence store removed — was only used for demo typing indicators
 
 type MessagesResponse = {
   messages: TeplaMessage[];
@@ -48,9 +43,9 @@ const toLocalMessage = (
 
 export const useMessages = (chatId: ChatId | null) => {
   const authUser = useAuthStore((state) => state.user);
-  const currentUserId = authUser?.id ?? DEMO_CURRENT_USER.id;
+  const currentUserId = authUser?.id ?? '';
   const backendEnabled = Boolean(authUser?.id);
-  const demoMode = !backendEnabled || isDemoChat(chatId);
+  const demoMode = false;
   const {
     messagesByChat,
     pinnedMessagesByChat,
@@ -126,17 +121,7 @@ export const useMessages = (chatId: ChatId | null) => {
       return;
     }
 
-    if (demoMode) {
-      const hydrated = getDemoMessages(chatId).map((message) =>
-        toLocalMessage(message, currentUserId),
-      );
-      syncMessages(chatId, hydrated);
-      applyPinnedMessages(
-        chatId,
-        hydrated.filter((message) => message.isPinned),
-      );
-      return;
-    }
+    if (!backendEnabled) return;
 
     if (!data) {
       return;
@@ -284,44 +269,7 @@ export const useMessages = (chatId: ChatId | null) => {
 
     appendMessage(params.chatId, optimistic);
 
-    if (isDemoChat(params.chatId) || !backendEnabled) {
-      await new Promise((resolve) => {
-        setTimeout(resolve, 160);
-      });
-
-      const finalMessageId = `demo-local-${uuidv4()}`;
-      replaceOptimistic(params.chatId, localId, {
-        ...optimistic,
-        id: finalMessageId,
-        localId: finalMessageId,
-        status: "sent",
-      });
-
-      const reply = buildDemoReply(
-        params.chatId,
-        params.encryptedContent?.trim() ?? "Voice message",
-      );
-
-      if (reply) {
-        const companionId = reply.senderId ?? "demo-companion";
-        const { setTyping } = usePresenceStore.getState();
-        setTyping(params.chatId, companionId, true);
-
-        setTimeout(() => {
-          setTyping(params.chatId, companionId, false);
-          const replyId = `${reply.id}-${uuidv4()}`;
-          appendMessage(params.chatId, {
-            ...reply,
-            id: replyId,
-            localId: replyId,
-            status: "delivered",
-            createdAt: new Date().toISOString(),
-          });
-        }, 900);
-      }
-
-      return;
-    }
+    if (!backendEnabled) return;
 
     try {
       const response = await fetch("/api/messages", {
@@ -515,12 +463,7 @@ export const useMessages = (chatId: ChatId | null) => {
     await setSize(size + 1);
   };
 
-  const demoThread =
-    chatId && demoMode
-      ? getDemoMessages(chatId).map((message) => toLocalMessage(message, currentUserId))
-      : [];
-
-  const thread = chatId ? messagesByChat[chatId] ?? demoThread : [];
+  const thread = chatId ? messagesByChat[chatId] ?? [] : [];
   const pinnedMessages = chatId ? pinnedMessagesByChat[chatId] ?? [] : [];
   const oldestPage = data?.[data.length - 1];
 

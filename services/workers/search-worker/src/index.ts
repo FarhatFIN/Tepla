@@ -34,9 +34,15 @@ const BULK_MAX_SIZE = 100;
 const BULK_FLUSH_MS = 500;
 let bulkTimer: NodeJS.Timeout | null = null;
 
+// Track offsets for manual commit after successful ES write
+let pendingOffsets: Map<string, { partition: number; offset: string }> = new Map();
+let consumer: KafkaConsumer;
+
 async function flushBulk(): Promise<void> {
   if (bulkBuffer.length === 0) return;
   const ops = bulkBuffer.splice(0, bulkBuffer.length);
+  const offsets = new Map(pendingOffsets);
+  pendingOffsets.clear();
   const body = ops.flatMap(op => op.doc ? [op.action, op.doc] : [op.action]);
   try {
     const result = await elastic.bulk({ body });
@@ -46,8 +52,15 @@ async function flushBulk(): Promise<void> {
     } else {
       logger.debug(`Indexed ${ops.length} documents`);
     }
+    // Commit offsets only after successful ES write
+    if (offsets.size > 0) {
+      const commitData = Array.from(offsets.entries()).map(([topic, { partition, offset }]) => ({
+        topic, partition, offset: String(Number(offset) + 1),
+      }));
+      await consumer.commitOffsets(commitData);
+    }
   } catch (err) {
-    logger.error('Bulk indexing failed', { error: (err as Error).message, count: ops.length });
+    logger.error('Bulk indexing failed — offsets NOT committed, will retry on restart', { error: (err as Error).message, count: ops.length });
   }
 }
 
@@ -65,7 +78,7 @@ function enqueueBulk(action: object, doc?: object): void {
 async function start(): Promise<void> {
   await ensureIndices();
 
-  const consumer = new KafkaConsumer('search-worker', 'search-index-group');
+  consumer = new KafkaConsumer('search-worker', 'search-index-group', { autoCommit: false });
   await consumer.subscribe([EventTopic.MESSAGE_EVENTS, EventTopic.USER_EVENTS, EventTopic.CHAT_EVENTS]);
 
   consumer.on(EventType.MESSAGE_SENT, async (event: DomainEvent) => {

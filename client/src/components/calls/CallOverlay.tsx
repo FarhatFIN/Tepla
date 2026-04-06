@@ -4,17 +4,7 @@ import Avatar from "@/components/ui/Avatar";
 import { useChatStore } from "@/stores/chat-store";
 import { useAuthStore } from "@/stores/auth-store";
 import { useTranslation } from "@/hooks/useTranslation";
-
-const AGORA_APP_ID = "fe668b6a178645fbaa767f3e7dbc9f3d";
-
-interface AgoraClient {
-  join: (appId: string, channel: string, token: string | null, uid: string | number) => Promise<any>;
-  leave: () => Promise<void>;
-  publish: (tracks: any[]) => Promise<void>;
-  unpublish: (tracks: any[]) => Promise<void>;
-  on: (event: string, cb: (...args: any[]) => void) => void;
-  remoteUsers: any[];
-}
+import api from "@/lib/api";
 
 export default function CallOverlay() {
   const { showCalls, toggleCalls, chats, activeChatId } = useChatStore();
@@ -26,25 +16,24 @@ export default function CallOverlay() {
   const [callType, setCallType] = useState<"voice" | "video">("voice");
   const [callState, setCallState] = useState<"connecting" | "ringing" | "active" | "ended">("connecting");
   const [callDuration, setCallDuration] = useState(0);
-  const [participants, setParticipants] = useState<{ uid: string | number; name?: string; avatar?: string; hasVideo: boolean; hasAudio: boolean }[]>([]);
+  const [participants, setParticipants] = useState<{ identity: string; name?: string; avatar?: string; hasVideo: boolean; hasAudio: boolean }[]>([]);
 
-  const clientRef = useRef<AgoraClient | null>(null);
+  const roomRef = useRef<any>(null);
   const localAudioRef = useRef<any>(null);
   const localVideoRef = useRef<any>(null);
-  const localScreenRef = useRef<any>(null);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const localVideoContainerRef = useRef<HTMLDivElement>(null);
 
   const chat = chats.find((c) => c.id === activeChatId);
-  const channelName = activeChatId ? `tepla-${activeChatId.slice(0, 8)}` : "";
+  const roomName = activeChatId ? `tepla-${activeChatId.slice(0, 8)}` : "";
 
   const cleanup = useCallback(async () => {
     if (timerRef.current) clearInterval(timerRef.current);
     try {
-      if (localAudioRef.current) { localAudioRef.current.close(); localAudioRef.current = null; }
-      if (localVideoRef.current) { localVideoRef.current.close(); localVideoRef.current = null; }
-      if (localScreenRef.current) { localScreenRef.current.close(); localScreenRef.current = null; }
-      if (clientRef.current) { await clientRef.current.leave(); clientRef.current = null; }
+      if (roomRef.current) {
+        roomRef.current.disconnect();
+        roomRef.current = null;
+      }
     } catch { /* ignore cleanup errors */ }
   }, []);
 
@@ -56,55 +45,70 @@ export default function CallOverlay() {
 
     async function startCall() {
       try {
-        // Dynamic import of Agora SDK
-        const AgoraRTC = (await import("agora-rtc-sdk-ng")).default;
+        // Get LiveKit token from backend
+        const res = await api.post<{ success: boolean; data: { token: string; url: string } }>("/calls/token", {
+          roomName,
+          participantName: user?.name || user?.username || "User",
+          chatId: activeChatId,
+          callType,
+        });
+        const { token, url } = res.data;
+        if (!token || !url) {
+          console.warn("[call] No LiveKit token/url received");
+          setCallState("ended");
+          return;
+        }
+
         if (cancelled) return;
 
-        const client = AgoraRTC.createClient({ mode: "rtc", codec: "vp8" }) as unknown as AgoraClient;
-        clientRef.current = client;
+        // Dynamic import of LiveKit SDK
+        const { Room, RoomEvent, Track } = await import("livekit-client");
 
-        // Handle remote user events
-        client.on("user-published", async (remoteUser: any, mediaType: string) => {
-          await (client as any).subscribe(remoteUser, mediaType);
+        const room = new Room();
+        roomRef.current = room;
+
+        // Handle remote participant events
+        room.on(RoomEvent.TrackSubscribed, (track: any, _pub: any, participant: any) => {
           setParticipants((prev) => {
-            const existing = prev.find((p) => p.uid === remoteUser.uid);
+            const existing = prev.find((p) => p.identity === participant.identity);
+            const hasVideo = track.kind === Track.Kind.Video || (existing?.hasVideo ?? false);
+            const hasAudio = track.kind === Track.Kind.Audio || (existing?.hasAudio ?? false);
             if (existing) {
-              return prev.map((p) => p.uid === remoteUser.uid ? { ...p, hasVideo: mediaType === "video" || p.hasVideo, hasAudio: mediaType === "audio" || p.hasAudio } : p);
+              return prev.map((p) => p.identity === participant.identity ? { ...p, hasVideo, hasAudio } : p);
             }
-            return [...prev, { uid: remoteUser.uid, hasVideo: mediaType === "video", hasAudio: mediaType === "audio" }];
+            return [...prev, { identity: participant.identity, name: participant.name, hasVideo, hasAudio }];
           });
-          // Play remote video
-          if (mediaType === "video") {
-            const el = document.getElementById(`remote-video-${remoteUser.uid}`);
-            if (el) remoteUser.videoTrack?.play(el);
+          if (track.kind === Track.Kind.Video) {
+            const el = document.getElementById(`remote-video-${participant.identity}`);
+            if (el) track.attach(el);
           }
-          if (mediaType === "audio") {
-            remoteUser.audioTrack?.play();
+          if (track.kind === Track.Kind.Audio) {
+            const audioEl = track.attach();
+            document.body.appendChild(audioEl);
           }
         });
 
-        client.on("user-unpublished", (remoteUser: any, mediaType: string) => {
+        room.on(RoomEvent.TrackUnsubscribed, (track: any, _pub: any, participant: any) => {
+          track.detach().forEach((el: HTMLElement) => el.remove());
           setParticipants((prev) =>
-            prev.map((p) => p.uid === remoteUser.uid ? { ...p, hasVideo: mediaType === "video" ? false : p.hasVideo, hasAudio: mediaType === "audio" ? false : p.hasAudio } : p)
+            prev.map((p) => p.identity === participant.identity
+              ? { ...p, hasVideo: track.kind === Track.Kind.Video ? false : p.hasVideo, hasAudio: track.kind === Track.Kind.Audio ? false : p.hasAudio }
+              : p)
           );
         });
 
-        client.on("user-left", (remoteUser: any) => {
-          setParticipants((prev) => prev.filter((p) => p.uid !== remoteUser.uid));
+        room.on(RoomEvent.ParticipantDisconnected, (participant: any) => {
+          setParticipants((prev) => prev.filter((p) => p.identity !== participant.identity));
         });
 
-        // Join channel
+        // Connect to room
         setCallState("ringing");
-        const uid = user?.id?.slice(0, 8) || String(Math.floor(Math.random() * 100000));
-        await client.join(AGORA_APP_ID, channelName, null, uid);
+        await room.connect(url, token);
 
-        if (cancelled) { await client.leave(); return; }
+        if (cancelled) { room.disconnect(); return; }
 
-        // Create and publish audio track
-        const audioTrack = await AgoraRTC.createMicrophoneAudioTrack();
-        localAudioRef.current = audioTrack;
-        await client.publish([audioTrack]);
-
+        // Enable microphone
+        await room.localParticipant.setMicrophoneEnabled(true);
         setCallState("active");
 
         // Start timer
@@ -124,8 +128,8 @@ export default function CallOverlay() {
 
   // Toggle mute
   const toggleMute = async () => {
-    if (localAudioRef.current) {
-      await localAudioRef.current.setEnabled(isMuted);
+    if (roomRef.current) {
+      await roomRef.current.localParticipant.setMicrophoneEnabled(isMuted);
       setIsMuted(!isMuted);
     }
   };
@@ -133,25 +137,10 @@ export default function CallOverlay() {
   // Toggle video
   const toggleVideo = async () => {
     try {
-      if (isVideoOn) {
-        if (localVideoRef.current && clientRef.current) {
-          await clientRef.current.unpublish([localVideoRef.current]);
-          localVideoRef.current.close();
-          localVideoRef.current = null;
-        }
-        setIsVideoOn(false);
-      } else {
-        const AgoraRTC = (await import("agora-rtc-sdk-ng")).default;
-        const videoTrack = await AgoraRTC.createCameraVideoTrack();
-        localVideoRef.current = videoTrack;
-        if (clientRef.current) {
-          await clientRef.current.publish([videoTrack]);
-        }
-        if (localVideoContainerRef.current) {
-          videoTrack.play(localVideoContainerRef.current);
-        }
-        setIsVideoOn(true);
-        setCallType("video");
+      if (roomRef.current) {
+        await roomRef.current.localParticipant.setCameraEnabled(!isVideoOn);
+        setIsVideoOn(!isVideoOn);
+        if (!isVideoOn) setCallType("video");
       }
     } catch (err) {
       console.warn("[call] Video toggle failed:", err);
@@ -161,32 +150,9 @@ export default function CallOverlay() {
   // Toggle screen share
   const toggleScreenShare = async () => {
     try {
-      if (isScreenSharing) {
-        if (localScreenRef.current && clientRef.current) {
-          await clientRef.current.unpublish([localScreenRef.current]);
-          localScreenRef.current.close();
-          localScreenRef.current = null;
-        }
-        setIsScreenSharing(false);
-      } else {
-        const AgoraRTC = (await import("agora-rtc-sdk-ng")).default;
-        const screenTrack = await AgoraRTC.createScreenVideoTrack({}, "disable");
-        const track = Array.isArray(screenTrack) ? screenTrack[0] : screenTrack;
-        localScreenRef.current = track;
-        if (clientRef.current) {
-          // Unpublish camera if active
-          if (localVideoRef.current) {
-            await clientRef.current.unpublish([localVideoRef.current]);
-            localVideoRef.current.close();
-            localVideoRef.current = null;
-            setIsVideoOn(false);
-          }
-          await clientRef.current.publish([track]);
-        }
-        (track as any).on?.("track-ended", () => {
-          toggleScreenShare();
-        });
-        setIsScreenSharing(true);
+      if (roomRef.current) {
+        await roomRef.current.localParticipant.setScreenShareEnabled(!isScreenSharing);
+        setIsScreenSharing(!isScreenSharing);
       }
     } catch (err) {
       console.warn("[call] Screen share failed:", err);
@@ -240,10 +206,10 @@ export default function CallOverlay() {
             </div>
             {/* Remote videos */}
             {participants.filter((p) => p.hasVideo).map((p) => (
-              <div key={String(p.uid)} className="relative aspect-video rounded-xl bg-black overflow-hidden">
-                <div id={`remote-video-${p.uid}`} className="absolute inset-0" />
+              <div key={p.identity} className="relative aspect-video rounded-xl bg-black overflow-hidden">
+                <div id={`remote-video-${p.identity}`} className="absolute inset-0" />
                 <div className="absolute bottom-2 left-2 rounded-lg bg-black/50 px-2 py-1">
-                  <span className="text-[10px] text-white">{p.name || String(p.uid).slice(0, 6)}</span>
+                  <span className="text-[10px] text-white">{p.name || p.identity.slice(0, 6)}</span>
                 </div>
               </div>
             ))}
@@ -254,8 +220,8 @@ export default function CallOverlay() {
               <div className="flex -space-x-3">
                 <Avatar name={chat.name} src={chat.avatar} size="xl" showStatus={false} />
                 {participants.slice(0, 3).map((p) => (
-                  <div key={String(p.uid)} className="flex h-12 w-12 items-center justify-center rounded-full bg-[var(--accent)] text-sm font-bold text-white ring-2 ring-[var(--bg-card)]">
-                    {(p.name || String(p.uid))[0].toUpperCase()}
+                  <div key={p.identity} className="flex h-12 w-12 items-center justify-center rounded-full bg-[var(--accent)] text-sm font-bold text-white ring-2 ring-[var(--bg-card)]">
+                    {(p.name || p.identity)[0].toUpperCase()}
                   </div>
                 ))}
               </div>
@@ -275,9 +241,9 @@ export default function CallOverlay() {
         {isGroupCall && participants.length > 0 && (
           <div className="flex w-full flex-wrap gap-2 rounded-xl bg-[var(--bg-input)] p-3">
             {participants.map((p) => (
-              <div key={String(p.uid)} className="flex items-center gap-2 rounded-lg bg-[var(--bg-main)] px-2.5 py-1.5">
+              <div key={p.identity} className="flex items-center gap-2 rounded-lg bg-[var(--bg-main)] px-2.5 py-1.5">
                 <div className={`h-2 w-2 rounded-full ${p.hasAudio ? "bg-[#00D46A]" : "bg-red-400"}`} />
-                <span className="text-xs">{p.name || String(p.uid).slice(0, 6)}</span>
+                <span className="text-xs">{p.name || p.identity.slice(0, 6)}</span>
                 {p.hasVideo && <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>}
               </div>
             ))}

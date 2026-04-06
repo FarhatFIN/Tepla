@@ -4,6 +4,7 @@
 // ============================================
 
 export { BaseService } from './base-service';
+export { BaseWorker } from './base-worker';
 export { BaseRepository } from './base-repository';
 export { KafkaProducer, KafkaConsumer } from './kafka';
 export { RedisClient, RedisRole } from './redis';

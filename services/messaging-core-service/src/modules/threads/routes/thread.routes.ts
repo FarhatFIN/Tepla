@@ -35,13 +35,13 @@ class ThreadRepository extends BaseRepository {
   async getThreadMessages(threadId: string, limit = 50, cursor?: string): Promise<any[]> {
     if (cursor) {
       return this.queryMany(
-        `SELECT * FROM messages WHERE thread_id = $1 AND created_at < (SELECT created_at FROM messages WHERE id = $2)
+        `SELECT * FROM messages WHERE thread_id = $1 AND is_deleted = false AND created_at < (SELECT created_at FROM messages WHERE id = $2)
          ORDER BY created_at DESC LIMIT $3`,
         [threadId, cursor, limit]
       );
     }
     return this.queryMany(
-      `SELECT * FROM messages WHERE thread_id = $1 ORDER BY created_at DESC LIMIT $2`,
+      `SELECT * FROM messages WHERE thread_id = $1 AND is_deleted = false ORDER BY created_at DESC LIMIT $2`,
       [threadId, limit]
     );
   }

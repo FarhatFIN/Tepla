@@ -53,6 +53,26 @@ export class StickerRepository extends BaseRepository {
     return this.mapPack(row, stickers);
   }
 
+  private async attachStickers(rows: any[], previewLimit?: number): Promise<StickerPack[]> {
+    if (rows.length === 0) return [];
+    const packIds = rows.map(r => r.id);
+    const placeholders = packIds.map((_, i) => `$${i + 1}`).join(',');
+    const limitClause = previewLimit
+      ? ` AND position <= ${previewLimit}`
+      : '';
+    const allStickers = await this.queryMany<any>(
+      `SELECT * FROM stickers WHERE pack_id IN (${placeholders})${limitClause} ORDER BY pack_id, position`,
+      packIds
+    );
+    const stickersByPack = new Map<string, any[]>();
+    for (const s of allStickers) {
+      const list = stickersByPack.get(s.pack_id) || [];
+      list.push(s);
+      stickersByPack.set(s.pack_id, list);
+    }
+    return rows.map(row => this.mapPack(row, stickersByPack.get(row.id) || []));
+  }
+
   async searchPacks(query: string, limit = 20): Promise<StickerPack[]> {
     const rows = await this.queryMany<any>(
       `SELECT sp.*, COUNT(si.user_id) as install_count_real
@@ -64,14 +84,7 @@ export class StickerRepository extends BaseRepository {
        LIMIT $2`,
       [`%${query}%`, limit]
     );
-    const packs: StickerPack[] = [];
-    for (const row of rows) {
-      const stickers = await this.queryMany<any>(
-        `SELECT * FROM stickers WHERE pack_id = $1 ORDER BY position LIMIT 5`, [row.id]
-      );
-      packs.push(this.mapPack(row, stickers));
-    }
-    return packs;
+    return this.attachStickers(rows, 5);
   }
 
   async getTrending(limit = 20): Promise<StickerPack[]> {
@@ -84,14 +97,7 @@ export class StickerRepository extends BaseRepository {
        LIMIT $1`,
       [limit]
     );
-    const packs: StickerPack[] = [];
-    for (const row of rows) {
-      const stickers = await this.queryMany<any>(
-        `SELECT * FROM stickers WHERE pack_id = $1 ORDER BY position LIMIT 5`, [row.id]
-      );
-      packs.push(this.mapPack(row, stickers));
-    }
-    return packs;
+    return this.attachStickers(rows, 5);
   }
 
   async installPack(userId: UserId, packId: StickerPackId): Promise<void> {
@@ -116,14 +122,7 @@ export class StickerRepository extends BaseRepository {
        ORDER BY si.installed_at DESC`,
       [userId]
     );
-    const packs: StickerPack[] = [];
-    for (const row of rows) {
-      const stickers = await this.queryMany<any>(
-        `SELECT * FROM stickers WHERE pack_id = $1 ORDER BY position`, [row.id]
-      );
-      packs.push(this.mapPack(row, stickers));
-    }
-    return packs;
+    return this.attachStickers(rows);
   }
 
   async getRecentStickers(userId: UserId, limit = 30): Promise<Sticker[]> {

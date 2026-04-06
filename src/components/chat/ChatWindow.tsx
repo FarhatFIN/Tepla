@@ -22,7 +22,7 @@ import { MessageBubble } from "./MessageBubble";
 import { MessageInput } from "./MessageInput";
 import { PinnedMessagesBar } from "./PinnedMessagesBar";
 import { SparksDialog } from "./SparksDialog";
-import { DEMO_CHAT_META } from "@/lib/demo-data";
+// Demo data removed
 
 type ChatWindowProps = {
   chat: TeplaChat | null;
@@ -91,9 +91,7 @@ export const ChatWindow = ({ chat }: ChatWindowProps) => {
   const companionUserId = chat?.type === "direct" && chat.user?.id ? chat.user.id : null;
   const isCompanionOnline = usePresenceStore((s) => companionUserId ? s.onlineUserIds.has(companionUserId) : false);
   const companionLastSeen = usePresenceStore((s) => companionUserId ? s.lastSeenByUser[companionUserId] ?? null : null);
-  const chatMeta = chatId ? DEMO_CHAT_META[chatId] : null;
   const canManagePins =
-    demoMode ||
     chat?.currentUserRole === "owner" ||
     chat?.currentUserRole === "admin";
   const activeTypingUsers = chatId
@@ -131,7 +129,7 @@ export const ChatWindow = ({ chat }: ChatWindowProps) => {
 
   const typingLabel =
     activeTypingUsers.length > 0
-      ? `${chatMeta?.companionName ?? "Someone"} is typing...`
+      ? `${chat?.user?.displayName ?? "Someone"} is typing...`
       : null;
 
   const handleEdit = async (message: LocalMessage) => {
@@ -289,7 +287,7 @@ export const ChatWindow = ({ chat }: ChatWindowProps) => {
               size="md"
               src={chat.avatarUrl ?? undefined}
               alt={chat.name ?? chat.username ?? "Chat"}
-              online={chatMeta?.online}
+              online={isCompanionOnline}
             />
             <div className="min-w-0">
               <div className="flex items-center gap-2">

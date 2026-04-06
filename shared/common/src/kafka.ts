@@ -96,7 +96,10 @@ export class KafkaConsumer {
   private handlers = new Map<string, EventHandler[]>();
   private connected = false;
 
-  constructor(clientId: string, groupId: string) {
+  private autoCommit: boolean;
+
+  constructor(clientId: string, groupId: string, opts?: { autoCommit?: boolean }) {
+    this.autoCommit = opts?.autoCommit !== false; // default true for backwards compat
     const kafka = createKafkaInstance(clientId);
     this.consumer = kafka.consumer({
       groupId,
@@ -123,9 +126,14 @@ export class KafkaConsumer {
     logger.info('Kafka consumer subscribed', { topics });
   }
 
+  async commitOffsets(offsets: Array<{ topic: string; partition: number; offset: string }>): Promise<void> {
+    await this.consumer.commitOffsets(offsets);
+  }
+
   async start(): Promise<void> {
     await this.consumer.run({
-      eachMessage: async ({ topic, message }: EachMessagePayload) => {
+      autoCommit: this.autoCommit,
+      eachMessage: async ({ topic, partition, message }: EachMessagePayload) => {
         try {
           const event: DomainEvent = JSON.parse(message.value!.toString());
           const handlers = this.handlers.get(event.type) || [];
