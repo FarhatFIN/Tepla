@@ -33,6 +33,8 @@ interface AuthState {
   setLanguage: (lang: string) => void;
   setUsername: (username: string) => void;
   setAvatar: (avatarDataUrl: string) => void;
+  setBio: (bio: string) => void;
+  setBirthDate: (birthDate: string) => void;
   hydrate: () => void;
 }
 
@@ -264,6 +266,42 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     saveAccountToList(updated, get().token!, get().language);
     set({ savedAccounts: getSavedAccounts() });
     api.patch("/users/" + user.id, { avatarUrl: avatarDataUrl }).catch(() => {});
+  },
+
+  setBio: (bio) => {
+    const { user } = get();
+    if (!user) return;
+    api.patch("/users/" + user.id, { bio }).catch((err) =>
+      console.warn("[auth] bio update failed:", err)
+    );
+    const updated = { ...user, bio };
+    set({ user: updated });
+    const stored = localStorage.getItem("tepla-auth");
+    if (stored) {
+      const data = JSON.parse(stored);
+      data.user = updated;
+      localStorage.setItem("tepla-auth", JSON.stringify(data));
+    }
+    saveAccountToList(updated, get().token!, get().language);
+    set({ savedAccounts: getSavedAccounts() });
+  },
+
+  setBirthDate: (birthDate) => {
+    const { user } = get();
+    if (!user) return;
+    api.patch("/users/" + user.id, { birthDate }).catch((err) =>
+      console.warn("[auth] birthDate update failed:", err)
+    );
+    const updated = { ...user, birthDate };
+    set({ user: updated });
+    const stored = localStorage.getItem("tepla-auth");
+    if (stored) {
+      const data = JSON.parse(stored);
+      data.user = updated;
+      localStorage.setItem("tepla-auth", JSON.stringify(data));
+    }
+    saveAccountToList(updated, get().token!, get().language);
+    set({ savedAccounts: getSavedAccounts() });
   },
 
   setUsername: (username) => {

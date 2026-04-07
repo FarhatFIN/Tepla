@@ -15,6 +15,7 @@ export interface User {
   username?: string;
   avatar?: string;
   bio?: string;
+  birthDate?: string;
   phone?: string;
   status: PresenceStatus;
   lastSeen?: string;
