@@ -5,6 +5,7 @@ import { JwtPayload, UserId } from '@tepla/types';
 import { UnauthorizedError, ForbiddenError } from './errors';
 import { RedisClient } from './redis';
 import { createLogger } from './logger';
+import { requestContext, RequestContext } from './context';
 
 const logger = createLogger('middleware');
 
@@ -32,6 +33,13 @@ export function authMiddleware(jwtSecret?: string) {
     try {
       const payload = jwt.verify(token, secret) as JwtPayload;
       req.user = payload;
+
+      // Update AsyncLocalStorage context with userId
+      const store = requestContext.getStore();
+      if (store) {
+        store.userId = payload.sub;
+      }
+
       next();
     } catch (err) {
       if ((err as Error).name === 'TokenExpiredError') {
@@ -42,12 +50,25 @@ export function authMiddleware(jwtSecret?: string) {
   };
 }
 
-// ─── Correlation ID Middleware ───────────────
+// ─── Correlation ID Middleware (with AsyncLocalStorage) ─────
 export function correlationMiddleware() {
-  return (req: Request, _res: Response, next: NextFunction) => {
-    req.correlationId = (req.headers['x-correlation-id'] as string) ||
+  return (req: Request, res: Response, next: NextFunction) => {
+    const correlationId = (req.headers['x-correlation-id'] as string) ||
       crypto.randomUUID();
-    next();
+    req.correlationId = correlationId;
+
+    // Set response header for tracing
+    res.setHeader('X-Correlation-ID', correlationId);
+
+    // Wrap remainder of request in AsyncLocalStorage context
+    const ctx: RequestContext = {
+      correlationId,
+      requestId: crypto.randomUUID(),
+      startTime: Date.now(),
+      service: '', // set by requestLoggerMiddleware
+    };
+
+    requestContext.run(ctx, () => next());
   };
 }
 
@@ -56,6 +77,11 @@ export function requestLoggerMiddleware(serviceName: string) {
   const svcLogger = createLogger(serviceName);
   return (req: Request, res: Response, next: NextFunction) => {
     const start = Date.now();
+
+    // Tag context with service name
+    const store = requestContext.getStore();
+    if (store) store.service = serviceName;
+
     res.on('finish', () => {
       svcLogger.info('request', {
         method: req.method,
@@ -70,37 +96,67 @@ export function requestLoggerMiddleware(serviceName: string) {
   };
 }
 
-// ─── Rate Limiter Middleware (Redis-based) ───
+// ─── Rate Limiter Middleware (Redis sliding window) ───
+// Uses sorted sets + Lua for atomic sliding window.
+// Replaces the old fixed-window INCR counter which had boundary burst issues.
+const RATE_LIMIT_LUA = `
+local key = KEYS[1]
+local now = tonumber(ARGV[1])
+local window = tonumber(ARGV[2])
+local max = tonumber(ARGV[3])
+redis.call('ZREMRANGEBYSCORE', key, 0, now - window)
+local count = redis.call('ZCARD', key)
+if count >= max then
+  local oldest = redis.call('ZRANGE', key, 0, 0, 'WITHSCORES')
+  local retryAfterMs = 0
+  if #oldest > 0 then retryAfterMs = window - (now - tonumber(oldest[2])) end
+  return {0, retryAfterMs, count}
+end
+redis.call('ZADD', key, now, now .. ':' .. math.random(1000000))
+redis.call('PEXPIRE', key, window)
+return {1, 0, count + 1}
+`;
+
 export function rateLimitMiddleware(redis: RedisClient, opts: {
   windowMs: number;
   maxRequests: number;
   keyPrefix?: string;
 }) {
   const { windowMs, maxRequests, keyPrefix = 'rl' } = opts;
-  const windowSec = Math.ceil(windowMs / 1000);
 
   return async (req: Request, res: Response, next: NextFunction) => {
-    const identifier = req.user?.sub || req.ip;
-    const key = `${keyPrefix}:${identifier}`;
+    try {
+      const identifier = req.user?.sub || req.ip;
+      const key = `${keyPrefix}:${identifier}`;
+      const now = Date.now();
 
-    const current = await redis.incr(key);
-    if (current === 1) {
-      await redis.expire(key, windowSec);
+      const result = await redis.eval(
+        RATE_LIMIT_LUA,
+        [key],
+        [String(now), String(windowMs), String(maxRequests)]
+      ) as [number, number, number];
+
+      const [allowed, retryAfterMs, currentCount] = result;
+
+      res.setHeader('X-RateLimit-Limit', maxRequests);
+      res.setHeader('X-RateLimit-Remaining', Math.max(0, maxRequests - currentCount));
+      res.setHeader('X-RateLimit-Reset', new Date(now + windowMs).toISOString());
+
+      if (!allowed) {
+        const retryAfterSec = Math.ceil(retryAfterMs / 1000);
+        res.setHeader('Retry-After', retryAfterSec);
+        res.status(429).json({
+          success: false,
+          error: { code: 'RATE_LIMIT', message: `Too many requests. Retry after ${retryAfterSec}s` },
+        });
+        return;
+      }
+
+      next();
+    } catch (err) {
+      // Fail open — don't block requests if Redis is down
+      logger.error('Rate limiter error', { error: (err as Error).message });
+      next();
     }
-
-    res.setHeader('X-RateLimit-Limit', maxRequests);
-    res.setHeader('X-RateLimit-Remaining', Math.max(0, maxRequests - current));
-
-    if (current > maxRequests) {
-      const ttl = await redis.ttl(key);
-      res.setHeader('Retry-After', ttl);
-      res.status(429).json({
-        success: false,
-        error: { code: 'RATE_LIMIT', message: `Too many requests. Retry after ${ttl}s` },
-      });
-      return;
-    }
-
-    next();
   };
 }

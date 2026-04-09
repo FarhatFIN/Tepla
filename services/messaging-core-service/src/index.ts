@@ -28,6 +28,9 @@ import { moderationRouter } from './modules/moderation/moderation.module';
 // Translation
 import { translationRouter } from './modules/translation/translation.module';
 
+// Admin
+import { adminRouter } from './modules/admin/routes/admin.routes';
+
 const expiryLogger = createLogger('message-expiry');
 
 class MessagingCoreService extends BaseService {
@@ -65,6 +68,9 @@ class MessagingCoreService extends BaseService {
 
     // ─── Translation ────────────────────────────
     this.registerRoutes('/api/translate', translationRouter(this.redis!, this.kafka!));
+
+    // ─── Admin (outbox DLQ management) ──────────
+    this.registerRoutes('/api/admin', adminRouter());
 
     // ─── Outbox worker (publishes buffered events → Kafka) ──
     const outboxWorker = new OutboxWorker(this.kafka!);

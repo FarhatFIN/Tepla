@@ -1,4 +1,5 @@
 import { BaseRepository } from '@tepla/common';
+import { PoolClient } from 'pg';
 import { uuidv7 } from 'uuidv7';
 
 export class MessageRepository extends BaseRepository {
@@ -45,6 +46,31 @@ export class MessageRepository extends BaseRepository {
     ]);
   }
 
+  /**
+   * Create message within an existing transaction (PoolClient).
+   * Used for atomic message + outbox insert.
+   */
+  async createWithClient(client: PoolClient, input: any): Promise<any> {
+    const id = uuidv7();
+
+    const chatRows = await client.query('SELECT message_ttl_seconds FROM chats WHERE id = $1', [input.chat_id]);
+    const chat = chatRows.rows[0];
+    const ttl = input.ttl_seconds || chat?.message_ttl_seconds || null;
+    const expiresAt = ttl ? `NOW() + INTERVAL '${parseInt(ttl)} seconds'` : 'NULL';
+
+    const sql = `
+      INSERT INTO messages (id, id_v7, chat_id, sender_id, content, content_iv, encrypted_keys, type, reply_to_id, ttl_seconds, expires_at, created_at)
+      VALUES ($1, $1, $2, $3, $4, $5, $6, $7, $8, $9, ${expiresAt}, NOW())
+      RETURNING *
+    `;
+    const result = await client.query(sql, [
+      id, input.chat_id, input.sender_id, input.content,
+      input.content_iv, input.encrypted_keys, input.type, input.reply_to_id,
+      ttl,
+    ]);
+    return result.rows[0];
+  }
+
   async update(id: string, fields: Record<string, any>): Promise<any> {
     const keys = Object.keys(fields);
     const sets = keys.map((k, i) => `${k} = $${i + 2}`).join(', ');
@@ -60,13 +86,22 @@ export class MessageRepository extends BaseRepository {
   }
 
   async addAttachments(messageId: string, attachments: any[]): Promise<void> {
+    if (!attachments.length) return;
+    // Batch insert instead of N individual inserts
+    const values: string[] = [];
+    const params: unknown[] = [];
+    let idx = 1;
     for (const att of attachments) {
-      await this.execute(
-        `INSERT INTO files (id, id_v7, message_id, uploader_id, url, type, mime_type, size_bytes, file_name, created_at)
-         VALUES ($1, $1, $2, $3, $4, $5, $6, $7, $8, NOW())`,
-        [uuidv7(), messageId, att.uploaderId, att.url, att.type, att.mimeType, att.sizeBytes, att.fileName]
-      );
+      const id = uuidv7();
+      values.push(`($${idx}, $${idx}, $${idx + 1}, $${idx + 2}, $${idx + 3}, $${idx + 4}, $${idx + 5}, $${idx + 6}, $${idx + 7}, NOW())`);
+      params.push(id, messageId, att.uploaderId, att.url, att.type, att.mimeType, att.sizeBytes, att.fileName);
+      idx += 8;
     }
+    await this.execute(
+      `INSERT INTO files (id, id_v7, message_id, uploader_id, url, type, mime_type, size_bytes, file_name, created_at)
+       VALUES ${values.join(', ')}`,
+      params
+    );
   }
 
   async hydrate(messages: any[]): Promise<any[]> {
@@ -100,6 +135,12 @@ export class MessageRepository extends BaseRepository {
       attachments: fileMap.get(m.id) || [],
       reactions: reactionMap.get(m.id) || [],
     }));
+  }
+
+  // Slow mode seconds for a chat
+  async getSlowModeSeconds(chatId: string): Promise<number> {
+    const row = await this.queryOne<{ slow_mode_seconds: number }>('SELECT slow_mode_seconds FROM chats WHERE id = $1', [chatId]);
+    return row?.slow_mode_seconds || 0;
   }
 
   // Channel check

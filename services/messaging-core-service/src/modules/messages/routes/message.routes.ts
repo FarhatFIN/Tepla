@@ -1,13 +1,14 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { uuidv7 } from 'uuidv7';
 import Redis from 'ioredis';
-import { RedisClient, KafkaProducer, authMiddleware, NotFoundError, ValidationError, ForbiddenError, createLogger } from '@tepla/common';
-import { EventType, EventTopic, UserId } from '@tepla/types';
+import { RedisClient, KafkaProducer, CacheLayer, authMiddleware, NotFoundError, ValidationError, ForbiddenError, createLogger } from '@tepla/common';
+import { EventType, EventTopic } from '@tepla/types';
 import {
   ReplayProtection,
   AuditLogger,
 } from '@tepla/security';
 import { MessageRepository } from '../repositories/message.repository';
+import { OutboxRepository } from '../repositories/outbox.repository';
 
 const logger = createLogger('message-routes');
 
@@ -15,6 +16,8 @@ export function messageRouter(redis: RedisClient, kafka: KafkaProducer): Router 
   const router = Router();
   const auth = authMiddleware();
   const msgRepo = new MessageRepository();
+  const outboxRepo = new OutboxRepository();
+  const cache = new CacheLayer(redis);
 
   // Security framework — replay protection + audit
   const rawRedis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379');
@@ -48,6 +51,8 @@ export function messageRouter(redis: RedisClient, kafka: KafkaProducer): Router 
   });
 
   // POST /api/messages — send message (with optional E2E encryption)
+  // ATOMIC: message + outbox event in single DB transaction.
+  // Outbox worker handles Kafka delivery asynchronously.
   router.post('/', auth, async (req: Request, res: Response, next: NextFunction) => {
     try {
       const {
@@ -61,21 +66,27 @@ export function messageRouter(redis: RedisClient, kafka: KafkaProducer): Router 
       } = req.body;
       if (!chatId || !content) throw new ValidationError('chatId and content are required');
 
+      // ─── Cached role lookup (Redis → DB fallback) ───
+      const userId = req.user!.sub;
+      let cachedRole = await cache.getMemberRole(chatId, userId);
+      if (cachedRole === null) {
+        cachedRole = await msgRepo.getMemberRole(chatId, userId) || '';
+        if (cachedRole) await cache.setMemberRole(chatId, userId, cachedRole);
+      }
+
       // Channel broadcast guard — only owner/admin can post
       const chatType = await msgRepo.getChatType(chatId);
       if (chatType === 'channel') {
-        const role = await msgRepo.getMemberRole(chatId, req.user!.sub);
-        if (!role || !['owner', 'admin'].includes(role)) {
+        if (!cachedRole || !['owner', 'admin'].includes(cachedRole)) {
           throw new ForbiddenError('Only admins can post in channels');
         }
       }
 
       // Slow mode check (skip for admins)
-      const slowKey = `slow:${chatId}:${req.user!.sub}`;
+      const slowKey = `slow:${chatId}:${userId}`;
       const slowTtl = await redis.ttl(slowKey);
       if (slowTtl > 0) {
-        const role = await msgRepo.getMemberRole(chatId, req.user!.sub);
-        if (!role || !['owner', 'admin'].includes(role)) {
+        if (!cachedRole || !['owner', 'admin'].includes(cachedRole)) {
           throw new ValidationError(`Slow mode: wait ${slowTtl} seconds`);
         }
       }
@@ -85,59 +96,59 @@ export function messageRouter(redis: RedisClient, kafka: KafkaProducer): Router 
         await replayProtection.validate(req.user!.sub, clientNonce);
       }
 
-      // E2EE: server is a BLIND RELAY — stores ciphertext as-is.
-      // Client encrypts before sending; client decrypts on receive.
-      // Server never sees plaintext for e2e messages.
       const finalContent = content;
       const finalContentIv = contentIv || null;
+      const correlationId = req.correlationId || uuidv7();
 
-      const message = await msgRepo.create({
-        chat_id: chatId,
-        sender_id: req.user!.sub,
-        content: finalContent,
-        content_iv: finalContentIv,
-        encrypted_keys: encryptedKeys || null,
-        type,
-        reply_to_id: replyToId || null,
-        is_silent: isSilent || false,
+      // ─── ATOMIC TRANSACTION: message + outbox ───
+      const message = await msgRepo.transaction(async (client) => {
+        // 1. Insert message
+        const msg = await msgRepo.createWithClient(client, {
+          chat_id: chatId,
+          sender_id: req.user!.sub,
+          content: finalContent,
+          content_iv: finalContentIv,
+          encrypted_keys: encryptedKeys || null,
+          type,
+          reply_to_id: replyToId || null,
+          is_silent: isSilent || false,
+        });
+
+        // 2. Insert outbox event (same transaction — both succeed or both fail)
+        await outboxRepo.insertWithClient(client, {
+          aggregateType: 'message',
+          aggregateId: msg.id,
+          eventType: EventType.MESSAGE_SENT,
+          topic: EventTopic.MESSAGE_EVENTS,
+          correlationId,
+          payload: {
+            messageId: msg.id,
+            chatId,
+            senderId: req.user!.sub,
+            content: finalContent,
+            type,
+            replyToId,
+            attachments: attachments || [],
+            createdAt: msg.created_at,
+            e2e: !!e2e,
+            x3dhHeader: x3dhHeader || null,
+            isSilent: isSilent || false,
+          },
+        });
+
+        return msg;
       });
 
-      // Set slow mode cooldown
-      const slowModeRow = await msgRepo.queryOne<{ slow_mode_seconds: number }>(`SELECT slow_mode_seconds FROM chats WHERE id = $1`, [chatId]);
-      if (slowModeRow?.slow_mode_seconds > 0) {
-        await redis.set(slowKey, '1', slowModeRow.slow_mode_seconds);
+      // Non-critical side effects (outside transaction — OK to fail)
+      const slowModeSec = await msgRepo.getSlowModeSeconds(chatId);
+      if (slowModeSec > 0) {
+        await redis.set(slowKey, '1', slowModeSec);
       }
 
-      // Save attachments if any
       if (attachments?.length) {
         await msgRepo.addAttachments(message.id, attachments);
       }
 
-      // Publish event for WebSocket delivery + notification
-      await kafka.publish({
-        id: uuidv7(),
-        type: EventType.MESSAGE_SENT,
-        topic: EventTopic.MESSAGE_EVENTS,
-        timestamp: new Date().toISOString(),
-        source: 'message-service',
-        correlationId: req.correlationId || uuidv7(),
-        userId: req.user!.sub as UserId,
-        payload: {
-          messageId: message.id,
-          chatId,
-          senderId: req.user!.sub,
-          content: finalContent,
-          type,
-          replyToId,
-          attachments: attachments || [],
-          createdAt: message.created_at,
-          e2e: !!e2e,
-          x3dhHeader: x3dhHeader || null,
-          isSilent: isSilent || false,
-        },
-      });
-
-      // Invalidate chat list cache for all members
       await redis.del(`messages:${chatId}:latest`);
 
       res.status(201).json({ success: true, data: message });
@@ -148,6 +159,18 @@ export function messageRouter(redis: RedisClient, kafka: KafkaProducer): Router 
   // Session establishment happens client-side via X3DH + Double Ratchet.
   // See: src/lib/crypto/x3dh.ts, src/lib/crypto/signal.ts
   // Key management: GET/POST /api/e2e/keys/* (user-service)
+
+  // Helper: write to outbox (for non-transactional mutations like edit/delete/pin)
+  async function enqueueEvent(entry: { aggregateId: string; eventType: string; topic: string; payload: Record<string, unknown>; correlationId?: string }) {
+    await outboxRepo.insert({
+      aggregateType: 'message',
+      aggregateId: entry.aggregateId,
+      eventType: entry.eventType,
+      topic: entry.topic,
+      payload: entry.payload,
+      correlationId: entry.correlationId,
+    });
+  }
 
   // PATCH /api/messages/:messageId — edit
   router.patch('/:messageId', auth, async (req: Request, res: Response, next: NextFunction) => {
@@ -161,14 +184,11 @@ export function messageRouter(redis: RedisClient, kafka: KafkaProducer): Router 
         is_edited: true,
       });
 
-      await kafka.publish({
-        id: uuidv7(),
-        type: EventType.MESSAGE_EDITED,
+      await enqueueEvent({
+        aggregateId: msg.id,
+        eventType: EventType.MESSAGE_EDITED,
         topic: EventTopic.MESSAGE_EVENTS,
-        timestamp: new Date().toISOString(),
-        source: 'message-service',
-        correlationId: req.correlationId || uuidv7(),
-        userId: req.user!.sub as UserId,
+        correlationId: req.correlationId,
         payload: { messageId: msg.id, chatId: msg.chat_id, content: req.body.content },
       });
 
@@ -185,14 +205,11 @@ export function messageRouter(redis: RedisClient, kafka: KafkaProducer): Router 
 
       await msgRepo.softDelete(req.params.messageId);
 
-      await kafka.publish({
-        id: uuidv7(),
-        type: EventType.MESSAGE_DELETED,
+      await enqueueEvent({
+        aggregateId: msg.id,
+        eventType: EventType.MESSAGE_DELETED,
         topic: EventTopic.MESSAGE_EVENTS,
-        timestamp: new Date().toISOString(),
-        source: 'message-service',
-        correlationId: req.correlationId || uuidv7(),
-        userId: req.user!.sub as UserId,
+        correlationId: req.correlationId,
         payload: { messageId: msg.id, chatId: msg.chat_id },
       });
 
@@ -209,14 +226,11 @@ export function messageRouter(redis: RedisClient, kafka: KafkaProducer): Router 
       const updated = await msgRepo.togglePin(req.params.messageId, !msg.is_pinned);
 
       const eventType = updated.is_pinned ? EventType.MESSAGE_PINNED : EventType.MESSAGE_UNPINNED;
-      await kafka.publish({
-        id: uuidv7(),
-        type: eventType,
+      await enqueueEvent({
+        aggregateId: msg.id,
+        eventType,
         topic: EventTopic.MESSAGE_EVENTS,
-        timestamp: new Date().toISOString(),
-        source: 'message-service',
-        correlationId: req.correlationId || uuidv7(),
-        userId: req.user!.sub as UserId,
+        correlationId: req.correlationId,
         payload: { messageId: msg.id, chatId: msg.chat_id, isPinned: updated.is_pinned },
       });
 
@@ -246,14 +260,11 @@ export function messageRouter(redis: RedisClient, kafka: KafkaProducer): Router 
       }
 
       if (readMessageIds.length > 0) {
-        await kafka.publish({
-          id: uuidv7(),
-          type: EventType.MESSAGE_READ,
+        await enqueueEvent({
+          aggregateId: chatId,
+          eventType: EventType.MESSAGE_READ,
           topic: EventTopic.MESSAGE_EVENTS,
-          timestamp: new Date().toISOString(),
-          source: 'message-service',
-          correlationId: req.correlationId || uuidv7(),
-          userId: userId as UserId,
+          correlationId: req.correlationId,
           payload: { chatId, messageIds: readMessageIds, readBy: userId },
         });
       }
@@ -300,14 +311,11 @@ export function messageRouter(redis: RedisClient, kafka: KafkaProducer): Router 
       // Create the poll
       const poll = await msgRepo.createPoll(message.id, question, options, type, correctOptionId);
 
-      await kafka.publish({
-        id: uuidv7(),
-        type: EventType.MESSAGE_SENT,
+      await enqueueEvent({
+        aggregateId: message.id,
+        eventType: EventType.MESSAGE_SENT,
         topic: EventTopic.MESSAGE_EVENTS,
-        timestamp: new Date().toISOString(),
-        source: 'message-service',
-        correlationId: req.correlationId || uuidv7(),
-        userId: req.user!.sub as UserId,
+        correlationId: req.correlationId,
         payload: {
           messageId: message.id,
           chatId,
@@ -346,14 +354,11 @@ export function messageRouter(redis: RedisClient, kafka: KafkaProducer): Router 
       // Get the message to find chatId
       const msg = await msgRepo.findById(poll.message_id);
 
-      await kafka.publish({
-        id: uuidv7(),
-        type: EventType.MESSAGE_EDITED,
+      await enqueueEvent({
+        aggregateId: poll.message_id,
+        eventType: EventType.MESSAGE_EDITED,
         topic: EventTopic.MESSAGE_EVENTS,
-        timestamp: new Date().toISOString(),
-        source: 'message-service',
-        correlationId: req.correlationId || uuidv7(),
-        userId: req.user!.sub as UserId,
+        correlationId: req.correlationId,
         payload: {
           chatId: msg?.chat_id,
           messageId: poll.message_id,
@@ -400,14 +405,11 @@ export function messageRouter(redis: RedisClient, kafka: KafkaProducer): Router 
       const forwarded = await msgRepo.createForward(messageId, toChatId, req.user!.sub);
       if (!forwarded) throw new NotFoundError('Message');
 
-      await kafka.publish({
-        id: uuidv7(),
-        type: EventType.MESSAGE_FORWARDED,
+      await enqueueEvent({
+        aggregateId: forwarded.id,
+        eventType: EventType.MESSAGE_FORWARDED,
         topic: EventTopic.MESSAGE_EVENTS,
-        timestamp: new Date().toISOString(),
-        source: 'message-service',
-        correlationId: req.correlationId || uuidv7(),
-        userId: req.user!.sub as UserId,
+        correlationId: req.correlationId,
         payload: {
           messageId: forwarded.id,
           chatId: toChatId,

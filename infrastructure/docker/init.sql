@@ -223,12 +223,19 @@ CREATE TABLE IF NOT EXISTS outbox (
   event_type TEXT NOT NULL,
   topic TEXT NOT NULL,
   payload JSONB NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending',
+  retries INTEGER DEFAULT 0,
+  max_retries INTEGER NOT NULL DEFAULT 5,
+  error TEXT,
+  correlation_id TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   published_at TIMESTAMPTZ,
-  retries INTEGER DEFAULT 0
+  processed_at TIMESTAMPTZ
 );
 
-CREATE INDEX idx_outbox_unpublished ON outbox(created_at) WHERE published_at IS NULL;
+CREATE INDEX idx_outbox_pending ON outbox(status, created_at) WHERE status = 'pending';
+CREATE INDEX idx_outbox_dead ON outbox(status) WHERE status = 'dead';
+CREATE INDEX idx_outbox_aggregate ON outbox(aggregate_id);
 
 -- ─── Push Subscriptions ─────────────────────
 CREATE TABLE IF NOT EXISTS push_subscriptions (
