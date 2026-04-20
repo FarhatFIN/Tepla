@@ -9,8 +9,8 @@
     "dev": "tsx watch src/index.ts"
   },
   "dependencies": {
-    "@tepla/common": "workspace:*",
-    "@tepla/types": "workspace:*",
+    "@tepla/common": "file:../../shared/common",
+    "@tepla/types": "file:../../shared/types",
     "@ton/core": "^0.56.0",
     "@ton/crypto": "^3.3.0",
     "@ton/ton": "^14.0.0",
@@ -26,3 +26,4 @@
     "typescript": "^5.4.0"
   }
 }
+

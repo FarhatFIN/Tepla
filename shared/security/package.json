@@ -9,8 +9,8 @@
     "dev": "tsc --watch"
   },
   "dependencies": {
-    "@tepla/common": "workspace:*",
-    "@tepla/types": "workspace:*",
+    "@tepla/common": "file:../common",
+    "@tepla/types": "file:../types",
     "ioredis": "^5.3.2",
     "libsodium-wrappers": "^0.7.13"
   },
@@ -19,3 +19,4 @@
     "typescript": "^5.4.0"
   }
 }
+

@@ -9,7 +9,8 @@
     "start": "node dist/index.js"
   },
   "dependencies": {
-    "@tepla/common": "workspace:*",
-    "@tepla/types": "workspace:*"
+    "@tepla/common": "file:../../shared/common",
+    "@tepla/types": "file:../../shared/types"
   }
 }
+

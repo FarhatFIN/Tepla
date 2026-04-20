@@ -5,10 +5,11 @@
   "main": "dist/index.js",
   "scripts": { "build": "tsc", "start": "node dist/index.js", "dev": "tsx watch src/index.ts" },
   "dependencies": {
-    "@tepla/common": "workspace:*", "@tepla/types": "workspace:*",
+    "@tepla/common": "file:../../shared/common", "@tepla/types": "file:../../shared/types",
     "express": "^4.18.2", "ioredis": "^5.3.2", "kafkajs": "^2.2.4", "pg": "^8.12.0", "uuid": "^9.0.0"
   },
   "devDependencies": {
     "@types/express": "^4.17.21", "@types/pg": "^8.11.6", "typescript": "^5.4.0", "tsx": "^4.7.0"
   }
 }
+

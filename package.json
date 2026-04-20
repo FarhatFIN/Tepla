@@ -2,11 +2,22 @@
   "name": "tepla",
   "version": "0.1.0",
   "private": true,
+  "packageManager": "npm@11.6.2",
+  "workspaces": [
+    "client",
+    "shared/*",
+    "services/*",
+    "gateway/*"
+  ],
   "scripts": {
-    "dev": "npm --prefix client run dev",
-    "build": "npm --prefix client run build",
-    "start": "npm --prefix client run start",
-    "lint": "npm --prefix client run lint",
+    "bootstrap": "npm install --workspaces --include-workspace-root",
+    "dev": "npm run dev --workspace tepla-client",
+    "build": "npm run build --workspace tepla-client",
+    "start": "npm run start --workspace tepla-client",
+    "lint": "npm run lint --workspace tepla-client",
+    "typecheck": "npm run typecheck --workspace tepla-client",
+    "test": "npm run test --workspace tepla-client",
+    "check": "npm run lint && npm run test && npm run typecheck && npm run build",
     "infra:up": "docker compose -f infrastructure/docker-compose.yml -f infrastructure/docker-compose.dev.yml up -d",
     "infra:down": "docker compose -f infrastructure/docker-compose.yml -f infrastructure/docker-compose.dev.yml down",
     "stack:legacy:up": "docker compose -f infrastructure/docker-compose.legacy.yml up -d",
@@ -16,6 +27,10 @@
     "start:legacy-root": "set NODE_ENV=production&& node server.mts",
     "lint:legacy-root": "next lint",
     "dev:next": "next dev"
+  },
+  "engines": {
+    "node": ">=24.0.0",
+    "npm": ">=11.0.0"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1010.0",

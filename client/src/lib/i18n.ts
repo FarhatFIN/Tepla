@@ -310,7 +310,6 @@ const translations: Record<string, Record<string, string>> = {
     "recipient": "Recipient",
     "description": "Description",
     "fee": "Fee",
-    "total": "Total",
     "confirm_transfer": "Confirm Transfer",
     "transfer_success": "Transfer successful!",
     "transfer_failed": "Transfer failed",
@@ -330,8 +329,6 @@ const translations: Record<string, Record<string, string>> = {
     "outgoing": "Outgoing",
     "wallet_blocked": "Wallet is blocked",
     "calls": "Calls",
-    "voice_call": "Voice call",
-    "video_call": "Video call",
     "call_history": "Call history",
     "no_calls": "No calls yet",
     "missed_call": "Missed call",
@@ -723,7 +720,6 @@ const translations: Record<string, Record<string, string>> = {
     "recipient": "Получатель",
     "description": "Описание",
     "fee": "Комиссия",
-    "total": "Итого",
     "confirm_transfer": "Подтвердить перевод",
     "transfer_success": "Перевод выполнен!",
     "transfer_failed": "Ошибка перевода",
@@ -743,9 +739,6 @@ const translations: Record<string, Record<string, string>> = {
     "outgoing": "Исходящие",
     "wallet_blocked": "Кошелёк заблокирован",
     "calls": "Звонки",
-    "voice_call": "Голосовой звонок",
-    "video_call": "Видеозвонок",
-    "call_history": "История звонков",
     "no_calls": "Нет звонков",
     "missed_call": "Пропущенный звонок",
     "call_duration": "Длительность",
@@ -1218,3 +1211,4 @@ export function t(key: string, lang: string, params?: Record<string, string | nu
 export function useT(lang: string) {
   return (key: string, params?: Record<string, string | number>) => t(key, lang, params);
 }
+

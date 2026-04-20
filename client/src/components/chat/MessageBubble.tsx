@@ -16,6 +16,30 @@ interface MessageBubbleProps {
 
 const quickReactions = ["\u{1F44D}", "\u{2764}\u{FE0F}", "\u{1F602}", "\u{1F622}", "\u{1F525}", "\u{1F680}", "\u{1F914}", "\u{1F60D}"];
 
+type LocationPayload = {
+  address?: string;
+  isLive?: boolean;
+  lat: number;
+  lng: number;
+};
+
+type PollPayload = {
+  correctOptionId?: number;
+  isAnonymous?: boolean;
+  options?: string[];
+  question: string;
+  type?: string;
+  votes?: number[];
+};
+
+function parseMessagePayload<T>(text: string): T | null {
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    return null;
+  }
+}
+
 function StatusIcon({ status }: { status: MessageStatus }) {
   if (status === "sending") return <div className="h-3 w-3 animate-spin rounded-full border border-current border-t-transparent" />;
   if (status === "failed") return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="red" strokeWidth="2.5"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>;
@@ -132,58 +156,60 @@ function MediaContent({ attachment, isOwn }: { attachment: MessageAttachment; is
 
 // Location message
 function LocationContent({ message, isOwn }: { message: Message; isOwn: boolean }) {
-  try {
-    const loc = JSON.parse(message.text);
-    const mapUrl = `https://maps.googleapis.com/maps/api/staticmap?center=${loc.lat},${loc.lng}&zoom=15&size=300x200&markers=${loc.lat},${loc.lng}&key=static`;
-    return (
-      <div className="px-1 pt-1">
-        <div className="overflow-hidden rounded-lg bg-[var(--bg-input)]" style={{ width: 260, height: 160 }}>
-          <div className="flex h-full w-full items-center justify-center text-[var(--text-tertiary)]">
-            <div className="text-center">
-              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="mx-auto mb-1"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
-              <p className="text-xs">{loc.address || `${loc.lat.toFixed(4)}, ${loc.lng.toFixed(4)}`}</p>
-              {loc.isLive && <span className="mt-1 inline-flex items-center gap-1 text-[10px] text-[#00D46A]"><span className="h-1.5 w-1.5 rounded-full bg-[#00D46A] animate-pulse" />Live</span>}
-            </div>
+  const loc = parseMessagePayload<LocationPayload>(message.text);
+
+  if (!loc) {
+    return null;
+  }
+
+  return (
+    <div className="px-1 pt-1">
+      <div className="overflow-hidden rounded-lg bg-[var(--bg-input)]" style={{ width: 260, height: 160 }}>
+        <div className="flex h-full w-full items-center justify-center text-[var(--text-tertiary)]">
+          <div className="text-center">
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="mx-auto mb-1"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+            <p className="text-xs">{loc.address || `${loc.lat.toFixed(4)}, ${loc.lng.toFixed(4)}`}</p>
+            {loc.isLive && <span className="mt-1 inline-flex items-center gap-1 text-[10px] text-[#00D46A]"><span className="h-1.5 w-1.5 rounded-full bg-[#00D46A] animate-pulse" />Live</span>}
           </div>
         </div>
       </div>
-    );
-  } catch {
-    return null;
-  }
+    </div>
+  );
 }
 
 // Poll message
 function PollContent({ message, isOwn }: { message: Message; isOwn: boolean }) {
   const t = useTranslation();
   const [voted, setVoted] = useState<number | null>(null);
-  try {
-    const poll = JSON.parse(message.text);
-    const totalVotes = (poll.votes || []).reduce((s: number, v: number) => s + v, 0) || 0;
-    return (
-      <div className="px-3 py-2 min-w-[220px]">
-        <p className="text-sm font-semibold mb-2">{poll.question}</p>
-        {poll.type === "quiz" && voted !== null && <p className={`text-[10px] mb-1 ${voted === poll.correctOptionId ? "text-[#00D46A]" : "text-red-400"}`}>{voted === poll.correctOptionId ? t("correct") : t("wrong")}</p>}
-        <div className="flex flex-col gap-1.5">
-          {(poll.options || []).map((opt: string, i: number) => {
-            const votes = poll.votes?.[i] || 0;
-            const pct = totalVotes ? Math.round(votes / totalVotes * 100) : 0;
-            const isVoted = voted === i;
-            return (
-              <button key={i} onClick={() => { if (voted === null) setVoted(i); }} disabled={voted !== null} className={`relative overflow-hidden rounded-lg px-3 py-1.5 text-left text-sm transition-colors ${isVoted ? (isOwn ? "ring-1 ring-white/50" : "ring-1 ring-[var(--accent)]") : ""} ${isOwn ? "bg-white/10 hover:bg-white/20" : "bg-[var(--bg-input)] hover:bg-[var(--bg-hover)]"}`}>
-                {voted !== null && <div className={`absolute inset-y-0 left-0 transition-all ${isOwn ? "bg-white/10" : "bg-[var(--accent)]/10"}`} style={{ width: `${pct}%` }} />}
-                <span className="relative">{opt}</span>
-                {voted !== null && <span className={`relative float-right text-xs ${isOwn ? "text-white/60" : "text-[var(--text-tertiary)]"}`}>{pct}%</span>}
-              </button>
-            );
-          })}
-        </div>
-        {!poll.isAnonymous && <p className={`mt-1.5 text-[10px] ${isOwn ? "text-white/40" : "text-[var(--text-tertiary)]"}`}>{t("votes", { count: totalVotes })}</p>}
-      </div>
-    );
-  } catch {
+  const poll = parseMessagePayload<PollPayload>(message.text);
+
+  if (!poll) {
     return null;
   }
+
+  const totalVotes = (poll.votes || []).reduce((sum, value) => sum + value, 0);
+
+  return (
+    <div className="px-3 py-2 min-w-[220px]">
+      <p className="text-sm font-semibold mb-2">{poll.question}</p>
+      {poll.type === "quiz" && voted !== null && <p className={`text-[10px] mb-1 ${voted === poll.correctOptionId ? "text-[#00D46A]" : "text-red-400"}`}>{voted === poll.correctOptionId ? t("correct") : t("wrong")}</p>}
+      <div className="flex flex-col gap-1.5">
+        {(poll.options || []).map((opt, i) => {
+          const votes = poll.votes?.[i] || 0;
+          const pct = totalVotes ? Math.round(votes / totalVotes * 100) : 0;
+          const isVoted = voted === i;
+          return (
+            <button key={i} onClick={() => { if (voted === null) setVoted(i); }} disabled={voted !== null} className={`relative overflow-hidden rounded-lg px-3 py-1.5 text-left text-sm transition-colors ${isVoted ? (isOwn ? "ring-1 ring-white/50" : "ring-1 ring-[var(--accent)]") : ""} ${isOwn ? "bg-white/10 hover:bg-white/20" : "bg-[var(--bg-input)] hover:bg-[var(--bg-hover)]"}`}>
+              {voted !== null && <div className={`absolute inset-y-0 left-0 transition-all ${isOwn ? "bg-white/10" : "bg-[var(--accent)]/10"}`} style={{ width: `${pct}%` }} />}
+              <span className="relative">{opt}</span>
+              {voted !== null && <span className={`relative float-right text-xs ${isOwn ? "text-white/60" : "text-[var(--text-tertiary)]"}`}>{pct}%</span>}
+            </button>
+          );
+        })}
+      </div>
+      {!poll.isAnonymous && <p className={`mt-1.5 text-[10px] ${isOwn ? "text-white/40" : "text-[var(--text-tertiary)]"}`}>{t("votes", { count: totalVotes })}</p>}
+    </div>
+  );
 }
 
 export default memo(function MessageBubble({ message, isOwn, isFirstInGroup, isLastInGroup }: MessageBubbleProps) {
