@@ -14,6 +14,8 @@ node_modules
 # production
 /build
 dist/
+!tools/launcher/dist/
+!tools/launcher/dist/TeplaLauncher.exe
 
 # misc
 .DS_Store

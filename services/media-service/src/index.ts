@@ -4,7 +4,7 @@ import { Router, Request, Response, NextFunction } from 'express';
 import multer from 'multer';
 import sharp from 'sharp';
 import { v4 as uuid } from 'uuid';
-import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand, HeadBucketCommand, CreateBucketCommand } from '@aws-sdk/client-s3';
 import { Upload } from '@aws-sdk/lib-storage';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { PassThrough } from 'stream';
@@ -30,6 +30,7 @@ class MediaService extends BaseService {
     });
 
     const bucket = process.env.S3_BUCKET || 'tepla-media';
+    await this.ensureBucket(bucket);
     // Stream upload: multer only parses form metadata, file streams directly to S3
     // No memoryStorage — prevents 4GB buffer in process memory
     const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } }); // 50MB for thumbnails only
@@ -159,6 +160,16 @@ class MediaService extends BaseService {
 
     this.registerRoutes('/api/media', router);
     this.logger.info('Media service ready');
+  }
+
+  private async ensureBucket(bucket: string): Promise<void> {
+    try {
+      await this.s3.send(new HeadBucketCommand({ Bucket: bucket }));
+      logger.info('Media bucket is ready', { bucket });
+    } catch {
+      await this.s3.send(new CreateBucketCommand({ Bucket: bucket }));
+      logger.info('Media bucket created', { bucket });
+    }
   }
 }
 

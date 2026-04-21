@@ -46,10 +46,32 @@ The previous all-in-one stack is preserved in `infrastructure/docker-compose.leg
 - `npm run typecheck` - run TypeScript checks for the standalone frontend
 - `npm run test` - run the standalone frontend test suite
 - `npm run check` - lint, test, typecheck, and build the standalone frontend
+- `npm run stack:core:start` - start infra, core services, and the client via the local launcher script
+- `npm run stack:core:stop` - stop spawned core services and bring infrastructure down
+- `npm run launcher:open` - open the Windows launcher UI without rebuilding the `.exe`
+- `npm run launcher:build` - build `tools/launcher/dist/TeplaLauncher.exe`
 - `npm run infra:up` - start shared infrastructure
 - `npm run infra:down` - stop shared infrastructure
 - `npm run stack:legacy:up` - start the legacy 18-service stack
 - `npm run stack:legacy:down` - stop the legacy 18-service stack
+
+## Windows Beta Launcher
+
+For easier local testing on Windows, Tepla now includes:
+
+- a reusable orchestration script in `scripts/dev/tepla-dev.ps1`
+- a clickable launcher UI in `tools/launcher/TeplaLauncher.hta`
+- a packaged executable at `tools/launcher/dist/TeplaLauncher.exe` after running `npm run launcher:build`
+
+The launcher can:
+
+- select and remember the Tepla repo root
+- start infrastructure
+- start the consolidated core services
+- start the client
+- start the bot platform on demand
+- open the app and gateway health pages
+- stop all spawned local processes
 
 ## Target Architecture
 

@@ -15,6 +15,16 @@ Tepla should run with no more than five core application services, plus one opti
 
 Premium is intentionally excluded from the current consolidation wave.
 
+## Canonical Local Stack
+
+Local beta orchestration now has a single source of truth:
+
+- `scripts/dev/core-stack.json` defines the canonical local topology, ports, and shared environment values.
+- `scripts/dev/tepla-dev.ps1` is the only supported local orchestration entrypoint for starting infra, core services, client, and bot platform.
+- `tools/launcher/TeplaLauncher.hta` and `tools/launcher/dist/TeplaLauncher.exe` are UI wrappers around that same orchestration contract.
+
+This removes the previous ambiguity where local startup logic lived partly in ad-hoc terminal commands and partly in developer memory.
+
 ## Service Boundaries
 
 ### 1. Gateway/API Service
