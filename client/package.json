@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "vitest run"
+    "typecheck": "tsc --noEmit",
+    "test": "node --no-warnings --experimental-strip-types scripts/sanitizeHtml.test.mjs"
   },
   "dependencies": {
     "agora-rtc-sdk-ng": "^4.24.3",

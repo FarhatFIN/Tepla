@@ -2,9 +2,19 @@
   "compilerOptions": {
     "target": "ES2022",
     "module": "commonjs",
+    "moduleResolution": "node",
     "lib": ["ES2022"],
     "outDir": "./dist",
-    "rootDir": "./src",
+    "rootDir": "../..",
+    "baseUrl": "../..",
+    "paths": {
+      "@tepla/common": ["shared/common/src"],
+      "@tepla/common/*": ["shared/common/src/*"],
+      "@tepla/security": ["shared/security/src"],
+      "@tepla/security/*": ["shared/security/src/*"],
+      "@tepla/types": ["shared/types/src"],
+      "@tepla/types/*": ["shared/types/src/*"]
+    },
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
@@ -14,6 +24,11 @@
     "declarationMap": true,
     "sourceMap": true
   },
-  "include": ["src/**/*"],
+  "include": [
+    "src/**/*",
+    "../../shared/common/src/**/*",
+    "../../shared/security/src/**/*",
+    "../../shared/types/src/**/*"
+  ],
   "exclude": ["node_modules", "dist"]
 }

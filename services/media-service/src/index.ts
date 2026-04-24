@@ -5,7 +5,14 @@ import sharp from 'sharp';
 import ffmpeg from 'fluent-ffmpeg';
 import { path as ffmpegPath } from '@ffmpeg-installer/ffmpeg';
 import { v4 as uuid } from 'uuid';
-import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
+import {
+  S3Client,
+  PutObjectCommand,
+  GetObjectCommand,
+  DeleteObjectCommand,
+  HeadBucketCommand,
+  CreateBucketCommand,
+} from '@aws-sdk/client-s3';
 import { Upload } from '@aws-sdk/lib-storage';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { PassThrough, Readable } from 'stream';
@@ -15,20 +22,12 @@ import { join } from 'path';
 
 ffmpeg.setFfmpegPath(ffmpegPath);
 
-// Stickers module (formerly sticker-service)
 import { stickerRouter } from './modules/stickers/stickers.module';
-
-// GIFs module (formerly sticker-service gifs)
 import { gifRouter } from './modules/gifs/gifs.module';
-
-// Stories module (formerly stories-service)
 import { storiesRouter, StoryRepository, startStoryCleanup } from './modules/stories/stories.module';
 
 const logger = createLogger('media-service');
 
-// ─── Media processing helpers ────────────────────────
-
-/** Generate multiple thumbnail sizes for images */
 async function generateImageThumbnails(
   buffer: Buffer,
 ): Promise<{ size: string; data: Buffer; width: number; height: number }[]> {
@@ -51,18 +50,15 @@ async function generateImageThumbnails(
   return results;
 }
 
-/** Get image metadata (dimensions, format) */
 async function getImageMetadata(buffer: Buffer) {
   const meta = await sharp(buffer).metadata();
   return { width: meta.width ?? 0, height: meta.height ?? 0, format: meta.format ?? 'unknown' };
 }
 
-/** Strip EXIF data from images for privacy */
 async function stripExif(buffer: Buffer): Promise<Buffer> {
-  return sharp(buffer).rotate().toBuffer(); // rotate() auto-orients and strips EXIF
+  return sharp(buffer).rotate().toBuffer();
 }
 
-/** Extract video thumbnail at 1s mark */
 async function extractVideoThumbnail(inputPath: string): Promise<{ path: string; width: number; height: number }> {
   const tmpDir = await mkdtemp(join(tmpdir(), 'tepla-'));
   const outPath = join(tmpDir, 'thumb.jpg');
@@ -81,7 +77,6 @@ async function extractVideoThumbnail(inputPath: string): Promise<{ path: string;
   });
 }
 
-/** Probe media file for duration, dimensions, codecs */
 function probeMedia(inputPath: string): Promise<{
   duration: number;
   width: number;
@@ -103,7 +98,6 @@ function probeMedia(inputPath: string): Promise<{
   });
 }
 
-/** Generate waveform data for voice/audio messages (64 bars) */
 async function generateWaveform(inputPath: string): Promise<number[]> {
   const tmpDir = await mkdtemp(join(tmpdir(), 'tepla-wave-'));
   const rawPath = join(tmpDir, 'raw.pcm');
@@ -134,12 +128,10 @@ async function generateWaveform(inputPath: string): Promise<number[]> {
     for (let j = start; j < end; j++) {
       sum += Math.abs(samples[j]);
     }
-    waveform.push(Math.round((sum / (end - start)) / 327.67)); // normalize to 0-100
+    waveform.push(Math.round((sum / (end - start)) / 327.67));
   }
 
-  // Cleanup
   await unlink(rawPath).catch(() => {});
-
   return waveform;
 }
 
@@ -162,16 +154,15 @@ class MediaService extends BaseService {
     });
 
     const bucket = process.env.S3_BUCKET || 'tepla-media';
+    await this.ensureBucket(bucket);
+
     const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
     const router = Router();
     const auth = authMiddleware();
 
-    // ─── Upload module (inline — original media-service logic) ──
-
-    // POST /api/media/upload
     router.post('/upload', auth, async (req: Request, res: Response, next: NextFunction) => {
       try {
-        const maxSize = 4 * 1024 * 1024 * 1024; // 4 GB
+        const maxSize = 4 * 1024 * 1024 * 1024;
 
         const contentLength = parseInt(req.headers['content-length'] || '0');
         if (contentLength > maxSize) {
@@ -227,7 +218,6 @@ class MediaService extends BaseService {
         const baseUrl = process.env.S3_PUBLIC_URL || process.env.S3_ENDPOINT;
 
         if (file.mimetype.startsWith('image/')) {
-          // Strip EXIF for privacy, get metadata, generate multi-size thumbnails
           const cleanBuffer = await stripExif(file.buffer);
           const meta = await getImageMetadata(cleanBuffer);
           width = meta.width;
@@ -245,9 +235,7 @@ class MediaService extends BaseService {
             thumbnails[thumb.size] = `${baseUrl}/${bucket}/${thumbKey}`;
           }
           thumbnailUrl = thumbnails['md'] || thumbnails['sm'] || null;
-
         } else if (file.mimetype.startsWith('video/') || file.mimetype.startsWith('audio/')) {
-          // Write to temp file for ffmpeg processing
           const tmpDir = await mkdtemp(join(tmpdir(), 'tepla-upload-'));
           const tmpPath = join(tmpDir, `input.${ext}`);
           await writeFile(tmpPath, file.buffer);
@@ -259,7 +247,6 @@ class MediaService extends BaseService {
             height = probe.height || null;
 
             if (file.mimetype.startsWith('video/')) {
-              // Extract video thumbnail
               try {
                 const videoThumb = await extractVideoThumbnail(tmpPath);
                 const { readFile: rf } = await import('fs/promises');
@@ -276,7 +263,6 @@ class MediaService extends BaseService {
             }
 
             if (file.mimetype.startsWith('audio/') || file.mimetype === 'audio/ogg' || file.mimetype === 'audio/webm') {
-              // Generate waveform for voice/audio
               try {
                 waveform = await generateWaveform(tmpPath);
               } catch {
@@ -310,7 +296,6 @@ class MediaService extends BaseService {
       } catch (err) { next(err); }
     });
 
-    // GET /api/media/presigned-url
     router.get('/presigned-url', auth, async (req: Request, res: Response, next: NextFunction) => {
       try {
         const { key } = req.query;
@@ -325,7 +310,6 @@ class MediaService extends BaseService {
       } catch (err) { next(err); }
     });
 
-    // DELETE /api/media/:fileId
     router.delete('/:fileId', auth, async (req: Request, res: Response, next: NextFunction) => {
       try {
         const key = req.query.key as string;
@@ -336,30 +320,34 @@ class MediaService extends BaseService {
       } catch (err) { next(err); }
     });
 
-    // GET /api/media/storage-usage
-    router.get('/storage-usage', auth, async (req: Request, res: Response, next: NextFunction) => {
+    router.get('/storage-usage', auth, async (_req: Request, res: Response, next: NextFunction) => {
       try {
-        const limit = 100 * 1024 * 1024 * 1024; // 100 GB
+        const limit = 100 * 1024 * 1024 * 1024;
         res.json({ success: true, data: { used: 0, limit, remaining: limit } });
       } catch (err) { next(err); }
     });
 
     this.registerRoutes('/api/media', router);
-
-    // ─── Stickers module ────────────────────────
     this.registerRoutes('/api/stickers', stickerRouter(this.redis!));
-
-    // ─── GIFs module ────────────────────────────
     this.registerRoutes('/api/gifs', gifRouter(this.redis!));
-
-    // ─── Stories module ─────────────────────────
     this.registerRoutes('/api/stories', storiesRouter(this.redis!, this.kafka!));
+
     const storyRepo = new StoryRepository();
     startStoryCleanup(storyRepo);
 
     this.logger.info('Media service ready', {
       modules: ['uploads', 'stickers', 'gifs', 'stories'],
     });
+  }
+
+  private async ensureBucket(bucket: string): Promise<void> {
+    try {
+      await this.s3.send(new HeadBucketCommand({ Bucket: bucket }));
+      logger.info('Media bucket is ready', { bucket });
+    } catch {
+      await this.s3.send(new CreateBucketCommand({ Bucket: bucket }));
+      logger.info('Media bucket created', { bucket });
+    }
   }
 }
 
