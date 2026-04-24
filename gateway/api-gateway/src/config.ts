@@ -20,8 +20,7 @@ const hasLegacyFeatureConfig = Boolean(
   process.env.PREMIUM_SERVICE_URL ||
     process.env.ANALYTICS_SERVICE_URL ||
     process.env.WALLET_SERVICE_URL ||
-    process.env.WBIT_SERVICE_URL ||
-    process.env.TRANSLATION_SERVICE_URL,
+    process.env.WBIT_SERVICE_URL,
 );
 
 export const config = {
@@ -34,17 +33,14 @@ export const config = {
     legacyFeatures: parseBooleanEnv(process.env.TEPLA_ENABLE_LEGACY_FEATURES, hasLegacyFeatureConfig),
   },
 
-  // Service URLs support both the legacy split topology and the consolidated 5-service target.
   services: {
     authUser: authUserServiceUrl || process.env.AUTH_SERVICE_URL || process.env.USER_SERVICE_URL || 'http://localhost:3001',
-    messaging: messagingServiceUrl || process.env.MESSAGE_SERVICE_URL || process.env.CHAT_SERVICE_URL || 'http://localhost:3003',
+    messaging: messagingServiceUrl || process.env.MESSAGE_SERVICE_URL || process.env.CHAT_SERVICE_URL || 'http://localhost:3004',
     media: mediaServiceUrl || process.env.MEDIA_SERVICE_URL || process.env.STORIES_SERVICE_URL || process.env.STICKER_SERVICE_URL || 'http://localhost:3007',
-    realtime: realtimeServiceUrl || process.env.PRESENCE_SERVICE_URL || process.env.NOTIFICATION_SERVICE_URL || process.env.CALLS_SERVICE_URL || 'http://localhost:3005',
+    realtime: realtimeServiceUrl || process.env.PRESENCE_SERVICE_URL || process.env.NOTIFICATION_SERVICE_URL || process.env.CALLS_SERVICE_URL || 'http://localhost:3100',
     botPlatform: botPlatformServiceUrl || process.env.BOT_SERVICE_URL || process.env.WEBAPP_SERVICE_URL || 'http://localhost:3013',
     legacy: {
-      premium: process.env.PREMIUM_SERVICE_URL || 'http://localhost:3009',
       analytics: process.env.ANALYTICS_SERVICE_URL || 'http://localhost:3011',
-      translation: process.env.TRANSLATION_SERVICE_URL || 'http://localhost:3016',
       wallet: process.env.WALLET_SERVICE_URL || 'http://localhost:3018',
       wbit: process.env.WBIT_SERVICE_URL || 'http://localhost:3019',
       webapp: process.env.WEBAPP_SERVICE_URL || botPlatformServiceUrl || 'http://localhost:3017',

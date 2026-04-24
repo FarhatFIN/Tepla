@@ -2,7 +2,6 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { motion } from "framer-motion";
 import {
-  Crown,
   PanelLeftClose,
   PanelLeftOpen,
   Plus,
@@ -19,7 +18,6 @@ import { useUIStore } from "@/stores/ui.store";
 import { Button } from "@/components/ui/button";
 import { Avatar } from "@/components/ui/avatar";
 import { useUserSearch } from "@/hooks/useUserSearch";
-import { usePremium } from "@/hooks/usePremium";
 import type { TeplaChat } from "@/types/chat";
 
 export type ChatSnapshot = {
@@ -71,7 +69,7 @@ export const Sidebar = ({
     toggleFavoriteChat: toggleFavoriteChatLocal,
   } =
     useUIStore();
-  const { limits } = usePremium();
+  const MAX_PINNED_CHATS = 100;
   const { users: searchedUsers, isLoading: isSearchingUsers } = useUserSearch(query);
 
   const isChatFavorite = (chat: TeplaChat) =>
@@ -123,7 +121,7 @@ export const Sidebar = ({
   );
   const liveNow = Object.values(chatSnapshots).filter((snapshot) => snapshot.online).length;
   const userSearchActive = backendEnabled && query.trim().replace(/^@+/, "").length >= 2;
-  const canPinMoreChats = pinnedChatIds.length < limits.pinnedChats;
+  const canPinMoreChats = pinnedChatIds.length < MAX_PINNED_CHATS;
   const favoriteChats = filteredChats.filter((chat) => isChatFavorite(chat));
   const regularChats = filteredChats.filter((chat) => !isChatFavorite(chat));
   const orderedChats = [...favoriteChats, ...regularChats];
@@ -260,13 +258,13 @@ export const Sidebar = ({
                             size="sm"
                             alt={user.displayName ?? user.username}
                             src={user.avatarUrl ?? undefined}
-                            animated={Boolean(user.isPremium && user.animatedAvatarEnabled)}
+                            animated={Boolean(user.animatedAvatarEnabled)}
                           />
                           <div className="min-w-0">
                             <p
                               className="truncate text-sm font-medium"
                               style={
-                                user.isPremium && user.usernameColor
+                                user.usernameColor
                                   ? { color: user.usernameColor }
                                   : undefined
                               }
@@ -277,7 +275,7 @@ export const Sidebar = ({
                             <p
                               className="truncate text-xs"
                               style={
-                                user.isPremium && user.usernameColor
+                                user.usernameColor
                                   ? { color: user.usernameColor }
                                   : undefined
                               }
@@ -287,12 +285,6 @@ export const Sidebar = ({
                           </div>
                         </div>
                         <div className="flex items-center gap-2">
-                          {user.isPremium ? (
-                            <span className="inline-flex items-center gap-1 rounded-full border border-amber-400/20 bg-amber-500/10 px-2 py-0.5 text-[10px] font-medium text-amber-200">
-                              <Crown className="h-3 w-3" />
-                              Premium
-                            </span>
-                          ) : null}
                           <span className="text-[11px] text-tepla-text-muted">
                             {matchingChat ? "Open" : "Start chat"}
                           </span>
@@ -339,7 +331,7 @@ export const Sidebar = ({
                   const isPinned = pinnedChatIds.includes(chat.id);
                   if (!isPinned && !canPinMoreChats) {
                     setSearchError(
-                      `Pinned chats limit reached. Your current limit is ${limits.pinnedChats}.`,
+                      `Pinned chats limit reached. Your current limit is ${MAX_PINNED_CHATS}.`,
                     );
                     return;
                   }
@@ -392,7 +384,7 @@ export const Sidebar = ({
                   const isPinned = pinnedChatIds.includes(chat.id);
                   if (!isPinned && !canPinMoreChats) {
                     setSearchError(
-                      `Pinned chats limit reached. Your current limit is ${limits.pinnedChats}.`,
+                      `Pinned chats limit reached. Your current limit is ${MAX_PINNED_CHATS}.`,
                     );
                     return;
                   }

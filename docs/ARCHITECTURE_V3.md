@@ -8,10 +8,10 @@ Tepla should run with no more than five core application services, plus one opti
 
 1. `gateway/api-gateway`
 2. `services/auth-user-service`
-3. `services/messaging-service`
+3. `services/messaging-core-service`
 4. `services/media-service`
 5. `services/realtime-service`
-6. `services/bot-platform-service` (optional, only when ElevenBot or mini apps are enabled)
+6. `services/bot-service` (optional, only when ElevenBot or mini apps are enabled)
 
 Premium is intentionally excluded from the current consolidation wave.
 
@@ -64,7 +64,7 @@ This removes the previous ambiguity where local startup logic lived partly in ad
   - message bodies
   - media storage
 
-### 3. Messaging Service
+### 3. Messaging Core Service
 
 - Responsibility:
   - personal chats
@@ -76,7 +76,9 @@ This removes the previous ambiguity where local startup logic lived partly in ad
   - sparks
   - read/delivery states
   - folders, threads, scheduled messages
-  - internal message search and moderation hooks
+  - search query endpoints
+  - moderation/report endpoints
+  - translation endpoints
 - Owns data:
   - chats
   - chat_members
@@ -95,6 +97,8 @@ This removes the previous ambiguity where local startup logic lived partly in ad
   - `/api/v2/roles`
   - `/api/v2/sparks`
   - `/api/v2/search`
+  - `/api/v2/moderation`
+  - `/api/v2/translate`
 - Does not own:
   - user profile source of truth
   - object storage
@@ -108,6 +112,7 @@ This removes the previous ambiguity where local startup logic lived partly in ad
   - thumbnails
   - stories
   - sticker packs
+  - GIF integrations
 - Owns data:
   - file metadata
   - story metadata
@@ -171,11 +176,10 @@ This removes the previous ambiguity where local startup logic lived partly in ad
 | --- | --- |
 | `services/auth-service` | `services/auth-user-service` |
 | `services/user-service` | `services/auth-user-service` |
-| `services/premium-service` | out of current core scope |
-| `services/chat-service` | `services/messaging-service` |
-| `services/message-service` | `services/messaging-service` |
-| `services/search-service` | `services/messaging-service` |
-| `services/moderation-service` | `services/messaging-service` |
+| `services/chat-service` | `services/messaging-core-service` |
+| `services/message-service` | `services/messaging-core-service` |
+| `services/search-service` | `services/workers/search-worker` plus `services/messaging-core-service` HTTP queries |
+| `services/moderation-service` | `services/workers/moderation-worker` plus `services/messaging-core-service` HTTP endpoints |
 | `services/media-service` | `services/media-service` |
 | `services/sticker-service` | `services/media-service` |
 | `services/stories-service` | `services/media-service` |
@@ -183,10 +187,10 @@ This removes the previous ambiguity where local startup logic lived partly in ad
 | `services/presence-service` | `services/realtime-service` |
 | `services/notification-service` | `services/realtime-service` |
 | `services/calls-service` | `services/realtime-service` |
-| `services/bot-service` | `services/bot-platform-service` |
-| `services/webapp-service` | `services/bot-platform-service` |
-| `services/translation-service` | `services/messaging-service` module or disabled |
-| `services/analytics-service` | background consumer later, not a standalone runtime service |
+| `services/bot-service` | `services/bot-service` |
+| `services/webapp-service` | `services/bot-service` or future bot/webapp domain |
+| `services/translation-service` | `services/messaging-core-service` module or background worker later |
+| `services/analytics-service` | `services/workers/analytics-worker` |
 | `services/wallet-service` | external domain, removed from messenger core |
 | `services/wbit-service` | external domain, removed from messenger core |
 | `src/app/api/*` | removed from runtime ownership |
@@ -198,28 +202,27 @@ This removes the previous ambiguity where local startup logic lived partly in ad
 ### Phase 1: runtime cleanup
 
 - Switch default repo entrypoints to the standalone frontend in `client/`.
-- Preserve the old 18-service topology in `infrastructure/docker-compose.legacy.yml`.
+- Preserve the old oversized topology in `infrastructure/docker-compose.legacy.yml`.
 - Make `infrastructure/docker-compose.yml` infrastructure-only so the repo no longer implies that the legacy topology is the target.
 - Teach the API gateway to understand consolidated service URLs.
 
 ### Phase 2: auth/user consolidation
 
 - Create `services/auth-user-service`.
-- The first consolidated entrypoint now lives in `services/auth-user-service`.
 - Move auth and user routes into that service.
 - Point gateway routes `auth`, `users`, `e2e`, `kt` to one upstream.
 - Remove direct runtime dependency on `auth-service` and `user-service`.
 
 ### Phase 3: messaging consolidation
 
-- Create `services/messaging-service`.
-- The first consolidated messaging entrypoint now lives in `services/messaging-service`.
-- Merge chat, message, search, and moderation logic behind one store boundary.
+- Create `services/messaging-core-service`.
+- Merge chat, message, search, moderation, and translation logic behind one store boundary.
+- Move async indexing and moderation workloads to dedicated workers.
 - Eliminate cross-service reads into chat/message tables.
 
 ### Phase 4: media and realtime consolidation
 
-- Merge `media + stories + stickers`.
+- Merge `media + stories + stickers + gifs`.
 - Merge `websocket-gateway + presence + notifications + calls`.
 
 ### Phase 5: remove legacy backend

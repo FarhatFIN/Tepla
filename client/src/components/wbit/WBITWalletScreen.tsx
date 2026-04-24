@@ -70,18 +70,6 @@ export default function WBITWalletScreen({ onBack }: { onBack: () => void }) {
     }
   }
 
-  async function buyPremium(plan: "monthly" | "yearly") {
-    const price = plan === "monthly" ? "100" : "999";
-    if (!confirm(`${t("wbit_buy_premium_confirm")} ${price} WBIT?`)) return;
-    try {
-      await api.post("/wbit/buy-premium", { plan });
-      alert(t("wbit_premium_activated"));
-      loadData();
-    } catch (err: any) {
-      alert(err.message);
-    }
-  }
-
   if (loading) {
     return (
       <div className="flex h-full items-center justify-center">
@@ -145,12 +133,6 @@ export default function WBITWalletScreen({ onBack }: { onBack: () => void }) {
                 </div>
                 <span className="text-[11px]">{t("wbit_send")}</span>
               </button>
-              <button onClick={() => buyPremium("monthly")} className="flex flex-col items-center gap-1.5 rounded-xl bg-[var(--bg-card)] p-3 hover:bg-[var(--bg-hover)]">
-                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-purple-500/10 text-purple-400">
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
-                </div>
-                <span className="text-[11px]">{t("wbit_premium")}</span>
-              </button>
               <button onClick={() => window.open("https://app.ston.fi", "_blank")} className="flex flex-col items-center gap-1.5 rounded-xl bg-[var(--bg-card)] p-3 hover:bg-[var(--bg-hover)]">
                 <div className="flex h-10 w-10 items-center justify-center rounded-full bg-emerald-500/10 text-emerald-400">
                   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 22V8M5 12H2l10-10 10 10h-3"/></svg>
@@ -210,13 +192,6 @@ export default function WBITWalletScreen({ onBack }: { onBack: () => void }) {
                       <div className="flex justify-between"><span>{t("wbit_daily_active")}</span><span className="text-cyan-400">+1 WBIT/{t("wbit_day")}</span></div>
                       <div className="flex justify-between"><span>{t("wbit_referral")}</span><span className="text-cyan-400">+10 WBIT</span></div>
                       <div className="flex justify-between"><span>{t("wbit_messages_bonus")}</span><span className="text-cyan-400">+2 WBIT</span></div>
-                    </div>
-                  </div>
-                  <div className="rounded-xl bg-[var(--bg-card)] p-4">
-                    <h3 className="text-sm font-medium mb-2">{t("wbit_premium_prices")}</h3>
-                    <div className="space-y-2 text-xs text-[var(--text-secondary)]">
-                      <div className="flex justify-between"><span>{t("wbit_monthly")}</span><span className="font-medium">100 WBIT</span></div>
-                      <div className="flex justify-between"><span>{t("wbit_yearly")}</span><span className="font-medium">999 WBIT</span></div>
                     </div>
                   </div>
                 </div>

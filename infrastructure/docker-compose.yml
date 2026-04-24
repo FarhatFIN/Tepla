@@ -1,15 +1,13 @@
-# Phase 1 of the architecture cleanup:
-# - default compose now starts only shared infrastructure
-# - application services are being consolidated toward 5 core services
-# - the previous oversized runtime remains in docker-compose.legacy.yml
+# Tepla Messenger — Full Stack (Infrastructure + 5 Domain Services + 3 Workers)
 #
-# Target application services:
-# 1. gateway/api-gateway
-# 2. services/auth-user-service
-# 3. services/messaging-service
-# 4. services/media-service
-# 5. services/realtime-service
-# 6. services/bot-platform-service (optional)
+# Architecture:
+#   api-gateway (3000) → auth-user-service (3001)
+#                       → messaging-core-service (3004)
+#                       → media-service (3007)
+#                       → realtime-service (3100)
+#                       → bot-service (3013)
+#                       → webapp-service (3017)
+#   messaging-core-service → Kafka → [search-worker, moderation-worker, analytics-worker]
 
 services:
   postgres:
@@ -120,6 +118,231 @@ services:
     restart: unless-stopped
     environment:
       LIVEKIT_KEYS: "devkey:devsecret"
+    networks:
+      - tepla-network
+
+  # ─── Application Services ───────────────────
+
+  api-gateway:
+    build:
+      context: ../gateway/api-gateway
+      dockerfile: Dockerfile
+    container_name: tepla-api-gateway
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      JWT_SECRET: ${JWT_SECRET}
+      AUTH_USER_SERVICE_URL: http://auth-user-service:3001
+      MESSAGING_SERVICE_URL: http://messaging-core-service:3004
+      MEDIA_SERVICE_URL: http://media-service:3007
+      REALTIME_SERVICE_URL: http://realtime-service:3100
+      BOT_SERVICE_URL: http://bot-service:3013
+      WEBAPP_SERVICE_URL: http://webapp-service:3017
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - tepla-network
+
+  auth-user-service:
+    build:
+      context: ../services/auth-user-service
+      dockerfile: Dockerfile
+    container_name: tepla-auth-user-service
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 3001
+      DATABASE_URL: postgres://tepla:${POSTGRES_PASSWORD:-tepla_secret}@postgres:5432/tepla
+      REDIS_URL: redis://redis:6379
+      KAFKA_BROKERS: kafka:29092
+      JWT_SECRET: ${JWT_SECRET}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+      - tepla-network
+
+  messaging-core-service:
+    build:
+      context: ../services/messaging-core-service
+      dockerfile: Dockerfile
+    container_name: tepla-messaging-core-service
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 3004
+      DATABASE_URL: postgres://tepla:${POSTGRES_PASSWORD:-tepla_secret}@postgres:5432/tepla
+      REDIS_URL: redis://redis:6379
+      KAFKA_BROKERS: kafka:29092
+      ELASTICSEARCH_URL: http://elasticsearch:9200
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+    networks:
+      - tepla-network
+
+  media-service:
+    build:
+      context: ../services/media-service
+      dockerfile: Dockerfile
+    container_name: tepla-media-service
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 3007
+      DATABASE_URL: postgres://tepla:${POSTGRES_PASSWORD:-tepla_secret}@postgres:5432/tepla
+      REDIS_URL: redis://redis:6379
+      KAFKA_BROKERS: kafka:29092
+      S3_ENDPOINT: http://minio:9000
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:-tepla_minio}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:-tepla_minio_secret}
+      S3_BUCKET: tepla-media
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_started
+    networks:
+      - tepla-network
+
+  realtime-service:
+    build:
+      context: ../services/realtime-service
+      dockerfile: Dockerfile
+    container_name: tepla-realtime-service
+    restart: unless-stopped
+    ports:
+      - "3100:3100"
+    environment:
+      NODE_ENV: production
+      PORT: 3100
+      DATABASE_URL: postgres://tepla:${POSTGRES_PASSWORD:-tepla_secret}@postgres:5432/tepla
+      REDIS_URL: redis://redis:6379
+      KAFKA_BROKERS: kafka:29092
+      LIVEKIT_URL: ws://livekit:7880
+      LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:-devkey}
+      LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:-devsecret}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      livekit:
+        condition: service_started
+    networks:
+      - tepla-network
+
+  bot-service:
+    build:
+      context: ../services/bot-service
+      dockerfile: Dockerfile
+    container_name: tepla-bot-service
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 3013
+      DATABASE_URL: postgres://tepla:${POSTGRES_PASSWORD:-tepla_secret}@postgres:5432/tepla
+      REDIS_URL: redis://redis:6379
+      KAFKA_BROKERS: kafka:29092
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+      - tepla-network
+
+  webapp-service:
+    build:
+      context: ../services/webapp-service
+      dockerfile: Dockerfile
+    container_name: tepla-webapp-service
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 3017
+      DATABASE_URL: postgres://tepla:${POSTGRES_PASSWORD:-tepla_secret}@postgres:5432/tepla
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: ${JWT_SECRET}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - tepla-network
+
+  # ─── Kafka Workers ─────────────────────────
+
+  search-worker:
+    build:
+      context: ../services/workers/search-worker
+      dockerfile: Dockerfile
+    container_name: tepla-search-worker
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      KAFKA_BROKERS: kafka:29092
+      ELASTICSEARCH_URL: http://elasticsearch:9200
+    depends_on:
+      kafka:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+    networks:
+      - tepla-network
+
+  moderation-worker:
+    build:
+      context: ../services/workers/moderation-worker
+      dockerfile: Dockerfile
+    container_name: tepla-moderation-worker
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      KAFKA_BROKERS: kafka:29092
+    depends_on:
+      kafka:
+        condition: service_healthy
+    networks:
+      - tepla-network
+
+  analytics-worker:
+    build:
+      context: ../services/workers/analytics-worker
+      dockerfile: Dockerfile
+    container_name: tepla-analytics-worker
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      KAFKA_BROKERS: kafka:29092
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      kafka:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     networks:
       - tepla-network
 

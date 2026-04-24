@@ -7,7 +7,6 @@ const logger = createLogger('auth-user-token');
 interface TokenInput {
   sub: UserId;
   username: string;
-  isPremium: boolean;
   sessionId: string;
 }
 
@@ -51,9 +50,8 @@ export class TokenService {
       {
         sub: input.sub,
         username: input.username,
-        isPremium: input.isPremium,
         jti: crypto.randomUUID(),
-      } satisfies Omit<JwtPayload, 'iat' | 'exp'>,
+      },
       this.jwtSecret,
       { expiresIn: this.accessTtlSeconds },
     );

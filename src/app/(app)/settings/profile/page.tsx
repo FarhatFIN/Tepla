@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import { motion } from "framer-motion";
-import { Crown, Loader2, Sparkles, Trash2, Upload } from "lucide-react";
+import { Loader2, Trash2, Upload } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -10,7 +10,6 @@ import { Select } from "@/components/ui/select";
 import { Avatar } from "@/components/ui/avatar";
 import { useAuthStore } from "@/stores/auth.store";
 import { DEFAULT_LANGUAGE, SUPPORTED_LANGUAGES } from "@/lib/languages";
-import { usePremium } from "@/hooks/usePremium";
 import { VoiceRecorder, type VoiceRecording } from "@/components/chat/VoiceRecorder";
 
 const normalizeUsername = (value: string) =>
@@ -20,7 +19,7 @@ const normalizeUsername = (value: string) =>
     .replace(/[^a-z0-9_]/g, "")
     .slice(0, 24);
 
-const premiumUsernameColors = ["#2AABEE", "#7C3AED", "#F97316", "#10B981", "#F43F5E"];
+const usernameColors = ["#2AABEE", "#7C3AED", "#F97316", "#10B981", "#F43F5E"];
 
 const uploadAvatar = async (file: File, userId: string) => {
   const formData = new FormData();
@@ -69,7 +68,6 @@ const uploadVoiceStatus = async (recording: VoiceRecording, userId: string) => {
 
 export default function ProfileSettingsPage() {
   const { user, updateUser } = useAuthStore();
-  const { isPremium, purchasePremium, renewPremium } = usePremium();
   const avatarInputRef = useRef<HTMLInputElement | null>(null);
   const [username, setUsername] = useState(user?.username ?? "");
   const [displayName, setDisplayName] = useState(user?.displayName ?? "");
@@ -87,7 +85,6 @@ export default function ProfileSettingsPage() {
   );
   const [bio, setBio] = useState("");
   const [isSaving, setIsSaving] = useState(false);
-  const [isManagingPremium, setManagingPremium] = useState(false);
   const [isUploadingAvatar, setUploadingAvatar] = useState(false);
   const [isUploadingVoiceStatus, setUploadingVoiceStatus] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -147,10 +144,10 @@ export default function ProfileSettingsPage() {
           language,
           birthDate: birthDate || null,
           statusEmoji: statusEmoji || null,
-          usernameColor: isPremium ? usernameColor : null,
-          avatarAnimationEnabled: isPremium ? animatedAvatarEnabled : false,
-          voiceStatusUrl: isPremium ? voiceStatusUrl || null : null,
-          voiceStatusDurationSeconds: isPremium ? voiceStatusDurationSeconds : null,
+          usernameColor,
+          avatarAnimationEnabled: animatedAvatarEnabled,
+          voiceStatusUrl: voiceStatusUrl || null,
+          voiceStatusDurationSeconds,
         }),
       });
 
@@ -172,7 +169,6 @@ export default function ProfileSettingsPage() {
           animatedAvatarEnabled: boolean;
           voiceStatusUrl: string | null;
           voiceStatusDurationSeconds: number | null;
-          isPremium: boolean;
         };
       };
 
@@ -187,7 +183,6 @@ export default function ProfileSettingsPage() {
         animatedAvatarEnabled: payload.profile.animatedAvatarEnabled,
         voiceStatusUrl: payload.profile.voiceStatusUrl,
         voiceStatusDurationSeconds: payload.profile.voiceStatusDurationSeconds,
-        isPremium: payload.profile.isPremium,
       });
       setBio(payload.profile.bio ?? "");
       setSuccess("Profile updated.");
@@ -231,37 +226,6 @@ export default function ProfileSettingsPage() {
     }
   };
 
-  const handlePremiumAction = async () => {
-    if (!user) {
-      return;
-    }
-
-    setManagingPremium(true);
-    setError(null);
-    setSuccess(null);
-
-    try {
-      const payload = isPremium
-        ? await renewPremium()
-        : await purchasePremium("monthly");
-
-      if (payload.checkoutUrl) {
-        window.open(payload.checkoutUrl, "_blank", "noopener,noreferrer");
-        setSuccess("Checkout opened in a new tab.");
-      } else {
-        setSuccess(
-          isPremium
-            ? "Premium renewed successfully."
-            : "Premium activated. You now have access to premium profile features.",
-        );
-      }
-    } catch (premiumError) {
-      setError(premiumError instanceof Error ? premiumError.message : "Premium action failed.");
-    } finally {
-      setManagingPremium(false);
-    }
-  };
-
   const handleVoiceStatus = async (recording: VoiceRecording) => {
     if (!user) {
       throw new Error("Sign in to set a voice status.");
@@ -295,7 +259,7 @@ export default function ProfileSettingsPage() {
             <div className="flex flex-col items-center gap-3">
               <Avatar
                 size="lg"
-                animated={Boolean(animatedAvatarEnabled && isPremium)}
+                animated={Boolean(animatedAvatarEnabled)}
                 alt={displayName || normalizedUsername || "Tepla User"}
                 src={avatarUrl || undefined}
               />
@@ -340,7 +304,7 @@ export default function ProfileSettingsPage() {
                 ) : null}
               </div>
               <p className="text-center text-[11px] text-tepla-text-muted">
-                Upload JPG, PNG, WebP, or GIF. Premium animation works best with GIF avatars.
+                Upload JPG, PNG, WebP, or GIF. Animation works best with GIF avatars.
               </p>
             </div>
           </div>
@@ -354,49 +318,11 @@ export default function ProfileSettingsPage() {
             />
             <p
               className="text-[11px]"
-              style={{ color: isPremium ? usernameColor : undefined }}
+              style={{ color: usernameColor }}
             >
               Public search handle: @{normalizedUsername || "your_handle"}
-              {isPremium && statusEmoji ? ` ${statusEmoji}` : ""}
+              {statusEmoji ? ` ${statusEmoji}` : ""}
             </p>
-          </div>
-
-          <div className="rounded-[28px] border border-amber-400/20 bg-amber-500/10 p-4">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <p className="text-[11px] uppercase tracking-[0.18em] text-amber-200">
-                  Premium
-                </p>
-                <p className="mt-2 text-sm font-medium text-white">
-                  {isPremium ? "Premium is active" : "Unlock extra identity and media features"}
-                </p>
-                <p className="mt-1 text-xs leading-5 text-tepla-text-muted">
-                  Premium unlocks username colors, animated avatars, HQ voice, message translation,
-                  custom reactions, larger uploads, and expanded chat limits.
-                </p>
-              </div>
-              <span className="inline-flex items-center gap-1 rounded-full border border-amber-400/20 bg-black/20 px-2.5 py-1 text-[10px] font-medium uppercase tracking-[0.12em] text-amber-100">
-                <Crown className="h-3.5 w-3.5" />
-                {isPremium ? "Active" : "Upgrade"}
-              </span>
-            </div>
-            <Button
-              type="button"
-              variant="subtle"
-              size="sm"
-              className="mt-3"
-              disabled={isManagingPremium || !user}
-              onClick={() => {
-                void handlePremiumAction();
-              }}
-            >
-              <Sparkles className="h-4 w-4" />
-              {isManagingPremium
-                ? "Processing..."
-                : isPremium
-                  ? "Renew premium"
-                  : "Buy Premium"}
-            </Button>
           </div>
 
           <div className="space-y-1.5">
@@ -428,12 +354,11 @@ export default function ProfileSettingsPage() {
             </div>
 
             <div className="space-y-1.5">
-              <label className="text-xs text-tepla-text-muted">Premium emoji</label>
+              <label className="text-xs text-tepla-text-muted">Status emoji</label>
               <Input
                 value={statusEmoji}
                 onChange={(event) => setStatusEmoji(event.target.value)}
-                placeholder={isPremium ? "✨" : "Premium required"}
-                disabled={!isPremium}
+                placeholder="✨"
               />
             </div>
           </div>
@@ -450,17 +375,16 @@ export default function ProfileSettingsPage() {
           </div>
 
           <div className="rounded-[28px] border border-white/10 bg-white/[0.03] p-4">
-            <p className="text-sm font-medium text-white">Premium identity</p>
+            <p className="text-sm font-medium text-white">Identity customization</p>
             <div className="mt-3 grid gap-4 md:grid-cols-2">
               <div className="space-y-2">
                 <label className="text-xs text-tepla-text-muted">Username color</label>
                 <div className="flex flex-wrap gap-2">
-                  {premiumUsernameColors.map((color) => (
+                  {usernameColors.map((color) => (
                     <button
                       key={color}
                       type="button"
-                      disabled={!isPremium}
-                      className="h-8 w-8 rounded-full border-2 transition-transform hover:scale-110 disabled:cursor-not-allowed disabled:opacity-40"
+                      className="h-8 w-8 rounded-full border-2 transition-transform hover:scale-110"
                       style={{
                         backgroundColor: color,
                         borderColor: usernameColor === color ? "white" : "transparent",
@@ -477,7 +401,6 @@ export default function ProfileSettingsPage() {
                   type="button"
                   variant={animatedAvatarEnabled ? "primary" : "outline"}
                   size="sm"
-                  disabled={!isPremium}
                   onClick={() => setAnimatedAvatarEnabled((current) => !current)}
                 >
                   {animatedAvatarEnabled ? "Enabled" : "Disabled"}
@@ -489,12 +412,12 @@ export default function ProfileSettingsPage() {
           <div className="rounded-[28px] border border-white/10 bg-white/[0.03] p-4">
             <p className="text-sm font-medium text-white">Voice status</p>
             <p className="mt-1 text-xs text-tepla-text-muted">
-              Premium users can publish a short voice status on their profile.
+              Publish a short voice status on your profile.
             </p>
             <div className="mt-3">
               <VoiceRecorder
-                disabled={!isPremium || !user || isUploadingVoiceStatus}
-                highQuality={isPremium}
+                disabled={!user || isUploadingVoiceStatus}
+                highQuality
                 onSend={handleVoiceStatus}
               />
             </div>

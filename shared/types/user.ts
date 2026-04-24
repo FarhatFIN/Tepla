@@ -19,7 +19,6 @@ export interface TeplaUser {
   lastSeen?: string;
   isOnline: boolean;
   isVerified: boolean;
-  isPremium: boolean;
   publicKey: string;
   signingPublicKey: string;
   language: string;
@@ -34,7 +33,6 @@ export interface AuthUser {
   displayName?: string;
   avatarUrl?: string;
   avatarThumbUrl?: string;
-  isPremium: boolean;
   isVerified: boolean;
   language: string;
 }

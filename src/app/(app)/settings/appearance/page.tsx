@@ -1,24 +1,21 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { Crown } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { useUIStore } from "@/stores/ui.store";
-import { usePremium } from "@/hooks/usePremium";
 
 const themes = [
-  { id: "dark", label: "Dark", premium: false },
-  { id: "light", label: "Light", premium: false },
-  { id: "oled", label: "OLED", premium: false },
-  { id: "aurora", label: "Aurora", premium: true },
-  { id: "sunset", label: "Sunset", premium: true },
+  { id: "dark", label: "Dark" },
+  { id: "light", label: "Light" },
+  { id: "oled", label: "OLED" },
+  { id: "aurora", label: "Aurora" },
+  { id: "sunset", label: "Sunset" },
 ] as const;
 const accentColors = ["#6C63FF", "#2AABEE", "#4CAF50", "#FF5757", "#FFB74D"];
 
 export default function AppearanceSettingsPage() {
   const { theme, accentColor, setTheme, setAccentColor } = useUIStore();
-  const { isPremium } = usePremium();
 
   return (
     <motion.div
@@ -39,19 +36,12 @@ export default function AppearanceSettingsPage() {
                   key={t.id}
                   variant={theme === t.id ? "primary" : "outline"}
                   size="sm"
-                  disabled={t.premium && !isPremium}
                   onClick={() => setTheme(t.id)}
                 >
                   {t.label}
-                  {t.premium ? <Crown className="h-3.5 w-3.5 text-amber-300" /> : null}
                 </Button>
               ))}
             </div>
-            {!isPremium ? (
-              <p className="mt-2 text-xs text-tepla-text-muted">
-                Premium unlocks Aurora and Sunset themes.
-              </p>
-            ) : null}
           </div>
           <div>
             <p className="mb-2 text-xs text-tepla-text-muted">Accent color</p>

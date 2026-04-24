@@ -193,6 +193,20 @@ export const chatsRepository = {
     return count ?? 0;
   },
 
+  async listMemberIds(chatId: string): Promise<string[]> {
+    const supabase = getServiceSupabaseClient();
+    const { data, error } = await supabase
+      .from("chat_members")
+      .select("user_id")
+      .eq("chat_id", chatId);
+
+    if (error) {
+      throw new Error("Failed to load chat member IDs.");
+    }
+
+    return (data ?? []).map((row) => (row as { user_id: string }).user_id);
+  },
+
   async addMembers(chatId: string, members: Array<{ userId: string; role?: string }>) {
     if (members.length === 0) {
       return;

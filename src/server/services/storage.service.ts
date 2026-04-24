@@ -1,6 +1,6 @@
 import { getServiceSupabaseClient } from "@/lib/db";
-import { PREMIUM_LIMITS, STANDARD_LIMITS } from "@/lib/premium";
-import { subscriptionsService } from "@/server/services/subscriptions.service";
+
+const MAX_FILE_BYTES = 4 * 1024 * 1024 * 1024; // 4 GB
 
 const formatFileLimit = (bytes: number) => {
   if (bytes >= 1024 * 1024 * 1024) {
@@ -12,15 +12,8 @@ const formatFileLimit = (bytes: number) => {
 
 export const storageService = {
   async uploadFile(file: File, type: string, userId?: string | null) {
-    const premiumState = userId
-      ? await subscriptionsService.getPremiumState(userId).catch(() => null)
-      : null;
-    const maxFileBytes = premiumState?.isPremium
-      ? PREMIUM_LIMITS.maxFileBytes
-      : STANDARD_LIMITS.maxFileBytes;
-
-    if (file.size > maxFileBytes) {
-      throw new Error(`File is too large. Current limit is ${formatFileLimit(maxFileBytes)}.`);
+    if (file.size > MAX_FILE_BYTES) {
+      throw new Error(`File is too large. Current limit is ${formatFileLimit(MAX_FILE_BYTES)}.`);
     }
 
     const supabase = getServiceSupabaseClient();

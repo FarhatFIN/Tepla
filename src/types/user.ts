@@ -19,7 +19,6 @@ export type TeplaUser = {
   lastSeen: string | null;
   isOnline: boolean;
   isVerified: boolean;
-  isPremium: boolean;
   publicKey: string;
   signingPublicKey: string;
   language: string;

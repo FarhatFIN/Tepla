@@ -18,7 +18,6 @@ export interface DatabaseUser {
   is_online: boolean;
   is_verified: boolean;
   email_verified_at: string | Date | null;
-  is_premium: boolean;
   public_key: string;
   signing_public_key: string;
   password_hash: string | null;

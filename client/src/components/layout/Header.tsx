@@ -22,7 +22,7 @@ export default function Header({ chat, onBack }: HeaderProps) {
       </IconButton>
 
       <div className="flex min-w-0 flex-1 cursor-pointer items-center gap-3" onClick={toggleProfile}>
-        <Avatar name={chat.name} src={chat.avatar} status={user?.status} size="sm" isPremium={user?.isPremium} showStatus={chat.type === "direct"} />
+        <Avatar name={chat.name} src={chat.avatar} status={user?.status} size="sm" showStatus={chat.type === "direct"} />
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
             <h2 className="truncate text-sm font-bold text-[var(--text-primary)]">{chat.name}</h2>

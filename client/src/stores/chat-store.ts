@@ -23,7 +23,6 @@ interface ChatState {
   showCalls: boolean;
   callType: "voice" | "video";
   showSettings: boolean;
-  showPremium: boolean;
   showWallet: boolean;
   showWBIT: boolean;
   showThread: boolean;
@@ -38,7 +37,6 @@ interface ChatState {
   toggleStickers: () => void;
   toggleCalls: (type?: "voice" | "video") => void;
   toggleSettings: () => void;
-  togglePremium: () => void;
   toggleWallet: () => void;
   toggleWBIT: () => void;
   toggleThread: () => void;
@@ -163,7 +161,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
   showCalls: false,
   callType: "voice" as const,
   showSettings: false,
-  showPremium: false,
   showWallet: false,
   showWBIT: false,
   showThread: false,
@@ -387,7 +384,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
   toggleStickers: () => set((s) => ({ showStickers: !s.showStickers })),
   toggleCalls: (type) => set((s) => ({ showCalls: !s.showCalls, callType: type || s.callType })),
   toggleSettings: () => set((s) => ({ showSettings: !s.showSettings })),
-  togglePremium: () => set((s) => ({ showPremium: !s.showPremium })),
   toggleWallet: () => set((s) => ({ showWallet: !s.showWallet })),
   toggleWBIT: () => set((s) => ({ showWBIT: !s.showWBIT })),
   toggleThread: () => set((s) => ({ showThread: !s.showThread })),

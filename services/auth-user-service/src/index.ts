@@ -1,9 +1,9 @@
 import { BaseService } from '@tepla/common';
 import { initializeSecurity } from '@tepla/security';
-import { authRouter } from './routes/auth.routes';
-import { userRouter } from '../../user-service/src/routes/user.routes';
-import { e2eRouter } from '../../user-service/src/routes/e2e.routes';
-import { ktRouter } from '../../user-service/src/routes/kt.routes';
+import { authRouter } from './modules/auth/routes/auth.routes';
+import { userRouter } from './modules/users/routes/user.routes';
+import { e2eRouter } from './modules/e2e/routes/e2e.routes';
+import { ktRouter } from './modules/key-transparency/routes/kt.routes';
 
 class AuthUserService extends BaseService {
   constructor() {
@@ -28,7 +28,6 @@ class AuthUserService extends BaseService {
       contacts: true,
       e2eKeys: true,
       keyTransparency: true,
-      premium: false,
     });
   }
 }

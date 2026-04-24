@@ -144,7 +144,7 @@ export default function SettingsPanel() {
             <div className="flex items-center gap-4 border-b border-[var(--border)] p-4">
               <input ref={avatarInputRef} type="file" accept="image/*" className="hidden" onChange={(e) => { if (e.target.files?.[0]) handleAvatarChange(e.target.files[0]); e.target.value = ""; }} />
               <button onClick={() => avatarInputRef.current?.click()} className="relative group shrink-0" disabled={avatarUploading}>
-                <Avatar name={user?.name || "User"} size="lg" status="online" isPremium={user?.isPremium} src={user?.avatar} />
+                <Avatar name={user?.name || "User"} size="lg" status="online" src={user?.avatar} />
                 <div className="absolute inset-0 flex items-center justify-center rounded-full bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity">
                   {avatarUploading ? (
                     <div className="h-5 w-5 animate-spin rounded-full border-2 border-white border-t-transparent" />

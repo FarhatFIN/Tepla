@@ -125,19 +125,29 @@ export class KafkaConsumer {
 
   async start(): Promise<void> {
     await this.consumer.run({
-      eachMessage: async ({ message }: EachMessagePayload) => {
+      eachMessage: async ({ topic, message }: EachMessagePayload) => {
         try {
           const event: DomainEvent = JSON.parse(message.value!.toString());
           const handlers = this.handlers.get(event.type) || [];
           const wildcardHandlers = this.handlers.get('*') || [];
 
-          await Promise.all([
-            ...handlers.map((h) => h(event)),
-            ...wildcardHandlers.map((h) => h(event)),
-          ]);
+          const allHandlers = [...handlers, ...wildcardHandlers];
+          const results = await Promise.allSettled(allHandlers.map((h) => h(event)));
+
+          for (const result of results) {
+            if (result.status === 'rejected') {
+              logger.error('Handler failed for event', {
+                type: event.type,
+                topic,
+                error: (result.reason as Error).message,
+                correlationId: event.correlationId,
+              });
+            }
+          }
         } catch (err) {
           logger.error('Error processing Kafka message', {
             error: (err as Error).message,
+            topic,
             offset: message.offset,
           });
         }

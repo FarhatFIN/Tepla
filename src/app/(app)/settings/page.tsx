@@ -11,7 +11,6 @@ import {
   Palette,
   Smartphone,
   PhoneCall,
-  Crown,
 } from "lucide-react";
 
 const items = [
@@ -19,7 +18,6 @@ const items = [
   { href: "/settings/privacy", label: "Privacy", icon: Shield },
   { href: "/settings/notifications", label: "Notifications", icon: Bell },
   { href: "/settings/appearance", label: "Appearance", icon: Palette },
-  { href: "/settings/premium", label: "Premium", icon: Crown },
   { href: "/settings/communications", label: "Calls & Media", icon: PhoneCall },
   { href: "/settings/sessions", label: "Active Sessions", icon: Smartphone },
 ];

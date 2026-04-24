@@ -42,30 +42,6 @@ export function authMiddleware(jwtSecret?: string) {
   };
 }
 
-// ─── Premium Check Middleware ────────────────
-export function premiumMiddleware(redis?: RedisClient) {
-  return async (req: Request, _res: Response, next: NextFunction) => {
-    if (!req.user) {
-      throw new UnauthorizedError();
-    }
-
-    // Quick check from JWT claim
-    if (req.user.isPremium) {
-      return next();
-    }
-
-    // Double-check from Redis cache if available
-    if (redis) {
-      const cached = await redis.get(`premium:${req.user.sub}`);
-      if (cached === '1') {
-        return next();
-      }
-    }
-
-    throw new ForbiddenError('Premium subscription required');
-  };
-}
-
 // ─── Correlation ID Middleware ───────────────
 export function correlationMiddleware() {
   return (req: Request, _res: Response, next: NextFunction) => {

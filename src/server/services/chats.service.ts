@@ -1,6 +1,5 @@
 import { chatsRepository } from "@/server/database/chats.repository";
 import { messagesRepository } from "@/server/database/messages.repository";
-import { subscriptionsService } from "@/server/services/subscriptions.service";
 import type { ChatRole } from "@/types/chat";
 import {
   assertValidUsername,
@@ -9,12 +8,13 @@ import {
 } from "@/server/validation/validators";
 import { mapChat } from "./mappers";
 
+const MAX_GROUPS = 500;
+const MAX_CHANNELS = 100;
+
 export const chatsService = {
   async ensureCreationLimit(userId: string, type: "group" | "channel") {
-    const premiumState = await subscriptionsService.getPremiumState(userId);
     const currentCount = await chatsRepository.countCreatedChatsByType(userId, type);
-    const limit =
-      type === "group" ? premiumState.limits.groups : premiumState.limits.channels;
+    const limit = type === "group" ? MAX_GROUPS : MAX_CHANNELS;
 
     if (currentCount >= limit) {
       throw new Error(

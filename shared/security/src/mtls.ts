@@ -114,20 +114,23 @@ export function validateServiceIdentity(
 // Enforced by validateServiceIdentity middleware.
 
 export const SERVICE_PERMISSIONS: Record<string, string[]> = {
-  'message-service': [
-    'auth-service',        // validate tokens
-    'user-service',        // fetch user profiles
+  'messaging-core-service': [
+    'auth-user-service',   // validate tokens, fetch user profiles
     'media-service',       // upload attachments
   ],
-  'auth-service': [
-    'user-service',        // create/lookup users
+  'auth-user-service': [
+    'api-gateway',         // token validation from gateway
   ],
-  'websocket-gateway': [
-    'message-service',     // Kafka already handles this, but for HTTP fallback
-    'presence-service',
+  'realtime-service': [
+    'messaging-core-service', // message delivery via Kafka, HTTP fallback
+    'auth-user-service',      // fetch push tokens, validate sessions
   ],
-  'notification-service': [
-    'message-service',     // receive message events
-    'user-service',        // fetch push tokens
+  'api-gateway': [
+    'auth-user-service',
+    'messaging-core-service',
+    'media-service',
+    'realtime-service',
+    'bot-service',
+    'webapp-service',
   ],
 };

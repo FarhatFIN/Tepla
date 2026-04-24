@@ -1,6 +1,7 @@
 import compression from 'compression';
 import cors from 'cors';
 import express, { type Request, type RequestHandler, type Response } from 'express';
+import { createProxyMiddleware, fixRequestBody, type Options as ProxyOptions } from 'http-proxy-middleware';
 import {
   authMiddleware,
   correlationMiddleware,
@@ -10,7 +11,6 @@ import {
   requestLoggerMiddleware,
 } from '@tepla/common';
 import { AuditLogger, initializeSecurity, SecurityMiddleware } from '@tepla/security';
-import { createProxyMiddleware, fixRequestBody, type Options as ProxyOptions } from 'http-proxy-middleware';
 import Redis from 'ioredis';
 import { config } from './config';
 
@@ -36,7 +36,6 @@ type RouteDefinition = {
 const app = express();
 const logger = createLogger('api-gateway');
 const redis = new RedisClient(config.redisUrl);
-
 const securityRedis = new Redis(config.redisUrl);
 const securityMiddleware = new SecurityMiddleware(securityRedis);
 
@@ -222,6 +221,18 @@ registerRoutes([
     rewrite: '/api/search/',
   },
   {
+    path: '/api/v2/moderation',
+    middleware: [auth, securityMiddleware.userRateLimit(50), securityMiddleware.auditSensitive('moderation')],
+    target: config.services.messaging,
+    rewrite: '/api/moderation/',
+  },
+  {
+    path: '/api/v2/translate',
+    middleware: protectedMiddleware,
+    target: config.services.messaging,
+    rewrite: '/api/translate/',
+  },
+  {
     path: '/api/v2/sparks',
     middleware: [auth, securityMiddleware.userRateLimit(120), securityMiddleware.auditSensitive('sparks')],
     target: config.services.messaging,
@@ -301,28 +312,10 @@ if (config.features.botPlatform) {
 if (config.features.legacyFeatures) {
   registerRoutes([
     {
-      path: '/api/v2/premium',
-      middleware: [auth, securityMiddleware.userRateLimit(100), securityMiddleware.auditSensitive('premium')],
-      target: config.services.legacy.premium,
-      rewrite: '/api/premium/',
-    },
-    {
-      path: '/api/v2/moderation',
-      middleware: [auth, securityMiddleware.userRateLimit(50), securityMiddleware.auditSensitive('moderation')],
-      target: config.services.messaging,
-      rewrite: '/api/moderation/',
-    },
-    {
       path: '/api/v2/analytics',
       middleware: [auth, securityMiddleware.userRateLimit(30), securityMiddleware.auditSensitive('analytics')],
       target: config.services.legacy.analytics,
       rewrite: '/api/analytics/',
-    },
-    {
-      path: '/api/v2/translate',
-      middleware: protectedMiddleware,
-      target: config.services.legacy.translation,
-      rewrite: '/api/translate/',
     },
     {
       path: '/api/v2/payments',
@@ -361,15 +354,9 @@ if (config.features.legacyFeatures) {
       rewrite: '/api/wbit/',
     },
   ]);
-
-  app.use(
-    '/api/v2/wallet/kyc/webhook',
-    express.json({ limit: '1mb' }),
-    proxy(config.services.legacy.wallet, { '^/': '/api/wallet/kyc/webhook' }),
-  );
 } else {
   logger.info('Legacy feature routes are disabled by default', {
-    hint: 'Set TEPLA_ENABLE_LEGACY_FEATURES=true to expose premium, wallet, analytics, and WBIT routes',
+    hint: 'Set TEPLA_ENABLE_LEGACY_FEATURES=true to expose wallet, analytics, and WBIT routes',
   });
 }
 
@@ -377,7 +364,6 @@ app.use(errorHandler);
 
 async function start(): Promise<void> {
   await initializeSecurity();
-
   await redis.connect();
   AuditLogger.setRedis(securityRedis);
 

@@ -11,7 +11,7 @@ import { useTranslation } from "@/hooks/useTranslation";
 import NewChatModal from "@/components/chat/NewChatModal";
 
 export default function Sidebar() {
-  const { chats, activeChatId, setActiveChat, folders, activeFolderId, setActiveFolder, stories, searchQuery, setSearchQuery, toggleSettings, togglePremium, toggleWallet, toggleWBIT } = useChatStore(useShallow(s => ({ chats: s.chats, activeChatId: s.activeChatId, setActiveChat: s.setActiveChat, folders: s.folders, activeFolderId: s.activeFolderId, setActiveFolder: s.setActiveFolder, stories: s.stories, searchQuery: s.searchQuery, setSearchQuery: s.setSearchQuery, toggleSettings: s.toggleSettings, togglePremium: s.togglePremium, toggleWallet: s.toggleWallet, toggleWBIT: s.toggleWBIT })));
+  const { chats, activeChatId, setActiveChat, folders, activeFolderId, setActiveFolder, stories, searchQuery, setSearchQuery, toggleSettings, toggleWallet, toggleWBIT } = useChatStore(useShallow(s => ({ chats: s.chats, activeChatId: s.activeChatId, setActiveChat: s.setActiveChat, folders: s.folders, activeFolderId: s.activeFolderId, setActiveFolder: s.setActiveFolder, stories: s.stories, searchQuery: s.searchQuery, setSearchQuery: s.setSearchQuery, toggleSettings: s.toggleSettings, toggleWallet: s.toggleWallet, toggleWBIT: s.toggleWBIT })));
   const { theme, toggleTheme } = useTheme();
   const t = useTranslation();
   const [showNewChat, setShowNewChat] = useState(false);
@@ -155,7 +155,6 @@ export default function Sidebar() {
                 src={displayAvatar}
                 status={chat.user?.status}
                 size="md"
-                isPremium={chat.user?.isPremium}
                 showStatus={chat.type === "direct"}
               />
               <div className="min-w-0 flex-1">

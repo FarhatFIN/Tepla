@@ -20,13 +20,13 @@
               │     ┌─────────┘ │ │ └─────────┐     │
               │     │     ┌─────┘ └─────┐     │     │
               ▼     ▼     ▼             ▼     ▼     ▼
-         ┌────────┐┌────────┐┌────────┐┌────────┐┌────────┐┌────────┐
-         │  Auth  ││  User  ││  Chat  ││Message ││Presence││Premium │
-         │Service ││Service ││Service ││Service ││Service ││Service │
-         │ :3001  ││ :3002  ││ :3003  ││ :3004  ││ :3005  ││ :3009  │
-         └───┬────┘└───┬────┘└───┬────┘└───┬────┘└───┬────┘└───┬────┘
-             │         │         │         │         │         │
-         ┌───▼─────────▼─────────▼─────────▼─────────▼─────────▼────┐
+         ┌────────┐┌────────┐┌────────┐┌────────┐┌────────┐
+         │  Auth  ││  User  ││  Chat  ││Message ││Presence│
+         │Service ││Service ││Service ││Service ││Service │
+         │ :3001  ││ :3002  ││ :3003  ││ :3004  ││ :3005  │
+         └───┬────┘└───┬────┘└───┬────┘└───┬────┘└───┬────┘
+             │         │         │         │         │
+         ┌───▼─────────▼─────────▼─────────▼─────────▼─────────────┐
          │                    Apache Kafka                          │
          │              (Event Bus / Message Broker)                │
          └───┬─────────┬─────────┬─────────┬────────────────────────┘
@@ -62,18 +62,16 @@
 | Notification Service | 3006 | PG + Kafka | Push, email, in-app |
 | Media Service | 3007 | MinIO/S3 | Upload, thumbnails, presigned URLs |
 | Search Service | 3008 | Elasticsearch + Kafka | Full-text search, indexing |
-| Premium Service | 3009 | PG + Redis | Subscriptions, billing, feature flags |
 | Moderation Service | 3010 | PG + Kafka | Content filtering, reports, auto-ban |
 | Analytics Service | 3011 | Redis + Kafka | DAU/MAU, metrics, event counting |
 
 ## Event Architecture (Kafka Topics)
 
 ```
-tepla.user.events      → user.created, user.updated, user.deleted, user.premium_changed
+tepla.user.events      → user.created, user.updated, user.deleted
 tepla.chat.events      → chat.created, member_joined, member_left, member_role_changed
 tepla.message.events   → message.sent, edited, deleted, pinned, reaction.added/removed
 tepla.presence.events  → user.online, user.offline, user.typing
-tepla.premium.events   → subscription.created, renewed, cancelled, expired
 tepla.media.events     → media.uploaded, processed, deleted
 tepla.notification.events → push, email, in_app
 tepla.moderation.events   → content_flagged, user_banned, content_removed
@@ -94,36 +92,6 @@ Client → API Gateway → Message Service → PostgreSQL (store)
                         Search Service ← Kafka Consumer → Elasticsearch index
                         Analytics Service ← Kafka Consumer → Redis counters
                         Moderation Service ← Kafka Consumer → Auto-flag
-```
-
-## Premium System
-
-### Tiers
-| Feature | Free | Premium |
-|---------|------|---------|
-| File size | 50 MB | 4 GB |
-| Cloud storage | 1 GB | 100 GB |
-| Pinned chats | 5 | 100 |
-| Bio length | 140 | 500 |
-| Custom emoji | No | Yes |
-| Premium stickers | No | Yes |
-| Advanced search | No | Yes |
-| Priority servers | No | Yes |
-| Animated avatars | No | Yes |
-| Voice statuses | No | Yes |
-| Translations/day | 5 | Unlimited |
-
-### Pricing
-- Monthly: 299 RUB
-- Yearly: 2499 RUB (save 30%)
-- Lifetime: 9999 RUB
-
-### Premium Middleware
-```typescript
-// JWT payload includes isPremium flag
-// API Gateway forwards X-User-Premium header
-// Each service checks premium before granting access
-premiumMiddleware(redis) → checks JWT + Redis cache
 ```
 
 ## Scaling Strategy
@@ -190,11 +158,6 @@ POST   /api/v2/sparks/transfer     → message-service
 POST   /api/v2/presence/heartbeat  → presence-service
 POST   /api/v2/presence/typing     → presence-service
 GET    /api/v2/presence/:userId    → presence-service
-
-GET    /api/v2/premium/status      → premium-service
-GET    /api/v2/premium/plans       → premium-service
-POST   /api/v2/premium/subscribe   → premium-service
-POST   /api/v2/premium/cancel      → premium-service
 
 POST   /api/v2/media/upload        → media-service
 GET    /api/v2/search/messages     → search-service

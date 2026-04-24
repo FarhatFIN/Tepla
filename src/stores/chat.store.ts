@@ -14,6 +14,7 @@ export interface ChatState {
   messagesByChat: Record<ChatId, LocalMessage[]>;
   pinnedMessagesByChat: Record<ChatId, LocalMessage[]>;
   setActiveChatId: (chatId: ChatId | null) => void;
+  refreshUserInChats: (userId: string) => void;
   syncMessages: (chatId: ChatId, messages: LocalMessage[]) => void;
   upsertMessages: (chatId: ChatId, messages: LocalMessage[]) => void;
   setPinnedMessages: (chatId: ChatId, messages: LocalMessage[]) => void;
@@ -270,5 +271,30 @@ export const useChatStore = create<ChatState>((set) => ({
         },
       };
     }),
+  refreshUserInChats: (userId: string) => {
+    // Re-fetch user profile and update sender info in cached messages
+    fetch(`/api/users/${userId}`)
+      .then((r) => r.json())
+      .then((data) => {
+        if (!data.success || !data.data) return;
+        const profile = data.data;
+        set((state) => {
+          const updated: Record<ChatId, LocalMessage[]> = {};
+          for (const [chatId, messages] of Object.entries(state.messagesByChat)) {
+            const hasUser = messages.some((m) => m.senderId === userId);
+            if (hasUser) {
+              updated[chatId as ChatId] = messages.map((m) =>
+                m.senderId === userId
+                  ? { ...m, senderName: profile.displayName || profile.username, senderAvatar: profile.avatarUrl }
+                  : m,
+              );
+            }
+          }
+          if (Object.keys(updated).length === 0) return state;
+          return { messagesByChat: { ...state.messagesByChat, ...updated } };
+        });
+      })
+      .catch(() => {});
+  },
 }));
 

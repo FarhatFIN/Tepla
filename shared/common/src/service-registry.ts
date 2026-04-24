@@ -2,19 +2,13 @@ import { HttpClient } from './http-client';
 
 // Service Discovery — static config for Docker Compose / K8s
 const SERVICE_URLS: Record<string, string> = {
-  'auth-service': process.env.AUTH_SERVICE_URL || 'http://auth-service:3001',
-  'user-service': process.env.USER_SERVICE_URL || 'http://user-service:3002',
-  'chat-service': process.env.CHAT_SERVICE_URL || 'http://chat-service:3003',
-  'message-service': process.env.MESSAGE_SERVICE_URL || 'http://message-service:3004',
-  'presence-service': process.env.PRESENCE_SERVICE_URL || 'http://presence-service:3005',
-  'notification-service': process.env.NOTIFICATION_SERVICE_URL || 'http://notification-service:3006',
+  'auth-user-service': process.env.AUTH_USER_SERVICE_URL || 'http://auth-user-service:3001',
+  'messaging-core-service': process.env.MESSAGING_SERVICE_URL || 'http://messaging-core-service:3004',
   'media-service': process.env.MEDIA_SERVICE_URL || 'http://media-service:3007',
-  'search-service': process.env.SEARCH_SERVICE_URL || 'http://search-service:3008',
-  'premium-service': process.env.PREMIUM_SERVICE_URL || 'http://premium-service:3009',
-  'moderation-service': process.env.MODERATION_SERVICE_URL || 'http://moderation-service:3010',
-  'analytics-service': process.env.ANALYTICS_SERVICE_URL || 'http://analytics-service:3011',
+  'realtime-service': process.env.REALTIME_SERVICE_URL || 'http://realtime-service:3100',
+  'bot-service': process.env.BOT_SERVICE_URL || 'http://bot-service:3013',
+  'webapp-service': process.env.WEBAPP_SERVICE_URL || 'http://webapp-service:3017',
   'api-gateway': process.env.API_GATEWAY_URL || 'http://api-gateway:3000',
-  'websocket-gateway': process.env.WS_GATEWAY_URL || 'http://websocket-gateway:3100',
 };
 
 export class ServiceRegistry {

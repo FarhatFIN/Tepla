@@ -57,7 +57,6 @@ const isMediaSupported = () =>
 
 export const CommunicationsLab = () => {
   const authUser = useAuthStore((state) => state.user);
-  const isPremium = Boolean(authUser?.isPremium);
   const currentUserId = authUser?.id ?? null;
   const clipsRef = useRef<SavedClip[]>([]);
   const callVideoRef = useRef<HTMLVideoElement | null>(null);
@@ -357,7 +356,7 @@ export const CommunicationsLab = () => {
       await startMeter(stream);
 
       const recorder = new MediaRecorder(stream, {
-        audioBitsPerSecond: isPremium ? 256000 : 64000,
+        audioBitsPerSecond: 256000,
       });
       voiceRecorderRef.current = recorder;
       voiceChunksRef.current = [];
@@ -425,8 +424,8 @@ export const CommunicationsLab = () => {
       await startMeter(stream);
 
       const recorder = new MediaRecorder(stream, {
-        audioBitsPerSecond: isPremium ? 192000 : 96000,
-        videoBitsPerSecond: isPremium ? 6000000 : 2500000,
+        audioBitsPerSecond: 192000,
+        videoBitsPerSecond: 6000000,
       });
       circleRecorderRef.current = recorder;
       circleChunksRef.current = [];
@@ -722,14 +721,10 @@ export const CommunicationsLab = () => {
               <p className="text-sm font-medium text-white">
                 {isRecordingVoice
                   ? "Recording voice note..."
-                  : isPremium
-                    ? "Premium HQ voice capture"
-                    : "Quick voice message capture"}
+                  : "HQ voice capture"}
               </p>
               <p className="mt-1 text-xs text-tepla-text-muted">
-                {isPremium
-                  ? "Record high-quality voice notes, preview them, and upload them to cloud storage."
-                  : "Record a Telegram-style voice note, preview it, and upload it to media storage."}
+                {"Record high-quality voice notes, preview them, and upload them to cloud storage."}
               </p>
               <div className="mt-4 flex flex-wrap items-center gap-2">
                 <Button
@@ -749,7 +744,7 @@ export const CommunicationsLab = () => {
                   {formatDuration(voiceDurationMs)}
                 </span>
                 <span className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-xs text-sky-200">
-                  {isPremium ? "Premium HQ" : "Standard quality"}
+                  {"HQ"}
                 </span>
               </div>
             </div>

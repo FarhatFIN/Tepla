@@ -54,12 +54,6 @@ export const usersService = {
 
     const statusEmoji = normalizeStatusEmoji(payload.statusEmoji);
     const usernameColor = normalizeHexColor(payload.usernameColor);
-    if (statusEmoji && !existing.is_premium) {
-      throw new Error("Status emoji is a premium feature.");
-    }
-    if ((usernameColor || payload.avatarAnimationEnabled || payload.voiceStatusUrl) && !existing.is_premium) {
-      throw new Error("This premium profile feature requires an active subscription.");
-    }
 
     const username = await this.ensureUsernameAvailable(payload.username, payload.userId);
     const row = await usersRepository.updateProfile({
@@ -140,11 +134,4 @@ export const usersService = {
     };
   },
 
-  async activatePremium(userId: string) {
-    const row = await usersRepository.activatePremium(userId);
-    return {
-      user: mapAuthUser(row),
-      profile: mapUserProfile(row),
-    };
-  },
 };

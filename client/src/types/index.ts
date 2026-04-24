@@ -18,7 +18,6 @@ export interface User {
   phone?: string;
   status: PresenceStatus;
   lastSeen?: string;
-  isPremium?: boolean;
   isVerified?: boolean;
   isAdmin?: boolean;
   language?: string;
@@ -198,18 +197,6 @@ export interface Thread {
   repliesCount: number;
   lastReplyAt: string;
   participants: string[];
-}
-
-export interface PremiumPlan {
-  id: string;
-  name: string;
-  price: number;
-  currency: string;
-  period: "1month" | "3months" | "6months" | "1year";
-  periodLabel: string;
-  features: string[];
-  isPopular?: boolean;
-  savings?: string;
 }
 
 export interface NotificationSettings {

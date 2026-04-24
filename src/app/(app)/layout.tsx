@@ -2,9 +2,13 @@
 
 import { useEffect, type ReactNode } from "react";
 import { usePathname } from "next/navigation";
+import { CallOverlay } from "@/components/calls/CallOverlay";
+import { ConnectionStatus } from "@/components/ConnectionStatus";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { Sidebar } from "@/components/sidebar/Sidebar";
 import { ChatWindow } from "@/components/chat/ChatWindow";
 import { useSocket } from "@/hooks/useSocket";
+import { useNotifications } from "@/hooks/useNotifications";
 import { DEMO_CHAT_META, getDemoMessages } from "@/lib/demo-data";
 import { useChats } from "@/hooks/useChats";
 import { getMessagePreview } from "@/lib/utils";
@@ -23,6 +27,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
   const { chats, createGroup, startDirectChat, toggleFavoriteChat, backendEnabled } = useChats();
   const isSettings = pathname?.startsWith("/settings");
   useSocket(activeChatId);
+  const { permission: notifPermission, enableNotifications } = useNotifications();
 
   useEffect(() => {
     if (chats.length === 0) {
@@ -74,6 +79,21 @@ export default function AppLayout({ children }: AppLayoutProps) {
 
   return (
     <div className="flex h-full w-full">
+      <CallOverlay />
+      {notifPermission === "default" && backendEnabled ? (
+        <div className="fixed left-1/2 top-4 z-50 -translate-x-1/2 animate-in fade-in slide-in-from-top-2">
+          <div className="flex items-center gap-3 rounded-2xl border border-white/10 bg-tepla-bg/95 px-4 py-3 shadow-lg backdrop-blur-sm">
+            <span className="text-sm text-tepla-text">Enable notifications to stay in the loop</span>
+            <button
+              type="button"
+              onClick={enableNotifications}
+              className="rounded-xl bg-tepla-accent px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-tepla-accent/80"
+            >
+              Enable
+            </button>
+          </div>
+        </div>
+      ) : null}
       <Sidebar
         chats={chats}
         chatSnapshots={chatSnapshots}
@@ -91,9 +111,12 @@ export default function AppLayout({ children }: AppLayoutProps) {
         }}
         onToggleFavoriteChat={toggleFavoriteChat}
       />
-      <div className="flex h-full flex-1 flex-col overflow-hidden">
-        {isSettings ? children : <ChatWindow chat={activeChat} />}
-      </div>
+      <ErrorBoundary>
+        <div className="flex h-full flex-1 flex-col overflow-hidden">
+          <ConnectionStatus />
+          {isSettings ? children : <ChatWindow chat={activeChat} />}
+        </div>
+      </ErrorBoundary>
     </div>
   );
 }

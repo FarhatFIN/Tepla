@@ -124,8 +124,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
           avatar: raw.avatarUrl,
           phone: raw.phone,
           status: "online",
-          isPremium: raw.isPremium || false,
-          language: raw.language || get().language,
+            language: raw.language || get().language,
         };
         const finalUser = applyOwnerFlags(user);
         api.setToken(accessToken);
@@ -205,7 +204,6 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         avatar: raw.avatarUrl,
         phone: raw.phone,
         status: "online",
-        isPremium: raw.isPremium || false,
         language: raw.language || get().language,
       };
       const finalUser = applyOwnerFlags(user);

@@ -17,6 +17,7 @@ import {
   mapReplyPreview,
   mapSparkSummaryByMessage,
 } from "./mappers";
+import { pushService } from "./push.service";
 
 const asMessageArrayMap = <TItem extends { id: string }>(
   items: TItem[],
@@ -197,6 +198,28 @@ export const messagesService = {
       chatId: payload.chatId,
       message: hydrated,
     });
+
+    // Fire-and-forget push notifications to offline chat members
+    void (async () => {
+      try {
+        const memberIds = await chatsRepository.listMemberIds(payload.chatId);
+        const recipients = memberIds.filter((id) => id !== payload.senderId);
+        if (recipients.length === 0) return;
+
+        const preview =
+          payload.type === "text"
+            ? (payload.content?.slice(0, 100) ?? "New message")
+            : `Sent ${payload.type}`;
+
+        await pushService.notifyUsers(recipients, {
+          title: "Tepla",
+          body: preview,
+          url: `/`,
+        });
+      } catch {
+        // Push failure should never block messaging
+      }
+    })();
 
     return hydrated;
   },

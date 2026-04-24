@@ -109,8 +109,8 @@ export const MessageBubble = ({
   const isEncrypted = Boolean(message.contentIv || message.encryptedKeys);
   const canEdit = isOwn && message.type === "text" && message.attachments.length === 0;
   const canDelete = isOwn || canPin;
-  const canTranslate = Boolean(authUser?.isPremium && message.type === "text" && message.content);
-  const allowCustomReactions = Boolean(authUser?.isPremium);
+  const canTranslate = Boolean(message.type === "text" && message.content);
+  const allowCustomReactions = true;
   const sparkCount = message.sparkCount ?? 0;
   const sparkSendersCount = message.sparkSendersCount ?? 0;
 

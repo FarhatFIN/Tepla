@@ -8,58 +8,22 @@
       "port": 3080
     },
     {
-      "name": "client-legacy",
-      "runtimeExecutable": "cmd",
-      "runtimeArgs": ["/c", "node server.mts"],
-      "port": 3000
-    },
-    {
       "name": "api-gateway",
       "runtimeExecutable": "cmd",
       "runtimeArgs": ["/c", "node_modules\\.bin\\tsx --tsconfig tsconfig.services.json watch gateway/api-gateway/src/index.ts"],
       "port": 3000
     },
     {
-      "name": "websocket-gateway",
+      "name": "auth-user-service",
       "runtimeExecutable": "cmd",
-      "runtimeArgs": ["/c", "node_modules\\.bin\\tsx --tsconfig tsconfig.services.json watch gateway/websocket-gateway/src/index.ts"],
-      "port": 3100
-    },
-    {
-      "name": "auth-service",
-      "runtimeExecutable": "cmd",
-      "runtimeArgs": ["/c", "node_modules\\.bin\\tsx --tsconfig tsconfig.services.json watch services/auth-service/src/index.ts"],
+      "runtimeArgs": ["/c", "node_modules\\.bin\\tsx --tsconfig tsconfig.services.json watch services/auth-user-service/src/index.ts"],
       "port": 3001
     },
     {
-      "name": "user-service",
+      "name": "messaging-core-service",
       "runtimeExecutable": "cmd",
-      "runtimeArgs": ["/c", "node_modules\\.bin\\tsx --tsconfig tsconfig.services.json watch services/user-service/src/index.ts"],
-      "port": 3002
-    },
-    {
-      "name": "chat-service",
-      "runtimeExecutable": "cmd",
-      "runtimeArgs": ["/c", "node_modules\\.bin\\tsx --tsconfig tsconfig.services.json watch services/chat-service/src/index.ts"],
-      "port": 3003
-    },
-    {
-      "name": "message-service",
-      "runtimeExecutable": "cmd",
-      "runtimeArgs": ["/c", "node_modules\\.bin\\tsx --tsconfig tsconfig.services.json watch services/message-service/src/index.ts"],
+      "runtimeArgs": ["/c", "node_modules\\.bin\\tsx --tsconfig tsconfig.services.json watch services/messaging-core-service/src/index.ts"],
       "port": 3004
-    },
-    {
-      "name": "presence-service",
-      "runtimeExecutable": "cmd",
-      "runtimeArgs": ["/c", "node_modules\\.bin\\tsx --tsconfig tsconfig.services.json watch services/presence-service/src/index.ts"],
-      "port": 3005
-    },
-    {
-      "name": "notification-service",
-      "runtimeExecutable": "cmd",
-      "runtimeArgs": ["/c", "node_modules\\.bin\\tsx --tsconfig tsconfig.services.json watch services/notification-service/src/index.ts"],
-      "port": 3006
     },
     {
       "name": "media-service",
@@ -68,34 +32,10 @@
       "port": 3007
     },
     {
-      "name": "search-service",
+      "name": "realtime-service",
       "runtimeExecutable": "cmd",
-      "runtimeArgs": ["/c", "node_modules\\.bin\\tsx --tsconfig tsconfig.services.json watch services/search-service/src/index.ts"],
-      "port": 3008
-    },
-    {
-      "name": "premium-service",
-      "runtimeExecutable": "cmd",
-      "runtimeArgs": ["/c", "node_modules\\.bin\\tsx --tsconfig tsconfig.services.json watch services/premium-service/src/index.ts"],
-      "port": 3009
-    },
-    {
-      "name": "moderation-service",
-      "runtimeExecutable": "cmd",
-      "runtimeArgs": ["/c", "node_modules\\.bin\\tsx --tsconfig tsconfig.services.json watch services/moderation-service/src/index.ts"],
-      "port": 3010
-    },
-    {
-      "name": "analytics-service",
-      "runtimeExecutable": "cmd",
-      "runtimeArgs": ["/c", "node_modules\\.bin\\tsx --tsconfig tsconfig.services.json watch services/analytics-service/src/index.ts"],
-      "port": 3011
-    },
-    {
-      "name": "calls-service",
-      "runtimeExecutable": "cmd",
-      "runtimeArgs": ["/c", "node_modules\\.bin\\tsx --tsconfig tsconfig.services.json watch services/calls-service/src/index.ts"],
-      "port": 3012
+      "runtimeArgs": ["/c", "node_modules\\.bin\\tsx --tsconfig tsconfig.services.json watch services/realtime-service/src/index.ts"],
+      "port": 3100
     },
     {
       "name": "bot-service",
@@ -104,28 +44,25 @@
       "port": 3013
     },
     {
-      "name": "stories-service",
-      "runtimeExecutable": "cmd",
-      "runtimeArgs": ["/c", "node_modules\\.bin\\tsx --tsconfig tsconfig.services.json watch services/stories-service/src/index.ts"],
-      "port": 3014
-    },
-    {
-      "name": "sticker-service",
-      "runtimeExecutable": "cmd",
-      "runtimeArgs": ["/c", "node_modules\\.bin\\tsx --tsconfig tsconfig.services.json watch services/sticker-service/src/index.ts"],
-      "port": 3015
-    },
-    {
-      "name": "translation-service",
-      "runtimeExecutable": "cmd",
-      "runtimeArgs": ["/c", "node_modules\\.bin\\tsx --tsconfig tsconfig.services.json watch services/translation-service/src/index.ts"],
-      "port": 3016
-    },
-    {
       "name": "webapp-service",
       "runtimeExecutable": "cmd",
       "runtimeArgs": ["/c", "node_modules\\.bin\\tsx --tsconfig tsconfig.services.json watch services/webapp-service/src/index.ts"],
       "port": 3017
+    },
+    {
+      "name": "search-worker",
+      "runtimeExecutable": "cmd",
+      "runtimeArgs": ["/c", "node_modules\\.bin\\tsx --tsconfig tsconfig.services.json watch services/workers/search-worker/src/index.ts"]
+    },
+    {
+      "name": "moderation-worker",
+      "runtimeExecutable": "cmd",
+      "runtimeArgs": ["/c", "node_modules\\.bin\\tsx --tsconfig tsconfig.services.json watch services/workers/moderation-worker/src/index.ts"]
+    },
+    {
+      "name": "analytics-worker",
+      "runtimeExecutable": "cmd",
+      "runtimeArgs": ["/c", "node_modules\\.bin\\tsx --tsconfig tsconfig.services.json watch services/workers/analytics-worker/src/index.ts"]
     }
   ]
 }

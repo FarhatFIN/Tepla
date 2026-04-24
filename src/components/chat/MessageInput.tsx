@@ -32,7 +32,7 @@ const generalPrompts = [
   },
   {
     label: "Polish copy",
-    value: "Rewrite this so it sounds sharper and more premium:\n",
+    value: "Rewrite this so it sounds sharper and more polished:\n",
   },
 ];
 
@@ -108,7 +108,6 @@ export const MessageInput = ({
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const authUser = useAuthStore((state) => state.user);
   const { sendMessage, sendTyping, editMessage, demoMode, currentUserId } = useMessages(chatId);
-  const isPremium = Boolean(authUser?.isPremium);
 
   useEffect(() => {
     if (editingMessage) {
@@ -351,7 +350,7 @@ export const MessageInput = ({
       <div className="space-y-2">
         <VoiceRecorder
           disabled={!chatId}
-          highQuality={isPremium}
+          highQuality
           onSend={handleSendVoice}
         />
         <StickerStudio
@@ -426,9 +425,7 @@ export const MessageInput = ({
         <span>
           {draft.trim().length
             ? `${draft.trim().length} chars`
-            : isPremium
-              ? "Premium HQ voice enabled"
-              : "Instant send"}
+            : "HQ voice enabled"}
         </span>
       </div>
     </div>
