@@ -9,7 +9,7 @@ import { Sidebar } from "@/components/sidebar/Sidebar";
 import { ChatWindow } from "@/components/chat/ChatWindow";
 import { useSocket } from "@/hooks/useSocket";
 import { useNotifications } from "@/hooks/useNotifications";
-import { DEMO_CHAT_META, getDemoMessages } from "@/lib/demo-data";
+// Demo data removed — all content from backend
 import { useChats } from "@/hooks/useChats";
 import { getMessagePreview } from "@/lib/utils";
 import { useChatStore } from "@/stores/chat.store";
@@ -45,15 +45,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
 
   const chatSnapshots = Object.fromEntries(
     chats.map((chat) => {
-      const liveMessages =
-        messagesByChat[chat.id] ??
-        (DEMO_CHAT_META[chat.id]
-          ? getDemoMessages(chat.id).map((message) => ({
-              ...message,
-              localId: message.id,
-              status: "sent" as const,
-            }))
-          : []);
+      const liveMessages = messagesByChat[chat.id] ?? [];
       const latest = liveMessages.at(-1);
 
       return [
@@ -69,8 +61,8 @@ export default function AppLayout({ children }: AppLayoutProps) {
                 )
               : chat.description ?? "No messages yet",
           updatedAt: latest?.createdAt ?? chat.lastMessage?.createdAt ?? chat.createdAt,
-          unreadCount: DEMO_CHAT_META[chat.id]?.unreadCount ?? 0,
-          online: DEMO_CHAT_META[chat.id]?.online ?? false,
+          unreadCount: 0,
+          online: false,
         },
       ];
     }),

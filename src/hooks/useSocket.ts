@@ -32,11 +32,11 @@ export const useSocket = (activeChatId: string | null) => {
     });
 
     const handleConnect = () => {
-      if (socket.id) setOnline(socket.id);
+      if (currentUserId) setOnline(currentUserId);
     };
 
     const handleDisconnect = () => {
-      if (socket.id) setOffline(socket.id);
+      if (currentUserId) setOffline(currentUserId);
     };
 
     // ─── Typing ───────────────────────────────

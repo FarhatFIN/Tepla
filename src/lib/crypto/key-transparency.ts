@@ -17,7 +17,11 @@
 
 import { sha256 } from '@noble/hashes/sha256';
 import { bytesToHex, hexToBytes, concatBytes } from '@noble/hashes/utils';
+import { ed25519 } from '@noble/curves/ed25519';
 import { saveEncryptedKey, loadEncryptedKey } from './storage';
+
+// KT server's Ed25519 public key (hex) — must match the signing key on the server
+const KT_SERVER_PUBLIC_KEY = process.env.NEXT_PUBLIC_KT_PUBLIC_KEY || '';
 
 const LEAF_PREFIX = new Uint8Array([0x00]);
 const NODE_PREFIX = new Uint8Array([0x01]);
@@ -93,9 +97,35 @@ export function verifyInclusionProof(
  * Verify the signed tree head against the last known one.
  * Detects split-view attacks and log rollbacks.
  */
+/**
+ * Verify the Ed25519 signature on a signed tree head.
+ * The server signs: `${treeSize}:${rootHash}:${timestamp}`
+ */
+function verifySTHSignature(sth: SignedTreeHead): boolean {
+  if (!KT_SERVER_PUBLIC_KEY) {
+    // If no public key configured, can't verify — reject in production
+    if (process.env.NODE_ENV === 'production') return false;
+    return true; // allow in dev
+  }
+  if (sth.signature === '00') return false; // unsigned fallback — always reject
+  try {
+    const message = new TextEncoder().encode(`${sth.treeSize}:${sth.rootHash}:${sth.timestamp}`);
+    const sig = hexToBytes(sth.signature);
+    const pubKey = hexToBytes(KT_SERVER_PUBLIC_KEY);
+    return ed25519.verify(sig, sha256(message), pubKey);
+  } catch {
+    return false;
+  }
+}
+
 export async function verifyTreeHeadConsistency(
   newSTH: SignedTreeHead
 ): Promise<KTVerificationResult> {
+  // Verify cryptographic signature before trusting the tree head
+  if (!verifySTHSignature(newSTH)) {
+    return { valid: false, reason: 'STH signature verification failed — possible MITM' };
+  }
+
   const stored = await loadLastSTH();
 
   if (!stored) {

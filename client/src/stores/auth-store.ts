@@ -33,16 +33,9 @@ interface AuthState {
   setLanguage: (lang: string) => void;
   setUsername: (username: string) => void;
   setAvatar: (avatarDataUrl: string) => void;
+  setBio: (bio: string) => void;
+  setBirthDate: (birthDate: string) => void;
   hydrate: () => void;
-}
-
-const OWNER_ID = "c5246051-acc3-4b39-9911-1513909b7f9a";
-
-function applyOwnerFlags(user: User): User {
-  if (user.id === OWNER_ID) {
-    return { ...user, isVerified: true, isAdmin: true };
-  }
-  return user;
 }
 
 function persist(user: User, token: string, language: string) {
@@ -90,8 +83,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         if (data.token && data.user) {
           api.setToken(data.token);
           connectSocket(data.token);
-          const u = applyOwnerFlags(data.user);
-          set({ user: u, token: data.token, language: data.language || "en", isLoading: false, savedAccounts: accounts });
+          set({ user: data.user, token: data.token, language: data.language || "en", isLoading: false, savedAccounts: accounts });
           return;
         }
       } catch { /* corrupted */ }
@@ -126,12 +118,11 @@ export const useAuthStore = create<AuthState>((set, get) => ({
           status: "online",
             language: raw.language || get().language,
         };
-        const finalUser = applyOwnerFlags(user);
         api.setToken(accessToken);
         connectSocket(accessToken);
-        persist(finalUser, accessToken, finalUser.language || get().language);
-        saveAccountToList(finalUser, accessToken, finalUser.language || get().language);
-        set({ user: finalUser, token: accessToken, isLoading: false, savedAccounts: getSavedAccounts() });
+        persist(user, accessToken, user.language || get().language);
+        saveAccountToList(user, accessToken, user.language || get().language);
+        set({ user, token: accessToken, isLoading: false, savedAccounts: getSavedAccounts() });
         return { ok: true };
       }
 
@@ -170,12 +161,11 @@ export const useAuthStore = create<AuthState>((set, get) => ({
           language: raw.language || language,
           phone: raw.phone,
         };
-        const finalUser = applyOwnerFlags(user);
         api.setToken(accessToken);
         connectSocket(accessToken);
-        persist(finalUser, accessToken, language);
-        saveAccountToList(finalUser, accessToken, language);
-        set({ user: finalUser, token: accessToken, isLoading: false, language, savedAccounts: getSavedAccounts() });
+        persist(user, accessToken, language);
+        saveAccountToList(user, accessToken, language);
+        set({ user, token: accessToken, isLoading: false, language, savedAccounts: getSavedAccounts() });
         return { ok: true };
       }
 
@@ -206,12 +196,11 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         status: "online",
         language: raw.language || get().language,
       };
-      const finalUser = applyOwnerFlags(user);
       api.setToken(accessToken);
       connectSocket(accessToken);
-      persist(finalUser, accessToken, finalUser.language || get().language);
-      saveAccountToList(finalUser, accessToken, finalUser.language || get().language);
-      set({ user: finalUser, token: accessToken, isLoading: false, otpPending: null, savedAccounts: getSavedAccounts() });
+      persist(user, accessToken, user.language || get().language);
+      saveAccountToList(user, accessToken, user.language || get().language);
+      set({ user, token: accessToken, isLoading: false, otpPending: null, savedAccounts: getSavedAccounts() });
       return true;
     } catch (err) {
       console.warn("[auth] OTP verify failed:", err);
@@ -242,11 +231,10 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     const target = accounts.find((a) => a.user.id === accountId);
     if (!target) return;
     disconnectSocket();
-    const u = applyOwnerFlags(target.user);
     api.setToken(target.token);
     connectSocket(target.token);
-    persist(u, target.token, target.language);
-    set({ user: u, token: target.token, language: target.language, savedAccounts: accounts });
+    persist(target.user, target.token, target.language);
+    set({ user: target.user, token: target.token, language: target.language, savedAccounts: accounts });
   },
 
   removeSavedAccount: (accountId) => {
@@ -278,6 +266,42 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     saveAccountToList(updated, get().token!, get().language);
     set({ savedAccounts: getSavedAccounts() });
     api.patch("/users/" + user.id, { avatarUrl: avatarDataUrl }).catch(() => {});
+  },
+
+  setBio: (bio) => {
+    const { user } = get();
+    if (!user) return;
+    api.patch("/users/" + user.id, { bio }).catch((err) =>
+      console.warn("[auth] bio update failed:", err)
+    );
+    const updated = { ...user, bio };
+    set({ user: updated });
+    const stored = localStorage.getItem("tepla-auth");
+    if (stored) {
+      const data = JSON.parse(stored);
+      data.user = updated;
+      localStorage.setItem("tepla-auth", JSON.stringify(data));
+    }
+    saveAccountToList(updated, get().token!, get().language);
+    set({ savedAccounts: getSavedAccounts() });
+  },
+
+  setBirthDate: (birthDate) => {
+    const { user } = get();
+    if (!user) return;
+    api.patch("/users/" + user.id, { birthDate }).catch((err) =>
+      console.warn("[auth] birthDate update failed:", err)
+    );
+    const updated = { ...user, birthDate };
+    set({ user: updated });
+    const stored = localStorage.getItem("tepla-auth");
+    if (stored) {
+      const data = JSON.parse(stored);
+      data.user = updated;
+      localStorage.setItem("tepla-auth", JSON.stringify(data));
+    }
+    saveAccountToList(updated, get().token!, get().language);
+    set({ savedAccounts: getSavedAccounts() });
   },
 
   setUsername: (username) => {

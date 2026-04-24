@@ -59,25 +59,31 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
     await sendOtpEmail(email, code);
   }
 
+  // Atomic OTP verification via Lua script — prevents race-condition brute-force
+  const OTP_VERIFY_LUA = `
+    local key = KEYS[1]
+    local code = ARGV[1]
+    local maxAttempts = tonumber(ARGV[2])
+    local raw = redis.call('GET', key)
+    if not raw then return -1 end
+    local data = cjson.decode(raw)
+    if data.attempts >= maxAttempts then return -2 end
+    if data.code ~= code then
+      data.attempts = data.attempts + 1
+      local ttl = redis.call('TTL', key)
+      if ttl < 1 then ttl = 600 end
+      redis.call('SETEX', key, ttl, cjson.encode(data))
+      return 0
+    end
+    redis.call('DEL', key)
+    return 1
+  `;
+
   async function verifyEmailOtp(email: string, code: string): Promise<boolean> {
-    const key = `otp:${email}`;
-    const raw = await redis.get(key);
-    if (!raw) return false;
-
-    const data = JSON.parse(raw);
-    if (data.attempts >= 5) {
-      throw new ValidationError('Too many attempts. Request a new code.');
-    }
-
-    if (data.code !== code) {
-      data.attempts++;
-      const ttl = await redis.ttl(key);
-      await redis.set(key, JSON.stringify(data), ttl > 0 ? ttl : 600);
-      return false;
-    }
-
-    await redis.del(key);
-    return true;
+    const result = await redis.eval(OTP_VERIFY_LUA, [`otp:${email}`], [code, '5']) as number;
+    if (result === -1) return false;         // key not found / expired
+    if (result === -2) throw new ValidationError('Too many attempts. Request a new code.');
+    return result === 1;                     // 1 = match, 0 = wrong code
   }
 
   // POST /api/auth/login/phone — request OTP
@@ -818,17 +824,26 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
       const { userId, pin, deviceId } = req.body;
       if (!userId || !pin) throw new ValidationError('userId and pin are required');
 
-      // Rate limit: 5 per device per hour
+      // Atomic rate limit: 5 per device per hour via Lua
       const rlKey = `pin_attempts:${deviceId || userId}`;
-      const attempts = parseInt(await redis.get(rlKey) || '0');
-      if (attempts >= 5) throw new ForbiddenError('Too many PIN attempts. Try again later.');
+      const PIN_RL_LUA = `
+        local key = KEYS[1]
+        local max = tonumber(ARGV[1])
+        local ttl = tonumber(ARGV[2])
+        local cur = tonumber(redis.call('GET', key) or '0')
+        if cur >= max then return -1 end
+        redis.call('INCR', key)
+        if cur == 0 then redis.call('EXPIRE', key, ttl) end
+        return cur + 1
+      `;
+      const rlResult = await redis.eval(PIN_RL_LUA, [rlKey], ['5', '3600']) as number;
+      if (rlResult === -1) throw new ForbiddenError('Too many PIN attempts. Try again later.');
 
       const user = await userRepo.findById(userId);
       if (!user || !user.pin_hash) throw new UnauthorizedError('PIN not set');
 
       const valid = await bcrypt.compare(pin, user.pin_hash);
       if (!valid) {
-        await redis.set(rlKey, String(attempts + 1), 3600);
         await AuditLogger.log('pin_verify_failed', { userId, ip: req.ip });
         throw new UnauthorizedError('Invalid PIN');
       }

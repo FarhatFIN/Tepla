@@ -1,10 +1,10 @@
 import { Server as IOServer } from "socket.io";
 import type { Server as HTTPServer } from "http";
-import { setSocketServer } from "../server/sockets/emitter.ts";
+import { setSocketServer } from "../server/sockets/emitter";
 import type {
   ClientToServerSocketEvents,
   ServerToClientSocketEvents,
-} from "../server/sockets/events.ts";
+} from "../server/sockets/events";
 
 let io:
   | IOServer<ClientToServerSocketEvents, ServerToClientSocketEvents>
@@ -105,7 +105,8 @@ export const initSocketServer = (
         const userId = findUserIdBySocket(socket.id);
         if (!userId) return;
 
-        const response = await fetch(`http://localhost:${process.env.PORT ?? 3000}/api/calls`, {
+        const baseUrl = process.env.NEXT_PUBLIC_APP_URL || `http://localhost:${process.env.PORT ?? 3000}`;
+        const response = await fetch(`${baseUrl}/api/calls`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({

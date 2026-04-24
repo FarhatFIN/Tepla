@@ -91,7 +91,7 @@ export function userRouter(redis: RedisClient, kafka: KafkaProducer): Router {
       }
 
       const allowed = ['username', 'displayName', 'bio', 'avatarUrl', 'statusEmoji', 'statusText',
-        'usernameColor', 'animatedAvatarEnabled', 'voiceStatusUrl', 'language'];
+        'usernameColor', 'animatedAvatarEnabled', 'voiceStatusUrl', 'language', 'birthDate'];
       const updates: Record<string, any> = {};
       for (const key of allowed) {
         if (req.body[key] !== undefined) {

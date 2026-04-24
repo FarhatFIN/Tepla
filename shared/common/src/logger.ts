@@ -1,3 +1,5 @@
+import { requestContext } from './context';
+
 export interface Logger {
   info(message: string, meta?: Record<string, unknown>): void;
   warn(message: string, meta?: Record<string, unknown>): void;
@@ -7,13 +9,18 @@ export interface Logger {
 
 export function createLogger(service: string): Logger {
   const log = (level: string, message: string, meta?: Record<string, unknown>) => {
-    const entry = {
+    // Auto-inject correlationId and userId from AsyncLocalStorage
+    const ctx = requestContext.getStore();
+    const entry: Record<string, unknown> = {
       timestamp: new Date().toISOString(),
       level,
       service,
       message,
-      ...meta,
     };
+    if (ctx?.correlationId) entry.correlationId = ctx.correlationId;
+    if (ctx?.userId) entry.userId = ctx.userId;
+    if (meta) Object.assign(entry, meta);
+
     const line = JSON.stringify(entry);
     if (level === 'error') {
       console.error(line);

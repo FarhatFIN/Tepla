@@ -4,7 +4,11 @@
 // ============================================
 
 export { BaseService } from './base-service';
+export { BaseWorker } from './base-worker';
 export { BaseRepository } from './base-repository';
+export { requestContext, getContext, getCorrelationId, type RequestContext } from './context';
+export { CacheLayer } from './cache';
+export { DataLoader, type BatchFn } from './dataloader';
 export { KafkaProducer, KafkaConsumer } from './kafka';
 export { RedisClient, RedisRole } from './redis';
 export { createLogger, Logger } from './logger';

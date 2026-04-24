@@ -22,7 +22,7 @@ import { MessageBubble } from "./MessageBubble";
 import { MessageInput } from "./MessageInput";
 import { PinnedMessagesBar } from "./PinnedMessagesBar";
 import { SparksDialog } from "./SparksDialog";
-import { DEMO_CHAT_META } from "@/lib/demo-data";
+// Demo data removed
 
 type ChatWindowProps = {
   chat: TeplaChat | null;
@@ -83,12 +83,15 @@ export const ChatWindow = ({ chat }: ChatWindowProps) => {
     useMessageSearch({
       query: searchQuery,
       chatId,
+      userId: currentUserId,
       type: searchMode !== "text" ? searchMode : undefined,
       enabled: isSearchOpen && !demoMode && searchQuery.trim().length >= 2,
     });
-  const chatMeta = chatId ? DEMO_CHAT_META[chatId] : null;
+  // Subscribe to presence reactively (not via getState in render)
+  const companionUserId = chat?.type === "direct" && chat.user?.id ? chat.user.id : null;
+  const isCompanionOnline = usePresenceStore((s) => companionUserId ? s.onlineUserIds.has(companionUserId) : false);
+  const companionLastSeen = usePresenceStore((s) => companionUserId ? s.lastSeenByUser[companionUserId] ?? null : null);
   const canManagePins =
-    demoMode ||
     chat?.currentUserRole === "owner" ||
     chat?.currentUserRole === "admin";
   const activeTypingUsers = chatId
@@ -126,7 +129,7 @@ export const ChatWindow = ({ chat }: ChatWindowProps) => {
 
   const typingLabel =
     activeTypingUsers.length > 0
-      ? `${chatMeta?.companionName ?? "Someone"} is typing...`
+      ? `${chat?.user?.displayName ?? "Someone"} is typing...`
       : null;
 
   const handleEdit = async (message: LocalMessage) => {
@@ -284,7 +287,7 @@ export const ChatWindow = ({ chat }: ChatWindowProps) => {
               size="md"
               src={chat.avatarUrl ?? undefined}
               alt={chat.name ?? chat.username ?? "Chat"}
-              online={chatMeta?.online}
+              online={isCompanionOnline}
             />
             <div className="min-w-0">
               <div className="flex items-center gap-2">
@@ -307,13 +310,11 @@ export const ChatWindow = ({ chat }: ChatWindowProps) => {
               <p className="truncate text-xs text-tepla-text-muted">
                 {typingLabel
                   ? typingLabel
-                  : chat.type === "direct" && chat.user?.id
-                    ? usePresenceStore.getState().isOnline(chat.user.id)
-                      ? "online"
-                      : usePresenceStore.getState().getLastSeen(chat.user.id)
-                        ? `last seen ${new Intl.DateTimeFormat("en", { hour: "numeric", minute: "numeric" }).format(new Date(usePresenceStore.getState().getLastSeen(chat.user.id)!))}`
-                        : chat.username ? `@${chat.username}` : chat.description ?? "Encrypted conversation"
-                    : chat.username ? `@${chat.username}` : chat.description ?? "Encrypted conversation"
+                  : isCompanionOnline
+                    ? "online"
+                    : companionLastSeen
+                      ? `last seen ${new Intl.DateTimeFormat("en", { hour: "numeric", minute: "numeric" }).format(new Date(companionLastSeen))}`
+                      : chat.username ? `@${chat.username}` : chat.description ?? "Encrypted conversation"}
               </p>
             </div>
           </div>

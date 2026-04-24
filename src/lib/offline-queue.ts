@@ -114,10 +114,12 @@ export const offlineQueue = {
           continue;
         }
 
-        // Exponential backoff: skip if not enough time has passed
+        // Exponential backoff: skip if not enough time has passed since creation
         const delay = Math.min(BASE_DELAY_MS * 2 ** message.attempts, 30000);
-        const elapsed = Date.now() - message.createdAt - (message.attempts * delay);
-        if (message.attempts > 0 && elapsed < delay) {
+        const age = Date.now() - message.createdAt;
+        // Total wait before attempt N = sum of delays for all prior attempts
+        const totalWaitNeeded = BASE_DELAY_MS * (2 ** message.attempts - 1);
+        if (message.attempts > 0 && age < totalWaitNeeded) {
           continue;
         }
 

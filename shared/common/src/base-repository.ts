@@ -76,6 +76,48 @@ export class BaseRepository {
     }
   }
 
+  /**
+   * Execute a query within an existing transaction (PoolClient).
+   * Use this for multi-table atomic operations (e.g. message + outbox).
+   */
+  async queryWithClient<T extends QueryResultRow = QueryResultRow>(
+    client: PoolClient,
+    sql: string,
+    params?: unknown[]
+  ): Promise<T[]> {
+    const start = Date.now();
+    try {
+      const result = await client.query<T>(sql, params);
+      this.logger.debug('Client query executed', {
+        sql: sql.substring(0, 100),
+        duration: Date.now() - start,
+        rowCount: result.rowCount,
+      });
+      return result.rows;
+    } catch (err) {
+      this.logger.error('Client query failed', {
+        sql: sql.substring(0, 100),
+        error: (err as Error).message,
+        duration: Date.now() - start,
+      });
+      throw err;
+    }
+  }
+
+  async queryOneWithClient<T extends QueryResultRow = QueryResultRow>(
+    client: PoolClient,
+    sql: string,
+    params?: unknown[]
+  ): Promise<T | null> {
+    const rows = await this.queryWithClient<T>(client, sql, params);
+    return rows[0] || null;
+  }
+
+  /** Expose pool for cross-repository transactions */
+  getPool(): Pool {
+    return this.pool;
+  }
+
   async healthCheck(): Promise<boolean> {
     try {
       await this.query('SELECT 1');
