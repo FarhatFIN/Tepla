@@ -1,13 +1,54 @@
-node_modules/
+# dependencies
+node_modules
+/.pnp
+.pnp.js
+.yarn/install-state.gz
+
+# testing
+/coverage
+coverage/
+
+# next.js
+.next/
+/out/
+
+# production
+/build
 dist/
+!tools/launcher/dist/
+!tools/launcher/dist/TeplaLauncher.exe
+
+# env files
 .env
 .env.*
 !.env.example
+
+# logs and archives
 *.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+*.tgz
+
+# typescript
+*.tsbuildinfo
+next-env.d.ts
+
+# turbo
+.turbo/
+
+# binaries
+*.exe
+*.apk
+*.dll
+*.so
+*.dylib
+
+# misc / IDE / OS
 .DS_Store
+*.pem
 .idea/
 .vscode/
 *.swp
-coverage/
-*.tgz
-.turbo/
+*.swo
+Thumbs.db

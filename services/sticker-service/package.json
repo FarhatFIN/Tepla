@@ -1,0 +1,16 @@
+{
+  "name": "@tepla/sticker-service",
+  "version": "2.0.0",
+  "description": "Tepla Messenger — Stickers, GIF search (Giphy/Tenor)",
+  "main": "src/index.ts",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@tepla/common": "file:../../shared/common",
+    "@tepla/types": "file:../../shared/types"
+  }
+}
+
