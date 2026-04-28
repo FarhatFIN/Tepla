@@ -1,7 +1,7 @@
 "use client";
 import { create } from "zustand";
 import { Chat, Message, ChatFolder, UserStories } from "@/types";
-// Mock data removed — load from API
+// Chat state is backed by API data
 import api from "@/lib/api";
 import { getSocket } from "@/lib/socket";
 import { useAuthStore } from "@/stores/auth-store";

@@ -253,26 +253,18 @@ export default function MessageInput({ chatId }: MessageInputProps) {
     setShowPoll(false);
   };
 
-  // ── GIF search (GIPHY API) ──
   const searchGifs = async () => {
-    const key = "NxlUvPE2ZaimOBQhmx0CbGhehV4HBMGr";
-    const q = gifQuery.trim() || "trending";
+    const query = gifQuery.trim();
     try {
-      const endpoint = gifQuery.trim()
-        ? `https://api.giphy.com/v1/gifs/search?api_key=${key}&q=${encodeURIComponent(q)}&limit=20&rating=g`
-        : `https://api.giphy.com/v1/gifs/trending?api_key=${key}&limit=20&rating=g`;
-      const res = await fetch(endpoint);
-      const json = await res.json();
-      setGifResults((json.data || []).map((g: any) => ({
-        id: g.id,
-        url: g.images?.original?.url || g.images?.downsized?.url || "",
-        previewUrl: g.images?.fixed_width_small?.url || g.images?.preview_gif?.url || g.images?.fixed_width?.url || "",
-      })));
+      const path = query
+        ? `/gifs/search?q=${encodeURIComponent(query)}&limit=20`
+        : "/gifs/trending?limit=20";
+      const response = await api.get<{ success: boolean; data: { id: string; url: string; previewUrl: string }[] }>(path);
+      setGifResults((response.data || []).filter((gif) => gif.url && gif.previewUrl));
     } catch {
       setGifResults([]);
     }
   };
-
   const sendGif = (gif: { url: string; previewUrl: string }) => {
     const att = { id: `att-${Date.now()}`, type: "gif" as const, url: gif.url, thumbnailUrl: gif.previewUrl, mimeType: "image/gif" };
     sendMessage(chatId, gif.url, "gif", [att]);

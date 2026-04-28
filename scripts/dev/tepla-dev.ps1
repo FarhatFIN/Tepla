@@ -1,5 +1,5 @@
 param(
-  [ValidateSet("StartInfra", "StopInfra", "StartCore", "StartClient", "StartAll", "StopAll", "RunService", "OpenApp", "OpenHealth", "SelectRepo", "StartBot")]
+  [ValidateSet("StartInfra", "StopInfra", "StartCore", "StartClient", "StartAll", "StopAll", "RunService", "OpenApp", "OpenHealth", "SelectRepo", "StartBot", "StartService", "StopService", "GetStatus")]
   [string]$Action = "StartAll",
   [string]$RepoRoot,
   [string]$ServiceId
@@ -73,6 +73,64 @@ function Select-RepoRoot {
   }
 
   return $dialog.SelectedPath
+}
+
+function Resolve-RepoRootNoPrompt {
+  if (Test-RepoRoot $RepoRoot) {
+    return (Resolve-Path $RepoRoot).Path
+  }
+
+  $state = Read-State
+  if (Test-RepoRoot $state.repoRoot) {
+    return (Resolve-Path $state.repoRoot).Path
+  }
+
+  $candidate = Resolve-Path (Join-Path (Get-ScriptRootPath) "..\..")
+  if (Test-RepoRoot $candidate.Path) {
+    return $candidate.Path
+  }
+
+  return $null
+}
+
+function Get-Status {
+  $state = Read-State
+  $repo = Resolve-RepoRootNoPrompt
+  $manifest = Get-Manifest
+  $services = @()
+
+  foreach ($service in $manifest.services) {
+    $pidValue = $null
+    if ($state.processes -and $state.processes.PSObject.Properties[$service.id]) {
+      $pidValue = [int]$state.processes.PSObject.Properties[$service.id].Value
+    }
+
+    $running = $false
+    if ($pidValue) {
+      $running = [bool](Get-Process -Id $pidValue -ErrorAction SilentlyContinue)
+    }
+
+    $port = $null
+    if ($service.env -and $service.env.PSObject.Properties['PORT']) {
+      $port = [string]$service.env.PSObject.Properties['PORT'].Value
+    }
+
+    $services += [pscustomobject]@{
+      id = $service.id
+      name = $service.name
+      command = $service.command
+      port = $port
+      running = $running
+      pid = $(if ($running) { $pidValue } else { $null })
+    }
+  }
+
+  [pscustomobject]@{
+    repoRoot = $repo
+    clientUrl = $manifest.clientUrl
+    gatewayHealthUrl = $manifest.gatewayHealthUrl
+    services = $services
+  } | ConvertTo-Json -Depth 8
 }
 
 function Resolve-RepoRoot {
@@ -190,6 +248,23 @@ function Stop-Infra([string]$Repo) {
   & powershell.exe -ExecutionPolicy Bypass -Command "Set-Location '$($Repo.Replace("'", "''"))'; $composeCommand"
 }
 
+function Stop-ManagedService([string]$Id) {
+  $state = Read-State
+  if (-not $state.processes -or -not $state.processes.PSObject.Properties[$Id]) {
+    return
+  }
+
+  $pidValue = [int]$state.processes.PSObject.Properties[$Id].Value
+  try { Stop-Process -Id $pidValue -Force -ErrorAction Stop } catch {}
+
+  $currentProcesses = @{}
+  $state.processes.PSObject.Properties | ForEach-Object {
+    if ($_.Name -ne $Id) { $currentProcesses[$_.Name] = $_.Value }
+  }
+  $state.processes = [pscustomobject]$currentProcesses
+  Write-State $state
+}
+
 function Stop-ManagedServices {
   $state = Read-State
   if (-not $state.processes) {
@@ -241,7 +316,13 @@ function Open-Url([string]$Url) {
   Start-Process $Url | Out-Null
 }
 
-$resolvedRepo = Resolve-RepoRoot
+if ($Action -eq "GetStatus") { Get-Status; exit 0 }
+
+if ($Action -eq "SelectRepo") {
+  $resolvedRepo = Select-RepoRoot
+} else {
+  $resolvedRepo = Resolve-RepoRoot
+}
 Save-RepoRoot $resolvedRepo
 
 switch ($Action) {
@@ -262,6 +343,12 @@ switch ($Action) {
   }
   "StartBot" {
     Start-Bot -Repo $resolvedRepo
+  }
+  "StartService" {
+    Start-ManagedService -Repo $resolvedRepo -Service (Get-ServiceById $ServiceId)
+  }
+  "StopService" {
+    Stop-ManagedService -Id $ServiceId
   }
   "StartAll" {
     Start-Infra -Repo $resolvedRepo

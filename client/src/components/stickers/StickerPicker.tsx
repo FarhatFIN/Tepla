@@ -1,6 +1,28 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useChatStore } from "@/stores/chat-store";
+import api from "@/lib/api";
+
+type StickerApi = {
+  id: string;
+  packId?: string;
+  emoji?: string;
+  fileUrl?: string;
+  thumbnailUrl?: string | null;
+  width?: number;
+  height?: number;
+  isAnimated?: boolean;
+};
+
+type StickerPackApi = {
+  id: string;
+  stickers?: StickerApi[];
+};
+
+type ApiResponse<T> = {
+  success: boolean;
+  data: T;
+};
 
 const emojiCategories = [
   { name: "Smileys", emojis: ["\u{1F600}", "\u{1F603}", "\u{1F604}", "\u{1F601}", "\u{1F606}", "\u{1F605}", "\u{1F602}", "\u{1F923}", "\u{1F60A}", "\u{1F607}", "\u{1F642}", "\u{1F643}", "\u{1F609}", "\u{1F60C}", "\u{1F60D}", "\u{1F970}", "\u{1F618}", "\u{1F617}", "\u{1F619}", "\u{1F61A}", "\u{1F60B}", "\u{1F61B}", "\u{1F61C}", "\u{1F61D}", "\u{1F911}", "\u{1F917}", "\u{1F914}", "\u{1F910}", "\u{1F928}", "\u{1F610}", "\u{1F611}", "\u{1F636}", "\u{1F60F}", "\u{1F612}", "\u{1F644}", "\u{1F62C}", "\u{1F925}"] },
@@ -10,22 +32,49 @@ const emojiCategories = [
   { name: "Food", emojis: ["\u{1F34E}", "\u{1F34F}", "\u{1F350}", "\u{1F34A}", "\u{1F34B}", "\u{1F34C}", "\u{1F349}", "\u{1F347}", "\u{1F353}", "\u{1F348}", "\u{1F352}", "\u{1F351}", "\u{1F346}", "\u{1F955}", "\u{1F33D}", "\u{1F336}\u{FE0F}", "\u{1F951}", "\u{1F966}", "\u{1F355}", "\u{1F354}", "\u{1F32E}", "\u{1F37F}", "\u{2615}", "\u{1F37A}", "\u{1F377}"] },
 ];
 
-const mockStickers = [
-  { id: "st1", emoji: "\u{1F44D}", label: "Thumbs Up" },
-  { id: "st2", emoji: "\u{1F525}", label: "Fire" },
-  { id: "st3", emoji: "\u{2764}\u{FE0F}", label: "Heart" },
-  { id: "st4", emoji: "\u{1F602}", label: "Laugh" },
-  { id: "st5", emoji: "\u{1F60D}", label: "Love" },
-  { id: "st6", emoji: "\u{1F914}", label: "Think" },
-  { id: "st7", emoji: "\u{1F680}", label: "Rocket" },
-  { id: "st8", emoji: "\u{1F389}", label: "Party" },
-];
-
 export default function StickerPicker() {
   const { showStickers, toggleStickers, activeChatId, sendMessage } = useChatStore();
-  const [tab, setTab] = useState<"emoji" | "stickers" | "gif">("emoji");
+  const [tab, setTab] = useState<"emoji" | "stickers">("emoji");
   const [searchEmoji, setSearchEmoji] = useState("");
   const [activeCategory, setActiveCategory] = useState(0);
+  const [stickers, setStickers] = useState<StickerApi[]>([]);
+  const [isLoadingStickers, setIsLoadingStickers] = useState(false);
+  const [stickerError, setStickerError] = useState<string | null>(null);
+
+  const query = searchEmoji.trim();
+
+  useEffect(() => {
+    if (!showStickers || tab !== "stickers") return;
+
+    let alive = true;
+
+    const loadStickers = async () => {
+      setIsLoadingStickers(true);
+      setStickerError(null);
+
+      try {
+        const path = query
+          ? `/stickers/search?q=${encodeURIComponent(query)}`
+          : "/stickers/trending";
+        const response = await api.get<ApiResponse<StickerPackApi[]>>(path);
+        const next = (response.data || []).flatMap((pack) => pack.stickers || []);
+        if (alive) setStickers(next);
+      } catch (error) {
+        if (alive) {
+          setStickers([]);
+          setStickerError(error instanceof Error ? error.message : "Unable to load stickers");
+        }
+      } finally {
+        if (alive) setIsLoadingStickers(false);
+      }
+    };
+
+    void loadStickers();
+
+    return () => {
+      alive = false;
+    };
+  }, [query, showStickers, tab]);
 
   if (!showStickers || !activeChatId) return null;
 
@@ -34,13 +83,35 @@ export default function StickerPicker() {
     toggleStickers();
   };
 
+  const handleStickerClick = (sticker: StickerApi) => {
+    const url = sticker.fileUrl || sticker.thumbnailUrl;
+    if (!url) return;
+
+    sendMessage(activeChatId, sticker.emoji || "Sticker", "sticker", [
+      {
+        id: sticker.id,
+        type: "sticker",
+        url,
+        thumbnailUrl: sticker.thumbnailUrl || url,
+        fileName: `sticker-${sticker.id}`,
+        mimeType: sticker.isAnimated ? "image/gif" : "image/webp",
+        width: sticker.width,
+        height: sticker.height,
+      },
+    ]);
+    void api.post(`/stickers/${sticker.id}/use`).catch(() => undefined);
+    toggleStickers();
+  };
+
+  const emojiList = emojiCategories[activeCategory]?.emojis || [];
+  const visibleEmojis = query ? emojiList.filter((emoji) => emoji.includes(query)) : emojiList;
+
   return (
     <div className="absolute bottom-16 right-4 z-30 w-[340px] overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--bg-card)] shadow-xl animate-scale-in">
-      {/* Tabs */}
       <div className="flex border-b border-[var(--border)]">
-        {(["emoji", "stickers", "gif"] as const).map((t) => (
-          <button key={t} onClick={() => setTab(t)} className={`flex-1 py-2.5 text-xs font-medium capitalize transition-colors ${tab === t ? "border-b-2 border-[var(--accent)] text-[var(--accent)]" : "text-[var(--text-tertiary)] hover:text-[var(--text-primary)]"}`}>
-            {t === "gif" ? "GIF" : t}
+        {(["emoji", "stickers"] as const).map((item) => (
+          <button key={item} onClick={() => setTab(item)} className={`flex-1 py-2.5 text-xs font-medium capitalize transition-colors ${tab === item ? "border-b-2 border-[var(--accent)] text-[var(--accent)]" : "text-[var(--text-tertiary)] hover:text-[var(--text-primary)]"}`}>
+            {item}
           </button>
         ))}
         <button onClick={toggleStickers} className="px-3 text-[var(--text-tertiary)] hover:text-[var(--text-primary)]">
@@ -48,49 +119,47 @@ export default function StickerPicker() {
         </button>
       </div>
 
-      {/* Search */}
       <div className="px-3 py-2">
         <input value={searchEmoji} onChange={(e) => setSearchEmoji(e.target.value)} placeholder={`Search ${tab}...`} className="w-full rounded-lg bg-[var(--bg-input)] px-3 py-1.5 text-sm text-[var(--text-primary)] placeholder-[var(--text-tertiary)] outline-none" />
       </div>
 
       {tab === "emoji" && (
         <>
-          {/* Category tabs */}
           <div className="flex gap-1 px-3 pb-1">
-            {emojiCategories.map((cat, i) => (
-              <button key={cat.name} onClick={() => setActiveCategory(i)} className={`rounded-md px-2 py-1 text-[10px] transition-colors ${activeCategory === i ? "bg-[var(--accent-soft)] text-[var(--accent)]" : "text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)]"}`}>
+            {emojiCategories.map((cat, index) => (
+              <button key={cat.name} onClick={() => setActiveCategory(index)} className={`rounded-md px-2 py-1 text-[10px] transition-colors ${activeCategory === index ? "bg-[var(--accent-soft)] text-[var(--accent)]" : "text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)]"}`}>
                 {cat.emojis[0]}
               </button>
             ))}
           </div>
-          {/* Emoji grid */}
           <div className="grid max-h-[250px] grid-cols-8 gap-0.5 overflow-y-auto px-2 pb-2">
-            {emojiCategories[activeCategory].emojis
-              .filter((e) => !searchEmoji || e.includes(searchEmoji))
-              .map((emoji) => (
-                <button key={emoji} onClick={() => handleEmojiClick(emoji)} className="flex h-9 w-9 items-center justify-center rounded-lg text-xl transition-transform hover:scale-110 hover:bg-[var(--bg-hover)]">
-                  {emoji}
-                </button>
-              ))}
+            {visibleEmojis.map((emoji) => (
+              <button key={emoji} onClick={() => handleEmojiClick(emoji)} className="flex h-9 w-9 items-center justify-center rounded-lg text-xl transition-transform hover:scale-110 hover:bg-[var(--bg-hover)]">
+                {emoji}
+              </button>
+            ))}
           </div>
         </>
       )}
 
       {tab === "stickers" && (
         <div className="grid max-h-[280px] grid-cols-4 gap-2 overflow-y-auto p-3">
-          {mockStickers.map((s) => (
-            <button key={s.id} onClick={() => { sendMessage(activeChatId, s.emoji, "sticker"); toggleStickers(); }} className="flex h-16 items-center justify-center rounded-xl bg-[var(--bg-input)] text-3xl transition-transform hover:scale-105 hover:bg-[var(--bg-hover)]">
-              {s.emoji}
-            </button>
-          ))}
-        </div>
-      )}
-
-      {tab === "gif" && (
-        <div className="flex max-h-[280px] flex-col items-center justify-center gap-2 p-8 text-center">
-          <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="var(--text-tertiary)" strokeWidth="1.5"><rect x="2" y="2" width="20" height="20" rx="5"/><path d="M9 10h1v4H9v-2H8v2H7v-4h1v1h1z"/><path d="M13 10v4h2v-1h-1v-3z"/><path d="M17 10v4"/></svg>
-          <p className="text-sm text-[var(--text-tertiary)]">Search for GIFs</p>
-          <p className="text-xs text-[var(--text-tertiary)]">Powered by Giphy</p>
+          {isLoadingStickers ? (
+            <div className="col-span-4 py-8 text-center text-sm text-[var(--text-tertiary)]">Loading stickers...</div>
+          ) : stickerError ? (
+            <div className="col-span-4 py-8 text-center text-sm text-[var(--text-tertiary)]">{stickerError}</div>
+          ) : stickers.length > 0 ? (
+            stickers.map((sticker) => {
+              const url = sticker.thumbnailUrl || sticker.fileUrl;
+              return (
+                <button key={sticker.id} onClick={() => handleStickerClick(sticker)} className="flex h-16 items-center justify-center overflow-hidden rounded-xl bg-[var(--bg-input)] transition-transform hover:scale-105 hover:bg-[var(--bg-hover)]">
+                  {url ? <img src={url} alt={sticker.emoji || "Sticker"} className="h-full w-full object-contain p-1" loading="lazy" /> : <span className="text-3xl">{sticker.emoji}</span>}
+                </button>
+              );
+            })
+          ) : (
+            <div className="col-span-4 py-8 text-center text-sm text-[var(--text-tertiary)]">No stickers found</div>
+          )}
         </div>
       )}
     </div>

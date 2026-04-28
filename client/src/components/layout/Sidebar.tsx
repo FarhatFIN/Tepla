@@ -67,7 +67,7 @@ export default function Sidebar() {
       <div className="mx-3 mt-3 mb-2 rounded-xl border border-[var(--border)] bg-[var(--bg-card)] p-3">
         <div className="flex items-center gap-2 mb-2">
           <span className="text-sm">🚀</span>
-          <span className="text-xs font-semibold text-[var(--accent)]">{t("investor_demo")}</span>
+          <span className="text-xs font-semibold text-[var(--accent)]">{t("quality_status")}</span>
         </div>
         <div className="flex gap-4">
           <div>
