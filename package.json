@@ -27,7 +27,7 @@
     "dev:bot": "npm run dev --workspace @tepla/bot-service",
     "stack:core:start": "powershell -ExecutionPolicy Bypass -File scripts/dev/tepla-dev.ps1 -Action StartAll",
     "stack:core:stop": "powershell -ExecutionPolicy Bypass -File scripts/dev/tepla-dev.ps1 -Action StopAll",
-    "launcher:open": "mshta.exe tools/launcher/TeplaLauncher.hta",
+    "launcher:open": "tools\\launcher\\dist\\TeplaLauncher.exe",
     "launcher:build": "powershell -ExecutionPolicy Bypass -File tools/launcher/build-launcher.ps1",
     "infra:up": "docker compose -f infrastructure/docker-compose.yml -f infrastructure/docker-compose.dev.yml up -d",
     "infra:down": "docker compose -f infrastructure/docker-compose.yml -f infrastructure/docker-compose.dev.yml down",
