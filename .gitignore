@@ -52,3 +52,6 @@ next-env.d.ts
 *.swp
 *.swo
 Thumbs.db
+
+# pnpm
+pnpm-lock.yaml

@@ -2,7 +2,6 @@
   "name": "tepla",
   "version": "0.1.0",
   "private": true,
-  "packageManager": "npm@11.6.2",
   "workspaces": [
     "client",
     "shared/*",
@@ -11,7 +10,7 @@
   ],
   "scripts": {
     "bootstrap": "npm install --workspaces --include-workspace-root",
-    "dev": "npm run dev --workspace tepla-client",
+    "dev": "pnpm run dev --workspace tepla-client",
     "build": "npm run build --workspace tepla-client",
     "start": "npm run start --workspace tepla-client",
     "lint": "npm run lint --workspace tepla-client",
