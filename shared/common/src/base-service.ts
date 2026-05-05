@@ -124,7 +124,7 @@ export abstract class BaseService {
       // Error handler must be last
       this.app.use(errorHandler);
 
-      this.app.listen(this.config.port, () => {
+      this.app.listen(this.config.port, '0.0.0.0', () => {
         this.logger.info(`${this.config.name} running on port ${this.config.port}`);
       });
 
