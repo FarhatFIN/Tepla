@@ -180,7 +180,7 @@
       <div class="hero">
         <div class="eyebrow">Tepla Beta Ops</div>
         <h1>Tepla Launcher</h1>
-        <p class="sub">One place to lift infrastructure, core services, client UI, and the bot platform without juggling terminals.</p>
+        <p class="sub">Starts the same Docker stack used on Windows, macOS, and Linux: databases, gateway, auth, messaging, realtime, media, and client UI.</p>
       </div>
 
       <div class="status">
@@ -196,9 +196,9 @@
         </button>
 
         <button class="primary" onclick="runAction('StartAll')">
-          <span class="caption">Fast Start</span>
-          <span class="title">Start All</span>
-          <span class="hint">Lift infra, core services, and the client for beta testing.</span>
+          <span class="caption">Docker</span>
+          <span class="title">Start Stack</span>
+          <span class="hint">Build and start Postgres, Redis, Kafka, services, and client.</span>
         </button>
 
         <button onclick="runAction('StartInfra')">
@@ -210,7 +210,7 @@
         <button onclick="runAction('StartCore')">
           <span class="caption">Backend</span>
           <span class="title">Start Core Services</span>
-          <span class="hint">Launch gateway, auth-user, messaging, media, and realtime services.</span>
+          <span class="hint">For local pnpm dev only; Docker Start Stack is the normal path.</span>
         </button>
 
         <button onclick="runAction('StartClient')">
@@ -222,7 +222,7 @@
         <button onclick="runAction('StartBot')">
           <span class="caption">Platform</span>
           <span class="title">Start Bot Platform</span>
-          <span class="hint">Launch ElevenBot and bot-platform APIs when needed.</span>
+          <span class="hint">Disabled until a real bot service exists in this repository.</span>
         </button>
 
         <button onclick="runAction('OpenApp')">
@@ -239,12 +239,12 @@
 
         <button class="danger" onclick="runAction('StopAll')">
           <span class="caption">Shutdown</span>
-          <span class="title">Stop All</span>
-          <span class="hint">Stop spawned service windows and bring the infrastructure down.</span>
+          <span class="title">Stop Stack</span>
+          <span class="hint">Stop spawned service windows and bring Docker services down.</span>
         </button>
       </div>
 
-      <div class="footer">Launcher actions are backed by <code>scripts/dev/tepla-dev.ps1</code> so the UI and CLI stay in sync.</div>
+      <div class="footer">Cross-platform CLI: <code>node scripts/dev/tepla-dev.mjs start</code>. Windows UI wraps the same Docker stack.</div>
     </div>
   </body>
 </html>

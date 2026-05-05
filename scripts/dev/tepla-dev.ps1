@@ -1,5 +1,5 @@
 param(
-  [ValidateSet("StartInfra", "StopInfra", "StartCore", "StartClient", "StartAll", "StopAll", "RunService", "OpenApp", "OpenHealth", "SelectRepo", "StartBot")]
+  [ValidateSet("StartInfra", "StopInfra", "StartCore", "StartClient", "StartAll", "StopAll", "RunService", "OpenApp", "OpenHealth", "SelectRepo", "StartBot", "StartDocker", "StopDocker")]
   [string]$Action = "StartAll",
   [string]$RepoRoot,
   [string]$ServiceId
@@ -190,6 +190,21 @@ function Stop-Infra([string]$Repo) {
   & powershell.exe -ExecutionPolicy Bypass -Command "Set-Location '$($Repo.Replace("'", "''"))'; $composeCommand"
 }
 
+function Start-DockerStack([string]$Repo) {
+  $manifest = Get-Manifest
+  $composeArgs = @()
+  foreach ($composeFile in $manifest.infra.composeFiles) {
+    $composeArgs += "-f `"$composeFile`""
+  }
+
+  $composeCommand = "docker compose {0} up --build -d" -f ($composeArgs -join " ")
+  & powershell.exe -ExecutionPolicy Bypass -Command "Set-Location '$($Repo.Replace("'", "''"))'; $composeCommand"
+}
+
+function Stop-DockerStack([string]$Repo) {
+  Stop-Infra -Repo $Repo
+}
+
 function Stop-ManagedServices {
   $state = Read-State
   if (-not $state.processes) {
@@ -264,13 +279,17 @@ switch ($Action) {
     Start-Bot -Repo $resolvedRepo
   }
   "StartAll" {
-    Start-Infra -Repo $resolvedRepo
-    Start-Core -Repo $resolvedRepo
-    Start-Client -Repo $resolvedRepo
+    Start-DockerStack -Repo $resolvedRepo
   }
   "StopAll" {
     Stop-ManagedServices
-    Stop-Infra -Repo $resolvedRepo
+    Stop-DockerStack -Repo $resolvedRepo
+  }
+  "StartDocker" {
+    Start-DockerStack -Repo $resolvedRepo
+  }
+  "StopDocker" {
+    Stop-DockerStack -Repo $resolvedRepo
   }
   "RunService" {
     Run-Service -Repo $resolvedRepo -Id $ServiceId

@@ -1,19 +1,21 @@
-FROM node:20-alpine AS builder
-WORKDIR /app
-RUN corepack enable && corepack prepare pnpm@10 --activate
-COPY pnpm-lock.yaml pnpm-workspace.yaml package.json tsconfig.json tsconfig.services.json ./
-COPY shared ./shared
-COPY client/package.json client/tsconfig.json client/postcss.config.mjs client/next.config.ts client/next-env.d.ts ./client/
-COPY client/src ./client/src
-COPY client/public ./client/public
-RUN pnpm install --frozen-lockfile
-WORKDIR /app/client
-RUN pnpm run build
+FROM node:24-alpine
 
-FROM node:20-alpine
+ENV PNPM_HOME="/pnpm"
+ENV PATH="$PNPM_HOME:$PATH"
+RUN corepack enable
+
 WORKDIR /app
-COPY --from=builder /app/client/.next/standalone ./
-COPY --from=builder /app/client/public ./public
-COPY --from=builder /app/client/.next/static ./.next/static
+
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY client/package.json ./client/package.json
+RUN pnpm install --no-frozen-lockfile
+
+COPY client ./client
+
+ENV NODE_ENV=development
+ENV NEXT_TELEMETRY_DISABLED=1
+ENV PORT=3080
+ENV HOSTNAME=0.0.0.0
+
 EXPOSE 3080
-CMD ["node", "server.js"]
+CMD ["pnpm", "--filter", "tepla-client", "dev"]

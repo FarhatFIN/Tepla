@@ -17,15 +17,14 @@
       "id": "gateway",
       "name": "API Gateway",
       "workdir": ".",
-      "command": "npm.cmd run dev:gateway",
+      "command": "corepack pnpm run dev:gateway",
       "env": {
         "PORT": "3000",
         "AUTH_USER_SERVICE_URL": "http://localhost:3001",
-        "MESSAGING_SERVICE_URL": "http://localhost:3003",
+        "MESSAGING_SERVICE_URL": "http://localhost:3004",
         "MEDIA_SERVICE_URL": "http://localhost:3007",
         "REALTIME_SERVICE_URL": "http://localhost:3100",
-        "BOT_PLATFORM_SERVICE_URL": "http://localhost:3013",
-        "TEPLA_ENABLE_BOT_PLATFORM": "true",
+        "TEPLA_ENABLE_BOT_PLATFORM": "false",
         "TEPLA_ENABLE_LEGACY_FEATURES": "false"
       }
     },
@@ -33,25 +32,26 @@
       "id": "auth-user",
       "name": "Auth/User Service",
       "workdir": ".",
-      "command": "npm.cmd run dev:auth-user",
+      "command": "corepack pnpm run dev:auth-user",
       "env": {
-        "PORT": "3001"
+        "PORT": "3001",
+        "AUTH_EMAIL_OTP_REQUIRED": "false"
       }
     },
     {
       "id": "messaging",
       "name": "Messaging Service",
       "workdir": ".",
-      "command": "npm.cmd run dev:messaging",
+      "command": "corepack pnpm run dev:messaging",
       "env": {
-        "PORT": "3003"
+        "PORT": "3004"
       }
     },
     {
       "id": "media",
       "name": "Media Service",
       "workdir": ".",
-      "command": "npm.cmd run dev:media",
+      "command": "corepack pnpm run dev:media",
       "env": {
         "PORT": "3007",
         "S3_ENDPOINT": "http://localhost:9000",
@@ -65,7 +65,7 @@
       "id": "realtime",
       "name": "Realtime Service",
       "workdir": ".",
-      "command": "npm.cmd run dev:realtime",
+      "command": "corepack pnpm run dev:realtime",
       "env": {
         "PORT": "3100"
       }
@@ -74,7 +74,7 @@
       "id": "bot-platform",
       "name": "Bot Platform",
       "workdir": ".",
-      "command": "npm.cmd run dev:bot",
+      "command": "echo Bot platform service is not present in this repository",
       "env": {
         "PORT": "3013"
       }
@@ -83,7 +83,7 @@
       "id": "client",
       "name": "Tepla Client",
       "workdir": ".",
-      "command": "npm.cmd run dev",
+      "command": "corepack pnpm run dev",
       "env": {
         "NEXT_PUBLIC_API_URL": "http://localhost:3000/api/v2"
       }

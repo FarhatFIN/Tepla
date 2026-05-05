@@ -1,4 +1,4 @@
-import { Router, Request, Response, NextFunction } from 'express';
+﻿import { Router, Request, Response, NextFunction } from 'express';
 import { v4 as uuid } from 'uuid';
 import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
@@ -38,8 +38,48 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
 
   // Set audit logger redis
   AuditLogger.setRedis(rawRedis);
+  function shouldRequireEmailOtp(): boolean {
+    return process.env.AUTH_EMAIL_OTP_REQUIRED === 'true';
+  }
 
-  // ─── Email OTP Helpers ─────────────────────
+  async function issueEmailSession(user: any, req: Request, method: string) {
+    const tokens = tokenService.generateTokens({
+      sub: user.id as UserId,
+      username: user.username,
+    });
+
+    const deviceFingerprint = DeviceSecurity.fingerprint(
+      req.headers as Record<string, string>,
+      req.cookies?.deviceId
+    );
+    const session = await sessionManager.create(user.id, {
+      deviceFingerprint,
+      userAgent: req.headers['user-agent'] || 'unknown',
+      ip: req.ip || 'unknown',
+    });
+
+    await redis.set(`session:${tokens.refreshToken}`, user.id, 30 * 24 * 3600);
+    await userRepo.updateLastSeen(user.id);
+    await deviceSecurity.registerDevice(user.id, deviceFingerprint, {
+      userAgent: req.headers['user-agent'] || 'unknown',
+      ip: req.ip || 'unknown',
+    });
+
+    await kafka.publish({
+      id: uuid(),
+      type: EventType.USER_LOGGED_IN,
+      topic: EventTopic.USER_EVENTS,
+      timestamp: new Date().toISOString(),
+      source: 'auth-service',
+      correlationId: req.correlationId || uuid(),
+      userId: user.id as UserId,
+      payload: { userId: user.id, method },
+    });
+
+    return { user: mapUser(user), tokens, sessionId: session };
+  }
+
+  // в”Ђв”Ђв”Ђ Email OTP Helpers в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
   function generateEmailOtp(): string {
     return crypto.randomInt(100000, 999999).toString();
   }
@@ -59,7 +99,7 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
     await sendOtpEmail(email, code);
   }
 
-  // Atomic OTP verification via Lua script — prevents race-condition brute-force
+  // Atomic OTP verification via Lua script вЂ” prevents race-condition brute-force
   const OTP_VERIFY_LUA = `
     local key = KEYS[1]
     local code = ARGV[1]
@@ -86,7 +126,7 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
     return result === 1;                     // 1 = match, 0 = wrong code
   }
 
-  // POST /api/auth/login/phone — request OTP
+  // POST /api/auth/login/phone вЂ” request OTP
   router.post('/login/phone', async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { phone } = req.body;
@@ -110,7 +150,7 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
     } catch (err) { next(err); }
   });
 
-  // POST /api/auth/login/verify — verify OTP, return tokens
+  // POST /api/auth/login/verify вЂ” verify OTP, return tokens
   router.post('/login/verify', async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { phone, code } = req.body;
@@ -211,7 +251,7 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
     } catch (err) { next(err); }
   });
 
-  // POST /api/auth/register — create account
+  // POST /api/auth/register вЂ” create account
   router.post('/register', async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { username, displayName, phone, email, language, birthDate, publicKey, signingPublicKey } = req.body;
@@ -292,7 +332,7 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
     } catch (err) { next(err); }
   });
 
-  // POST /api/auth/login — email + password → send OTP
+  // POST /api/auth/login вЂ” email + password в†’ send OTP
   router.post('/login', async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { email, password } = req.body;
@@ -318,6 +358,16 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
       await rateLimiter.clearAuthFailures(normalizedEmail);
       await SecurityMetrics.authSuccess(rawRedis);
 
+      if (!shouldRequireEmailOtp()) {
+        if (!user.is_verified) {
+          await userRepo.markEmailVerified(user.id);
+          user.is_verified = true;
+        }
+
+        const data = await issueEmailSession(user, req, 'email');
+        return res.json({ success: true, data });
+      }
+
       // If email not verified, send OTP for verification
       if (!user.is_verified) {
         await storeAndSendEmailOtp(normalizedEmail);
@@ -327,7 +377,7 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
         });
       }
 
-      // Check if 2FA is enabled — require second step
+      // Check if 2FA is enabled вЂ” require second step
       const totpRow = await userRepo.getTotpSecret(user.id);
       if (totpRow?.is_verified) {
         const challengeId = uuid();
@@ -338,7 +388,7 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
         });
       }
 
-      // Send OTP for login verification — do NOT return JWT yet
+      // Send OTP for login verification вЂ” do NOT return JWT yet
       await storeAndSendEmailOtp(normalizedEmail);
 
       await AuditLogger.log('login_otp_sent', { userId: user.id, ip: req.ip });
@@ -350,7 +400,7 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
     } catch (err) { next(err); }
   });
 
-  // POST /api/auth/verify-login — verify login OTP → return JWT
+  // POST /api/auth/verify-login вЂ” verify login OTP в†’ return JWT
   router.post('/verify-login', async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { email, code } = req.body;
@@ -416,7 +466,7 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
     } catch (err) { next(err); }
   });
 
-  // POST /api/auth/resend-code — resend OTP email
+  // POST /api/auth/resend-code вЂ” resend OTP email
   router.post('/resend-code', async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { email } = req.body;
@@ -443,7 +493,7 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
     } catch (err) { next(err); }
   });
 
-  // POST /api/auth/register/email — register with email + password → send OTP
+  // POST /api/auth/register/email вЂ” register with email + password в†’ send OTP
   router.post('/register/email', async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { username, displayName, email, password, language } = req.body;
@@ -493,7 +543,15 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
         payload: { userId: user.id },
       });
 
-      // Send OTP email — do NOT return JWT yet
+      if (!shouldRequireEmailOtp()) {
+        await userRepo.markEmailVerified(user.id);
+        user.is_verified = true;
+
+        const data = await issueEmailSession(user, req, 'email_register');
+        return res.status(201).json({ success: true, data });
+      }
+
+      // Send OTP email вЂ” do NOT return JWT yet
       await storeAndSendEmailOtp(normalizedEmail);
 
       res.status(201).json({
@@ -503,7 +561,7 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
     } catch (err) { next(err); }
   });
 
-  // POST /api/auth/verify-email — verify registration OTP → return JWT
+  // POST /api/auth/verify-email вЂ” verify registration OTP в†’ return JWT
   router.post('/verify-email', async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { email, code } = req.body;
@@ -556,7 +614,7 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
     } catch (err) { next(err); }
   });
 
-  // POST /api/auth/refresh — refresh tokens
+  // POST /api/auth/refresh вЂ” refresh tokens
   router.post('/refresh', async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { refreshToken } = req.body;
@@ -602,7 +660,7 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
     } catch (err) { next(err); }
   });
 
-  // POST /api/auth/logout/all — revoke all sessions
+  // POST /api/auth/logout/all вЂ” revoke all sessions
   router.post('/logout/all', async (req: Request, res: Response, next: NextFunction) => {
     try {
       const userId = req.headers['x-user-id'] as string;
@@ -616,7 +674,7 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
     } catch (err) { next(err); }
   });
 
-  // GET /api/auth/sessions — list active sessions
+  // GET /api/auth/sessions вЂ” list active sessions
   router.get('/sessions', async (req: Request, res: Response, next: NextFunction) => {
     try {
       const userId = req.headers['x-user-id'] as string;
@@ -628,7 +686,7 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
     } catch (err) { next(err); }
   });
 
-  // GET /api/auth/devices — list registered devices
+  // GET /api/auth/devices вЂ” list registered devices
   router.get('/devices', async (req: Request, res: Response, next: NextFunction) => {
     try {
       const userId = req.headers['x-user-id'] as string;
@@ -640,7 +698,7 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
     } catch (err) { next(err); }
   });
 
-  // DELETE /api/auth/devices/:fingerprint — revoke device
+  // DELETE /api/auth/devices/:fingerprint вЂ” revoke device
   router.delete('/devices/:fingerprint', async (req: Request, res: Response, next: NextFunction) => {
     try {
       const userId = req.headers['x-user-id'] as string;
@@ -658,11 +716,11 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
     } catch (err) { next(err); }
   });
 
-  // ─── 2FA / TOTP ─────────────────────────────
+  // в”Ђв”Ђв”Ђ 2FA / TOTP в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 
   const auth = authMiddleware();
 
-  // POST /api/auth/2fa/setup — generate TOTP secret + backup codes
+  // POST /api/auth/2fa/setup вЂ” generate TOTP secret + backup codes
   router.post('/2fa/setup', auth, async (req: Request, res: Response, next: NextFunction) => {
     try {
       const userId = req.user!.sub;
@@ -697,7 +755,7 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
     } catch (err) { next(err); }
   });
 
-  // POST /api/auth/2fa/verify — verify TOTP code to activate 2FA
+  // POST /api/auth/2fa/verify вЂ” verify TOTP code to activate 2FA
   router.post('/2fa/verify', auth, async (req: Request, res: Response, next: NextFunction) => {
     try {
       const userId = req.user!.sub;
@@ -718,7 +776,7 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
     } catch (err) { next(err); }
   });
 
-  // POST /api/auth/2fa/disable — disable 2FA (requires current TOTP code or backup code)
+  // POST /api/auth/2fa/disable вЂ” disable 2FA (requires current TOTP code or backup code)
   router.post('/2fa/disable', auth, async (req: Request, res: Response, next: NextFunction) => {
     try {
       const userId = req.user!.sub;
@@ -744,7 +802,7 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
     } catch (err) { next(err); }
   });
 
-  // POST /api/auth/2fa/login — complete login with 2FA code (after challenge)
+  // POST /api/auth/2fa/login вЂ” complete login with 2FA code (after challenge)
   router.post('/2fa/login', async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { challengeId, code } = req.body;
@@ -767,7 +825,7 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
         }
       }
 
-      // 2FA passed — issue tokens
+      // 2FA passed вЂ” issue tokens
       await redis.del(`2fa:challenge:${challengeId}`);
       const user = await userRepo.findById(userId);
       if (!user) throw new UnauthorizedError('User not found');
@@ -799,7 +857,7 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
     } catch (err) { next(err); }
   });
 
-  // ─── PIN System ────────────────────────────
+  // в”Ђв”Ђв”Ђ PIN System в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 
   // POST /api/auth/pin/set
   router.post('/pin/set', auth, async (req: Request, res: Response, next: NextFunction) => {
@@ -875,7 +933,7 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
     } catch (err) { next(err); }
   });
 
-  // ─── Biometric System ────────────────────
+  // в”Ђв”Ђв”Ђ Biometric System в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 
   // POST /api/auth/biometric/register
   router.post('/biometric/register', auth, async (req: Request, res: Response, next: NextFunction) => {
@@ -941,9 +999,9 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
     } catch (err) { next(err); }
   });
 
-  // ─── Risk-based Login ────────────────────
+  // в”Ђв”Ђв”Ђ Risk-based Login в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 
-  // POST /api/auth/login/init — new device login with risk assessment
+  // POST /api/auth/login/init вЂ” new device login with risk assessment
   router.post('/login/init', async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { email } = req.body;
@@ -993,7 +1051,7 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
     } catch (err) { next(err); }
   });
 
-  // POST /api/auth/login/challenge-verify — verify challenge (OTP or number)
+  // POST /api/auth/login/challenge-verify вЂ” verify challenge (OTP or number)
   router.post('/login/challenge-verify', async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { challengeId, answer, challengeType, deviceName } = req.body;
@@ -1048,7 +1106,7 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
     } catch (err) { next(err); }
   });
 
-  // POST /api/auth/login/trusted — trusted device login
+  // POST /api/auth/login/trusted вЂ” trusted device login
   router.post('/login/trusted', async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { userId, deviceId, pinHash, biometricSignature } = req.body;
@@ -1119,7 +1177,7 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
   return router;
 }
 
-// ─── TOTP Helpers ─────────────────────────────
+// в”Ђв”Ђв”Ђ TOTP Helpers в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 function generateHOTP(secret: string, counter: number): string {
   const decodedSecret = base32Decode(secret);
   const buffer = Buffer.alloc(8);
@@ -1185,7 +1243,7 @@ function base32Decode(encoded: string): Buffer {
   return Buffer.from(output);
 }
 
-// ─── Helpers ────────────────────────────────
+// в”Ђв”Ђв”Ђ Helpers в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 function normalizePhone(phone: string): string {
   return phone.replace(/[^\d+]/g, '').replace(/^8/, '+7');
 }
@@ -1212,3 +1270,4 @@ function mapUser(row: any) {
     createdAt: row.created_at,
   };
 }
+

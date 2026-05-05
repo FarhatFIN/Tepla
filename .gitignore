@@ -10,6 +10,7 @@ coverage/
 
 # next.js
 .next/
+.next-app/
 /out/
 
 # production
@@ -52,6 +53,3 @@ next-env.d.ts
 *.swp
 *.swo
 Thumbs.db
-
-# pnpm
-pnpm-lock.yaml

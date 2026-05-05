@@ -11,6 +11,7 @@ export { CacheLayer } from './cache';
 export { DataLoader, type BatchFn } from './dataloader';
 export { KafkaProducer, KafkaConsumer } from './kafka';
 export { RedisClient, RedisRole } from './redis';
+export { db } from './db';
 export { createLogger, Logger } from './logger';
 export { HttpClient, HttpError } from './http-client';
 export { ServiceRegistry } from './service-registry';

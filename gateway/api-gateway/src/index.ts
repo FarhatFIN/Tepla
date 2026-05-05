@@ -1,4 +1,4 @@
-import compression from 'compression';
+﻿import compression from 'compression';
 import cors from 'cors';
 import express, { type Request, type RequestHandler, type Response } from 'express';
 import { createProxyMiddleware, fixRequestBody, type Options as ProxyOptions } from 'http-proxy-middleware';
@@ -133,48 +133,6 @@ function registerRoutes(routes: RouteDefinition[]): void {
 
 const auth = authMiddleware(config.jwtSecret);
 
-<<<<<<< HEAD
-// ─── Auth & Users (auth-user-service) ─────
-// NOTE: Do NOT use express.json() before proxy — it consumes the body stream
-// and fixRequestBody is broken with Express v5. Rate limit by IP only.
-app.use('/api/v2/auth',
-  securityMiddleware.ipRateLimit(10),
-  proxy(config.services.auth, { '^/': '/api/auth/' })
-);
-
-app.use('/api/v2/users', auth, proxy(config.services.auth, { '^/': '/api/users/' }));
-app.use('/api/v2/e2e', auth, proxy(config.services.auth, { '^/': '/api/e2e/' }));
-app.use('/api/v2/kt', auth, proxy(config.services.auth, { '^/': '/api/kt/' }));
-
-// ─── Messaging (messaging-core-service) ───
-app.use('/api/v2/chats', auth, proxy(config.services.message, { '^/': '/api/chats/' }));
-app.use('/api/v2/messages', auth, proxy(config.services.message, { '^/': '/api/messages/' }));
-app.use('/api/v2/search', auth, proxy(config.services.search, { '^/': '/api/search/' }));
-app.use('/api/v2/moderation', auth, proxy(config.services.moderation, { '^/': '/api/moderation/' }));
-app.use('/api/v2/reactions', auth, proxy(config.services.message, { '^/': '/api/reactions/' }));
-app.use('/api/v2/threads', auth, proxy(config.services.message, { '^/': '/api/threads/' }));
-app.use('/api/v2/sparks', auth, proxy(config.services.message, { '^/': '/api/sparks/' }));
-app.use('/api/v2/translate', auth, proxy(config.services.translation, { '^/': '/api/translate/' }));
-
-// ─── Media (media-service) ────────────────
-app.use('/api/v2/media', auth, proxy(config.services.media, { '^/': '/api/media/' }));
-app.use('/api/v2/stories', auth, proxy(config.services.stories, { '^/': '/api/stories/' }));
-app.use('/api/v2/stickers', auth, proxy(config.services.sticker, { '^/': '/api/stickers/' }));
-
-// ─── Real-time (realtime-service) ─────────
-app.use('/api/v2/presence', auth, proxy(config.services.presence, { '^/': '/api/presence/' }));
-app.use('/api/v2/notifications', auth, proxy(config.services.notification, { '^/': '/api/notifications/' }));
-app.use('/api/v2/calls', auth, proxy(config.services.calls, { '^/': '/api/calls/' }));
-
-// ─── Bots & Webapp ───────────────────────
-app.use('/api/v2/bots', auth, proxy(config.services.bot, { '^/': '/api/bots/' }));
-app.use('/api/v2/bot-api', proxy(config.services.bot, { '^/': '/api/bot-api/' }));
-app.use('/api/v2/webapp', auth, proxy(config.services.webapp, { '^/': '/api/webapp/' }));
-
-// ─── Wallet & WBIT ───────────────────────
-app.use('/api/v2/wallet', auth, proxy(config.services.wallet, { '^/': '/api/wallet/' }));
-app.use('/api/v2/wbit', auth, proxy(config.services.wbit, { '^/': '/api/wbit/' }));
-=======
 const protectedMiddleware: RequestHandler[] = [
   auth,
   securityMiddleware.userRateLimit(200),
@@ -402,7 +360,6 @@ if (config.features.legacyFeatures) {
   });
 }
 
->>>>>>> origin/main
 
 app.use(errorHandler);
 
@@ -437,3 +394,4 @@ start().catch((err: Error) => {
   logger.error('Failed to start API Gateway', { error: err.message });
   process.exit(1);
 });
+

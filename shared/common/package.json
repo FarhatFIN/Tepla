@@ -2,14 +2,18 @@
   "name": "@tepla/common",
   "version": "2.0.0",
   "description": "Tepla Messenger — Shared common utilities for microservices",
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./*": "./src/*"
+  },
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch"
   },
   "dependencies": {
-    "@tepla/types": "file:../types",
+    "@tepla/types": "workspace:*",
     "express": "^4.18.2",
     "cors": "^2.8.5",
     "helmet": "^7.1.0",
@@ -28,4 +32,3 @@
     "typescript": "^5.4.0"
   }
 }
-

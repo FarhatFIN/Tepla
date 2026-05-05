@@ -1,19 +1,16 @@
 import type { NextConfig } from "next";
 
-const nextConfig: NextConfig = {
-  output: 'standalone',
-  reactStrictMode: true,
+const gatewayUrl = process.env.API_GATEWAY_URL || "http://localhost:3000";
 
+const nextConfig: NextConfig = {
+  reactStrictMode: true,
   async rewrites() {
     return [
       {
         source: "/api/v2/:path*",
-        destination: "http://localhost:3000/api/v2/:path*",
+        destination: `${gatewayUrl}/api/v2/:path*`,
       },
     ];
-  },
-  typescript: {
-    ignoreBuildErrors: true,
   },
 };
 
