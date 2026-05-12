@@ -61,7 +61,7 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
     updated_at: Date | string | null;
   };
 
-  let binaryShieldInit: Promise<void> | null = null;
+  let authSchemaInit: Promise<void> | null = null;
 
   function shouldRequireEmailOtp(): boolean {
     return process.env.AUTH_EMAIL_OTP_REQUIRED === 'true';
@@ -71,9 +71,17 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
     return crypto.createHash('sha256').update(value).digest('hex');
   }
 
-  async function ensureBinaryShieldTables(): Promise<void> {
-    if (!binaryShieldInit) {
-      binaryShieldInit = (async () => {
+  async function ensureAuthRuntimeSchema(): Promise<void> {
+    if (!authSchemaInit) {
+      authSchemaInit = (async () => {
+        await db.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified_at TIMESTAMPTZ');
+        await db.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash TEXT');
+        await db.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS language TEXT DEFAULT 'en'");
+        await db.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS public_key TEXT DEFAULT ''");
+        await db.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS signing_public_key TEXT DEFAULT ''");
+        await db.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS is_verified BOOLEAN DEFAULT false');
+        await db.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS last_seen TIMESTAMPTZ');
+        await db.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS is_online BOOLEAN DEFAULT false');
         await db.query(`
           CREATE TABLE IF NOT EXISTS binary_shields (
             user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
@@ -102,7 +110,7 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
       })();
     }
 
-    await binaryShieldInit;
+    await authSchemaInit;
   }
 
   function generateBinaryPattern(length = 16): string {
@@ -141,7 +149,7 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
   }
 
   async function logBinaryShieldEvent(userId: string, event: string, req: Request, details: Record<string, unknown> = {}): Promise<void> {
-    await ensureBinaryShieldTables();
+    await ensureAuthRuntimeSchema();
     await db.query(
       `INSERT INTO binary_shield_events (user_id, event, ip_address, user_agent, details)
        VALUES ($1, $2, $3, $4, $5)`,
@@ -150,7 +158,7 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
   }
 
   async function createBinaryShield(userId: string, req: Request, event = 'initialized'): Promise<BinaryShieldIssue> {
-    await ensureBinaryShieldTables();
+    await ensureAuthRuntimeSchema();
     const seedPhrase = generateSeedPhrase();
     const { publicPatterns, storedPatterns } = buildShieldPatterns();
 
@@ -182,7 +190,7 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
   }
 
   async function rotateBinaryShieldAfterLogin(userId: string, req: Request): Promise<BinaryShieldIssue | null> {
-    await ensureBinaryShieldTables();
+    await ensureAuthRuntimeSchema();
     const existing = await db.queryRow<BinaryShieldRow>(
       'SELECT * FROM binary_shields WHERE user_id = $1 AND enabled = true',
       [userId]
@@ -506,6 +514,7 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
   // POST /api/auth/login вЂ” email + password в†’ send OTP
   router.post('/login', async (req: Request, res: Response, next: NextFunction) => {
     try {
+      await ensureAuthRuntimeSchema();
       const { email, password } = req.body;
       if (!email || !password) throw new ValidationError('Email and password are required');
 
@@ -667,6 +676,7 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
   // POST /api/auth/register/email вЂ” register with email + password в†’ send OTP
   router.post('/register/email', async (req: Request, res: Response, next: NextFunction) => {
     try {
+      await ensureAuthRuntimeSchema();
       const { username, displayName, email, password, language } = req.body;
 
       if (!email || !password) throw new ValidationError('Email and password are required');
@@ -895,7 +905,7 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
   router.get('/binary-shield/status', auth, async (req: Request, res: Response, next: NextFunction) => {
     try {
       const userId = req.user!.sub;
-      await ensureBinaryShieldTables();
+    await ensureAuthRuntimeSchema();
 
       const shield = await db.queryRow<BinaryShieldRow>(
         'SELECT * FROM binary_shields WHERE user_id = $1',
@@ -927,7 +937,7 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
     try {
       const userId = req.user!.sub;
       const emergency = req.body?.emergency === true;
-      await ensureBinaryShieldTables();
+      await ensureAuthRuntimeSchema();
 
       const sessions = await sessionManager.getActiveSessions(userId);
       if (!emergency && sessions.length > 1) {
@@ -959,7 +969,7 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
         throw new ValidationError('Master seed is required');
       }
 
-      await ensureBinaryShieldTables();
+      await ensureAuthRuntimeSchema();
       const shield = await db.queryRow<BinaryShieldRow>(
         'SELECT * FROM binary_shields WHERE user_id = $1 AND enabled = true',
         [userId]

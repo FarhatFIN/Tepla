@@ -108,7 +108,7 @@ services:
     container_name: tepla-livekit
     restart: unless-stopped
     environment:
-      LIVEKIT_KEYS: "devkey:devsecret"
+      LIVEKIT_KEYS: "devkey: devsecret"
     networks:
       - tepla-network
 
