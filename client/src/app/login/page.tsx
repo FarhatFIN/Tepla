@@ -15,6 +15,11 @@ const fadeUp = {
 
 const inputClass =
   "w-full h-[54px] bg-transparent border-b border-[#1E2D3D] text-[#E8EDF2] placeholder:text-[#4A6480] px-0 text-[16px] outline-none transition-all focus:border-[#3390EC]";
+type BinaryShieldIssue = {
+  seedPhrase?: string;
+  recoveryPatterns: Array<{ id: string; pattern: string; usesLeft: number }>;
+  nextManualRotationAt: string;
+};
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
@@ -31,6 +36,7 @@ export default function LoginPage() {
   const [otpLoading, setOtpLoading] = useState(false);
   const [resendCooldown, setResendCooldown] = useState(0);
   const [resendMessage, setResendMessage] = useState("");
+  const [binaryShield, setBinaryShield] = useState<BinaryShieldIssue | null>(null);
 
   const { login, verifyOtp, resendCode, switchAccount, removeSavedAccount, savedAccounts, hydrate } = useAuthStore();
   const router = useRouter();
@@ -55,6 +61,11 @@ export default function LoginPage() {
     try {
       const result = await login(email, password);
       if (result.ok) {
+        if (result.binaryShield) {
+          setBinaryShield(result.binaryShield);
+          setLoading(false);
+          return;
+        }
         router.push("/");
       } else if (result.needsOtp || result.needsVerification) {
         setOtpEmail(result.email || email);
@@ -95,6 +106,37 @@ export default function LoginPage() {
   function handleSwitch(accountId: string) {
     switchAccount(accountId);
     router.push("/");
+  }
+
+  if (binaryShield) {
+    return (
+      <div className="fixed inset-0 z-50 flex flex-col items-center overflow-y-auto bg-[#0E1621]">
+        <div className="flex min-h-full w-full max-w-[420px] flex-col justify-center px-4 py-8">
+          <motion.div initial="hidden" animate="visible" variants={fadeUp} className="w-full">
+            <div className="mb-8 flex flex-col items-center">
+              <div className="flex h-[96px] w-[96px] items-center justify-center rounded-full bg-[#152232]">
+                <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="#00D46A" strokeWidth="1.4"><path d="M12 2l7 4v5c0 5-3 9-7 11-4-2-7-6-7-11V6l7-4z"/><path d="M9 12l2 2 4-5"/></svg>
+              </div>
+              <h1 className="mt-4 text-2xl font-semibold text-[#E8EDF2]">Binary Shield updated</h1>
+              <p className="mt-2 text-center text-[14px] leading-relaxed text-[#6B8CAE]">Old recovery patterns are invalid now. Save the new one-time A/B patterns.</p>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              {binaryShield.recoveryPatterns.map((item) => (
+                <div key={item.id} className="rounded-lg border border-[#1E2D3D] bg-[#101B29] p-3">
+                  <p className="font-mono text-[15px] tracking-[0.12em] text-[#E8EDF2]">{item.pattern}</p>
+                  <p className="mt-1 text-[11px] text-[#4A6480]">uses: {item.usesLeft}</p>
+                </div>
+              ))}
+            </div>
+
+            <button onClick={() => router.push("/")} className="mt-8 h-[48px] w-full rounded-lg bg-[#3390EC] text-[15px] font-medium text-white transition-all hover:bg-[#4AA3F5] active:scale-[0.98]">
+              Continue
+            </button>
+          </motion.div>
+        </div>
+      </div>
+    );
   }
 
   // OTP screen

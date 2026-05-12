@@ -19,7 +19,7 @@ import {
   generateProof,
   createLeafData,
   type SignedTreeHead,
-} from '@tepla/crypto/merkle';
+} from '@tepla/crypto';
 
 const logger = createLogger('key-transparency');
 

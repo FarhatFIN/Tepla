@@ -8,6 +8,7 @@ export interface SecuritySession {
   userId: string;
   deviceFingerprint?: string;
   ipAddress?: string;
+  userAgent?: string;
   created: number;
 }
 
@@ -24,14 +25,15 @@ export class SessionManager {
   }
 
   /** Create a new security session */
-  async create(userId: string, meta?: { deviceFingerprint?: string; ipAddress?: string }): Promise<SecuritySession> {
+  async create(userId: string, meta?: { deviceFingerprint?: string; ipAddress?: string; ip?: string; userAgent?: string }): Promise<SecuritySession> {
     const token = crypto.randomBytes(SecurityConfig.TOKEN_BYTES).toString('hex');
 
     const session: SecuritySession = {
       token,
       userId,
       deviceFingerprint: meta?.deviceFingerprint,
-      ipAddress: meta?.ipAddress,
+      ipAddress: meta?.ipAddress || meta?.ip,
+      userAgent: meta?.userAgent,
       created: Date.now(),
     };
 

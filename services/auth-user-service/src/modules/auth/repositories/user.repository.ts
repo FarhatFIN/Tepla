@@ -6,7 +6,7 @@ interface CreateUserInput {
   display_name: string | null;
   phone: string | null;
   email: string | null;
-  password_hash: string | null;
+  password_hash?: string | null;
   language: string;
   birth_date: string | null;
   public_key: string;

@@ -38,8 +38,175 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
 
   // Set audit logger redis
   AuditLogger.setRedis(rawRedis);
+
+  type BinaryShieldPublicPattern = {
+    id: string;
+    pattern: string;
+    usesLeft: number;
+  };
+
+  type BinaryShieldIssue = {
+    seedPhrase?: string;
+    recoveryPatterns: BinaryShieldPublicPattern[];
+    nextManualRotationAt: string;
+  };
+
+  type BinaryShieldRow = {
+    user_id: string;
+    master_seed_hash: string | null;
+    patterns: unknown;
+    enabled: boolean;
+    last_manual_rotation_at: Date | string | null;
+    next_manual_rotation_at: Date | string | null;
+    updated_at: Date | string | null;
+  };
+
+  let binaryShieldInit: Promise<void> | null = null;
+
   function shouldRequireEmailOtp(): boolean {
     return process.env.AUTH_EMAIL_OTP_REQUIRED === 'true';
+  }
+
+  function sha256(value: string): string {
+    return crypto.createHash('sha256').update(value).digest('hex');
+  }
+
+  async function ensureBinaryShieldTables(): Promise<void> {
+    if (!binaryShieldInit) {
+      binaryShieldInit = (async () => {
+        await db.query(`
+          CREATE TABLE IF NOT EXISTS binary_shields (
+            user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+            master_seed_hash TEXT,
+            patterns JSONB NOT NULL DEFAULT '[]'::jsonb,
+            enabled BOOLEAN NOT NULL DEFAULT true,
+            last_manual_rotation_at TIMESTAMPTZ,
+            next_manual_rotation_at TIMESTAMPTZ,
+            last_login_rotation_at TIMESTAMPTZ,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+          )
+        `);
+        await db.query(`
+          CREATE TABLE IF NOT EXISTS binary_shield_events (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+            event TEXT NOT NULL,
+            ip_address TEXT,
+            user_agent TEXT,
+            details JSONB,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+          )
+        `);
+        await db.query('CREATE INDEX IF NOT EXISTS idx_binary_shield_events_user ON binary_shield_events(user_id, created_at DESC)');
+      })();
+    }
+
+    await binaryShieldInit;
+  }
+
+  function generateBinaryPattern(length = 16): string {
+    let out = '';
+    for (let i = 0; i < length; i += 1) {
+      out += crypto.randomInt(0, 2) === 0 ? 'A' : 'B';
+    }
+    return out;
+  }
+
+  function generateSeedPhrase(): string {
+    const chunks: string[] = [];
+    for (let i = 0; i < 8; i += 1) {
+      chunks.push(crypto.randomBytes(3).toString('hex'));
+    }
+    return chunks.join('-');
+  }
+
+  function buildShieldPatterns(): { publicPatterns: BinaryShieldPublicPattern[]; storedPatterns: unknown[] } {
+    const publicPatterns: BinaryShieldPublicPattern[] = [];
+    const storedPatterns: unknown[] = [];
+
+    for (let i = 0; i < 8; i += 1) {
+      const id = uuid();
+      const pattern = generateBinaryPattern();
+      publicPatterns.push({ id, pattern, usesLeft: 1 });
+      storedPatterns.push({
+        id,
+        patternHash: sha256(pattern),
+        usesLeft: 1,
+        createdAt: new Date().toISOString(),
+      });
+    }
+
+    return { publicPatterns, storedPatterns };
+  }
+
+  async function logBinaryShieldEvent(userId: string, event: string, req: Request, details: Record<string, unknown> = {}): Promise<void> {
+    await ensureBinaryShieldTables();
+    await db.query(
+      `INSERT INTO binary_shield_events (user_id, event, ip_address, user_agent, details)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [userId, event, req.ip || null, req.headers['user-agent'] || null, JSON.stringify(details)]
+    );
+  }
+
+  async function createBinaryShield(userId: string, req: Request, event = 'initialized'): Promise<BinaryShieldIssue> {
+    await ensureBinaryShieldTables();
+    const seedPhrase = generateSeedPhrase();
+    const { publicPatterns, storedPatterns } = buildShieldPatterns();
+
+    const row = await db.queryRow<{ next_manual_rotation_at: Date }>(
+      `INSERT INTO binary_shields (
+          user_id, master_seed_hash, patterns, enabled,
+          last_manual_rotation_at, next_manual_rotation_at, last_login_rotation_at, updated_at
+        )
+        VALUES ($1, $2, $3, true, NOW(), NOW() + INTERVAL '30 days', NOW(), NOW())
+        ON CONFLICT (user_id) DO UPDATE SET
+          master_seed_hash = EXCLUDED.master_seed_hash,
+          patterns = EXCLUDED.patterns,
+          enabled = true,
+          last_manual_rotation_at = NOW(),
+          next_manual_rotation_at = NOW() + INTERVAL '30 days',
+          last_login_rotation_at = NOW(),
+          updated_at = NOW()
+        RETURNING next_manual_rotation_at`,
+      [userId, sha256(seedPhrase), JSON.stringify(storedPatterns)]
+    );
+
+    await logBinaryShieldEvent(userId, event, req, { patternCount: publicPatterns.length });
+
+    return {
+      seedPhrase,
+      recoveryPatterns: publicPatterns,
+      nextManualRotationAt: (row?.next_manual_rotation_at || new Date(Date.now() + 30 * 24 * 3600 * 1000)).toISOString(),
+    };
+  }
+
+  async function rotateBinaryShieldAfterLogin(userId: string, req: Request): Promise<BinaryShieldIssue | null> {
+    await ensureBinaryShieldTables();
+    const existing = await db.queryRow<BinaryShieldRow>(
+      'SELECT * FROM binary_shields WHERE user_id = $1 AND enabled = true',
+      [userId]
+    );
+
+    if (!existing) {
+      return createBinaryShield(userId, req, 'initialized_on_login');
+    }
+
+    const { publicPatterns, storedPatterns } = buildShieldPatterns();
+    const row = await db.queryRow<{ next_manual_rotation_at: Date | null }>(
+      `UPDATE binary_shields
+       SET patterns = $2, last_login_rotation_at = NOW(), updated_at = NOW()
+       WHERE user_id = $1
+       RETURNING next_manual_rotation_at`,
+      [userId, JSON.stringify(storedPatterns)]
+    );
+
+    await logBinaryShieldEvent(userId, 'login_rotation', req, { patternCount: publicPatterns.length });
+
+    return {
+      recoveryPatterns: publicPatterns,
+      nextManualRotationAt: (row?.next_manual_rotation_at || new Date(Date.now() + 30 * 24 * 3600 * 1000)).toISOString(),
+    };
   }
 
   async function issueEmailSession(user: any, req: Request, method: string) {
@@ -76,7 +243,11 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
       payload: { userId: user.id, method },
     });
 
-    return { user: mapUser(user), tokens, sessionId: session };
+    const binaryShield = method === 'email_register'
+      ? await createBinaryShield(user.id, req)
+      : await rotateBinaryShieldAfterLogin(user.id, req);
+
+    return { user: mapUser(user), tokens, sessionId: session, binaryShield };
   }
 
   // в”Ђв”Ђв”Ђ Email OTP Helpers в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
@@ -461,7 +632,7 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
 
       res.json({
         success: true,
-        data: { user: mapUser(user), tokens, sessionId: session },
+        data: { user: mapUser(user), tokens, sessionId: session, binaryShield: await rotateBinaryShieldAfterLogin(user.id, req) },
       });
     } catch (err) { next(err); }
   });
@@ -609,7 +780,7 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
 
       res.json({
         success: true,
-        data: { user: mapUser(user), tokens, sessionId: session },
+        data: { user: mapUser(user), tokens, sessionId: session, binaryShield: await createBinaryShield(user.id, req) },
       });
     } catch (err) { next(err); }
   });
@@ -719,6 +890,103 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
   // в”Ђв”Ђв”Ђ 2FA / TOTP в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 
   const auth = authMiddleware();
+
+  // Tepla Binary Shield status, device log, controlled rotation, and master-seed reset.
+  router.get('/binary-shield/status', auth, async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const userId = req.user!.sub;
+      await ensureBinaryShieldTables();
+
+      const shield = await db.queryRow<BinaryShieldRow>(
+        'SELECT * FROM binary_shields WHERE user_id = $1',
+        [userId]
+      );
+      const sessions = await sessionManager.getActiveSessions(userId);
+      const events = await db.queryRows(
+        `SELECT event, ip_address AS "ipAddress", user_agent AS "userAgent", details, created_at AS "createdAt"
+         FROM binary_shield_events
+         WHERE user_id = $1
+         ORDER BY created_at DESC
+         LIMIT 30`,
+        [userId]
+      );
+
+      res.json({
+        success: true,
+        data: {
+          enabled: !!shield?.enabled,
+          activeSessions: sessions.length,
+          nextManualRotationAt: shield?.next_manual_rotation_at || null,
+          events,
+        },
+      });
+    } catch (err) { next(err); }
+  });
+
+  router.post('/binary-shield/rotate', auth, async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const userId = req.user!.sub;
+      const emergency = req.body?.emergency === true;
+      await ensureBinaryShieldTables();
+
+      const sessions = await sessionManager.getActiveSessions(userId);
+      if (!emergency && sessions.length > 1) {
+        throw new ForbiddenError('Binary Shield rotation requires exactly one active session');
+      }
+
+      const shield = await db.queryRow<BinaryShieldRow>(
+        'SELECT * FROM binary_shields WHERE user_id = $1',
+        [userId]
+      );
+      const nextRotation = shield?.next_manual_rotation_at
+        ? new Date(shield.next_manual_rotation_at)
+        : null;
+
+      if (!emergency && nextRotation && nextRotation.getTime() > Date.now()) {
+        throw new ValidationError('Binary Shield can be rotated once per 30 days');
+      }
+
+      const issue = await createBinaryShield(userId, req, emergency ? 'emergency_rotation' : 'manual_rotation');
+      res.json({ success: true, data: issue });
+    } catch (err) { next(err); }
+  });
+
+  router.post('/binary-shield/master-reset', auth, async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const userId = req.user!.sub;
+      const { masterSeed } = req.body || {};
+      if (!masterSeed || typeof masterSeed !== 'string') {
+        throw new ValidationError('Master seed is required');
+      }
+
+      await ensureBinaryShieldTables();
+      const shield = await db.queryRow<BinaryShieldRow>(
+        'SELECT * FROM binary_shields WHERE user_id = $1 AND enabled = true',
+        [userId]
+      );
+      if (!shield?.master_seed_hash || shield.master_seed_hash !== sha256(masterSeed)) {
+        await logBinaryShieldEvent(userId, 'master_reset_failed', req);
+        throw new UnauthorizedError('Invalid master seed');
+      }
+
+      await sessionManager.revokeAll(userId);
+      await db.query(
+        `UPDATE binary_shields
+         SET enabled = false, patterns = '[]'::jsonb, master_seed_hash = NULL, updated_at = NOW()
+         WHERE user_id = $1`,
+        [userId]
+      );
+      await logBinaryShieldEvent(userId, 'master_reset', req, { sessionsRevoked: true });
+
+      res.json({
+        success: true,
+        data: {
+          requiresReinitialize: true,
+          message: 'Binary Shield reset. Sign in again and reinitialize protection.',
+        },
+      });
+    } catch (err) { next(err); }
+  });
 
   // POST /api/auth/2fa/setup вЂ” generate TOTP secret + backup codes
   router.post('/2fa/setup', auth, async (req: Request, res: Response, next: NextFunction) => {

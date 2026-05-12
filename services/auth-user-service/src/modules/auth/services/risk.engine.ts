@@ -16,6 +16,13 @@ export interface IPInfo {
   isTor: boolean;
 }
 
+interface IpApiResponse {
+  status?: string;
+  country?: string;
+  proxy?: boolean;
+  hosting?: boolean;
+}
+
 export type RiskLevel = 'low' | 'medium' | 'high' | 'critical';
 export type RequiredAuth = 'biometric' | 'otp' | 'number_challenge' | 'blocked';
 
@@ -118,7 +125,7 @@ export class RiskEngine {
       try {
         const res = await fetch(`http://ip-api.com/json/${ip}?fields=status,country,proxy,hosting`);
         if (res.ok) {
-          const data = await res.json();
+          const data = await res.json() as IpApiResponse;
           if (data.status === 'success') {
             info.country = data.country || 'Unknown';
             info.isVPN = data.proxy || data.hosting || false;

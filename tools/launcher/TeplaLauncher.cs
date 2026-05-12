@@ -174,12 +174,6 @@ namespace TeplaLauncher
 
         private string ResolveRepoRoot()
         {
-            var saved = ReadSavedRepoRoot();
-            if (IsRepoRoot(saved))
-            {
-                return saved;
-            }
-
             var dir = AppDomain.CurrentDomain.BaseDirectory;
             while (!string.IsNullOrEmpty(dir))
             {
@@ -196,6 +190,32 @@ namespace TeplaLauncher
                 dir = parent.FullName;
             }
 
+            var desktop = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                "Desktop",
+                "tepla"
+            );
+            if (IsRepoRoot(desktop))
+            {
+                return desktop;
+            }
+
+            var desktopUpper = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                "Desktop",
+                "Tepla"
+            );
+            if (IsRepoRoot(desktopUpper))
+            {
+                return desktopUpper;
+            }
+
+            var saved = ReadSavedRepoRoot();
+            if (IsRepoRoot(saved))
+            {
+                return saved;
+            }
+
             return "";
         }
 
@@ -208,7 +228,8 @@ namespace TeplaLauncher
 
             return File.Exists(Path.Combine(path, "package.json"))
                 && File.Exists(Path.Combine(path, "client", "package.json"))
-                && File.Exists(Path.Combine(path, "infrastructure", "docker-compose.yml"));
+                && File.Exists(Path.Combine(path, "infrastructure", "docker-compose.yml"))
+                && File.Exists(Path.Combine(path, "scripts", "dev", "tepla-dev.mjs"));
         }
 
         private string StatePath()

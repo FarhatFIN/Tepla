@@ -5,8 +5,7 @@ import Link from "next/link";
 import { motion } from "framer-motion";
 import { useAuthStore } from "@/stores/auth-store";
 import OtpInput from "@/components/ui/OtpInput";
-import PhoneInput from "@/components/ui/PhoneInput";
-import { languages, defaultRegion, type PhoneRegion } from "@/lib/countries";
+import { languages } from "@/lib/countries";
 import { useTranslation } from "@/hooks/useTranslation";
 
 const fadeUp = {
@@ -28,12 +27,15 @@ function getPasswordStrength(pw: string): number {
 
 const strengthColors = ["#EF4444", "#F59E0B", "#EAB308", "#00D46A"];
 const strengthLabels = ["password_strength_weak", "password_strength_fair", "password_strength_good", "password_strength_strong"];
+type BinaryShieldIssue = {
+  seedPhrase?: string;
+  recoveryPatterns: Array<{ id: string; pattern: string; usesLeft: number }>;
+  nextManualRotationAt: string;
+};
 
 export default function RegisterPage() {
   const [name, setName] = useState("");
   const [username, setUsername] = useState("");
-  const [phoneDigits, setPhoneDigits] = useState("");
-  const [phoneRegion, setPhoneRegion] = useState<PhoneRegion>(defaultRegion);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
@@ -50,6 +52,7 @@ export default function RegisterPage() {
   const [otpLoading, setOtpLoading] = useState(false);
   const [resendCooldown, setResendCooldown] = useState(0);
   const [resendMessage, setResendMessage] = useState("");
+  const [binaryShield, setBinaryShield] = useState<BinaryShieldIssue | null>(null);
 
   const { register, verifyOtp, resendCode, language, setLanguage: setStoreLanguage } = useAuthStore();
   const router = useRouter();
@@ -84,8 +87,6 @@ export default function RegisterPage() {
     return e;
   }
 
-  const fullPhone = phoneDigits ? `${phoneRegion.phoneCode}${phoneDigits}` : "";
-
   async function handleSubmit(ev: FormEvent) {
     ev.preventDefault();
     setGlobalError("");
@@ -96,6 +97,11 @@ export default function RegisterPage() {
     try {
       const result = await register(name, email, password, language, username);
       if (result.ok) {
+        if (result.binaryShield) {
+          setBinaryShield(result.binaryShield);
+          setLoading(false);
+          return;
+        }
         router.push("/");
       } else if (result.needsOtp) {
         setOtpEmail(result.email || email);
@@ -132,6 +138,44 @@ export default function RegisterPage() {
   }
 
   const pwStrength = getPasswordStrength(password);
+
+  if (binaryShield) {
+    return (
+      <div className="fixed inset-0 z-50 flex flex-col items-center overflow-y-auto bg-[#0E1621]">
+        <div className="w-full max-w-[420px] px-4 py-10">
+          <motion.div initial="hidden" animate="visible" variants={fadeUp} className="w-full">
+            <div className="mb-8 flex flex-col items-center">
+              <div className="flex h-[96px] w-[96px] items-center justify-center rounded-full bg-[#152232]">
+                <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="#00D46A" strokeWidth="1.4"><path d="M12 2l7 4v5c0 5-3 9-7 11-4-2-7-6-7-11V6l7-4z"/><path d="M9 12l2 2 4-5"/></svg>
+              </div>
+              <h1 className="mt-4 text-2xl font-semibold text-[#E8EDF2]">Tepla Binary Shield</h1>
+              <p className="mt-2 text-center text-[14px] leading-relaxed text-[#6B8CAE]">Save these one-time A/B recovery patterns now. They rotate after login.</p>
+            </div>
+
+            {binaryShield.seedPhrase && (
+              <div className="mb-5 rounded-lg border border-[#1E2D3D] bg-[#101B29] p-4">
+                <p className="mb-2 text-[12px] uppercase text-[#4A6480]">Master seed</p>
+                <p className="break-all font-mono text-[13px] leading-relaxed text-[#E8EDF2]">{binaryShield.seedPhrase}</p>
+              </div>
+            )}
+
+            <div className="grid grid-cols-2 gap-2">
+              {binaryShield.recoveryPatterns.map((item) => (
+                <div key={item.id} className="rounded-lg border border-[#1E2D3D] bg-[#101B29] p-3">
+                  <p className="font-mono text-[15px] tracking-[0.12em] text-[#E8EDF2]">{item.pattern}</p>
+                  <p className="mt-1 text-[11px] text-[#4A6480]">uses: {item.usesLeft}</p>
+                </div>
+              ))}
+            </div>
+
+            <button onClick={() => router.push("/")} className="mt-8 h-[48px] w-full rounded-lg bg-[#3390EC] text-[15px] font-medium text-white transition-all hover:bg-[#4AA3F5] active:scale-[0.98]">
+              Continue to Tepla
+            </button>
+          </motion.div>
+        </div>
+      </div>
+    );
+  }
 
   // OTP verification
   if (otpStep) {
@@ -215,17 +259,6 @@ export default function RegisterPage() {
               {usernameStatus === "available" && <p className="mt-1 text-[12px] text-[#00D46A]">{t("username_available")}</p>}
               {usernameStatus === "taken" && <p className="mt-1 text-[12px] text-[#EF4444]">{t("username_taken")}</p>}
               {errors.username && <p className="mt-1 text-[12px] text-[#EF4444]">{errors.username}</p>}
-            </div>
-
-            {/* Phone with region selector */}
-            <div className="mt-4">
-              <p className="mb-2 text-[12px] font-medium uppercase tracking-wider text-[#4A6480]">{t("phone_number") || "Phone number"}</p>
-              <PhoneInput
-                value={phoneDigits}
-                region={phoneRegion}
-                onChangePhone={setPhoneDigits}
-                onChangeRegion={setPhoneRegion}
-              />
             </div>
 
             {/* Email */}

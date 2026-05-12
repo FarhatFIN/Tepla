@@ -847,6 +847,31 @@ CREATE TABLE IF NOT EXISTS auth_audit (
 
 CREATE INDEX idx_auth_audit_user ON auth_audit(user_id, created_at DESC);
 
+-- Tepla Binary Shield: one-time A/B recovery patterns and master-seed reset.
+CREATE TABLE IF NOT EXISTS binary_shields (
+  user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  master_seed_hash TEXT,
+  patterns JSONB NOT NULL DEFAULT '[]'::jsonb,
+  enabled BOOLEAN NOT NULL DEFAULT true,
+  last_manual_rotation_at TIMESTAMPTZ,
+  next_manual_rotation_at TIMESTAMPTZ,
+  last_login_rotation_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS binary_shield_events (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+  event TEXT NOT NULL,
+  ip_address TEXT,
+  user_agent TEXT,
+  details JSONB,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_binary_shield_events_user ON binary_shield_events(user_id, created_at DESC);
+
 -- ─── Blocked IPs ─────────────────────────────
 CREATE TABLE IF NOT EXISTS blocked_ips (
   ip TEXT PRIMARY KEY,

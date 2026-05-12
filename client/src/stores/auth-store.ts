@@ -15,6 +15,12 @@ interface OtpPending {
   type: 'login' | 'register' | 'verify';
 }
 
+interface BinaryShieldIssue {
+  seedPhrase?: string;
+  recoveryPatterns: Array<{ id: string; pattern: string; usesLeft: number }>;
+  nextManualRotationAt: string;
+}
+
 interface AuthState {
   user: User | null;
   token: string | null;
@@ -22,8 +28,8 @@ interface AuthState {
   language: string;
   savedAccounts: SavedAccount[];
   otpPending: OtpPending | null;
-  login: (email: string, password: string) => Promise<{ ok: boolean; needsOtp?: boolean; needsVerification?: boolean; email?: string }>;
-  register: (name: string, email: string, password: string, language: string, username: string) => Promise<{ ok: boolean; needsOtp?: boolean; email?: string }>;
+  login: (email: string, password: string) => Promise<{ ok: boolean; needsOtp?: boolean; needsVerification?: boolean; email?: string; binaryShield?: BinaryShieldIssue }>;
+  register: (name: string, email: string, password: string, language: string, username: string) => Promise<{ ok: boolean; needsOtp?: boolean; email?: string; binaryShield?: BinaryShieldIssue }>;
   verifyOtp: (email: string, code: string, type: 'login' | 'register' | 'verify') => Promise<boolean>;
   resendCode: (email: string) => Promise<boolean>;
   setOtpPending: (pending: OtpPending | null) => void;
@@ -123,7 +129,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         persist(user, accessToken, user.language || get().language);
         saveAccountToList(user, accessToken, user.language || get().language);
         set({ user, token: accessToken, isLoading: false, savedAccounts: getSavedAccounts() });
-        return { ok: true };
+        return { ok: true, binaryShield: data.binaryShield };
       }
 
       set({ isLoading: false });
@@ -166,7 +172,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         persist(user, accessToken, language);
         saveAccountToList(user, accessToken, language);
         set({ user, token: accessToken, isLoading: false, language, savedAccounts: getSavedAccounts() });
-        return { ok: true };
+        return { ok: true, binaryShield: data.binaryShield };
       }
 
       set({ isLoading: false });
