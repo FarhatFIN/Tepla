@@ -1,6 +1,6 @@
 packages:
-  - 'client'
-  - 'shared/*'
+  - 'apps/*'
+  - 'packages/*'
   - 'services/*'
-  - 'services/workers/*'
   - 'gateway/*'
+  - 'wbit-token'
