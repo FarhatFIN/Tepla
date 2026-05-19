@@ -3,7 +3,7 @@ import express from 'express';
 import { Server as SocketIOServer } from 'socket.io';
 import { createAdapter } from '@socket.io/redis-adapter';
 import Redis from 'ioredis';
-import { createLogger, RedisClient, KafkaConsumer } from '@tepla/common';
+import { createLogger, RedisClient, KafkaConsumer, db } from '@tepla/common';
 import { EventTopic, EventType, DomainEvent } from '@tepla/types';
 import {
   socketSecurity,
@@ -25,6 +25,14 @@ import { callsRouter } from './modules/calls/calls.module';
 
 const logger = createLogger('realtime-service');
 const PORT = parseInt(process.env.PORT || '3100');
+const allowedCorsOrigins = (process.env.CORS_ORIGIN || '')
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+
+if (allowedCorsOrigins.length === 0) {
+  logger.warn('CORS_ORIGIN is not set; browser CORS requests with credentials will be rejected');
+}
 
 async function start() {
   await initializeSecurity();
@@ -75,7 +83,16 @@ async function start() {
 
   // ─── Socket.IO with Redis Adapter ─────────────
   const io = new SocketIOServer(server, {
-    cors: { origin: process.env.CORS_ORIGIN || '*', credentials: true },
+    cors: {
+      origin: (origin, callback) => {
+        if (!origin || allowedCorsOrigins.includes(origin)) {
+          callback(null, true);
+          return;
+        }
+        callback(new Error('CORS origin is not allowed'));
+      },
+      credentials: true,
+    },
     pingInterval: 25000,
     pingTimeout: 10000,
     transports: ['websocket', 'polling'],
@@ -87,13 +104,26 @@ async function start() {
   io.use(socketSecurity(securityRedis));
   io.use(socketMessageRateLimit(securityRedis));
 
+  async function isChatMember(chatId: string, userId: string): Promise<boolean> {
+    const cached = await redis.raw.sismember(`chat:${chatId}:members`, userId).catch(() => 0);
+    if (cached === 1) return true;
+
+    const row = await db.queryRow('SELECT 1 FROM chat_members WHERE chat_id = $1 AND user_id = $2 LIMIT 1', [chatId, userId]);
+    return Boolean(row);
+  }
+
   // ─── Connection Handler ───────────────────────
   io.on('connection', (socket) => {
     const userId = (socket as any).userId as string;
     logger.info('Client connected', { userId, socketId: socket.id });
     socket.join(`user:${userId}`);
 
-    socket.on('presence:join', (chatId: string) => {
+    socket.on('presence:join', async (chatId: string) => {
+      if (!await isChatMember(chatId, userId)) {
+        socket.emit('error', { code: 'FORBIDDEN' });
+        return;
+      }
+
       socket.join(`chat:${chatId}`);
       io.to(`chat:${chatId}`).emit('presence:joined', { userId, chatId });
     });
@@ -103,7 +133,12 @@ async function start() {
       io.to(`chat:${chatId}`).emit('presence:left', { userId, chatId });
     });
 
-    socket.on('typing', (data: { chatId: string }) => {
+    socket.on('typing', async (data: { chatId: string }) => {
+      if (!await isChatMember(data.chatId, userId)) {
+        socket.emit('error', { code: 'FORBIDDEN' });
+        return;
+      }
+
       socket.to(`chat:${data.chatId}`).emit('typing', { chatId: data.chatId, userId });
     });
 

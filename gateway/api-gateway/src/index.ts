@@ -77,6 +77,9 @@ function proxy(target: string, pathRewrite: Record<string, string>): ReturnType<
     pathRewrite,
     on: {
       proxyReq: (proxyReq, req) => {
+        proxyReq.removeHeader('X-User-Id');
+        proxyReq.removeHeader('X-User-Premium');
+
         if (req.headers.authorization) {
           proxyReq.setHeader('Authorization', req.headers.authorization);
         }

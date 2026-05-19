@@ -126,6 +126,7 @@ services:
       NODE_ENV: development
       PORT: 3000
       JWT_SECRET: ${JWT_SECRET:-tepla-jwt-secret-change-me}
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:3080,http://127.0.0.1:3080}
       AUTH_USER_SERVICE_URL: http://auth-user-service:3001
       MESSAGING_SERVICE_URL: http://messaging-core-service:3004
       MEDIA_SERVICE_URL: http://media-service:3007
@@ -170,6 +171,7 @@ services:
       REDIS_PERSIST_URL: redis://redis:6379
       KAFKA_BROKERS: kafka:29092
       JWT_SECRET: ${JWT_SECRET:-tepla-jwt-secret-change-me}
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:3080,http://127.0.0.1:3080}
     depends_on:
       postgres:
         condition: service_healthy
@@ -199,6 +201,8 @@ services:
       DATABASE_URL: postgres://tepla:${POSTGRES_PASSWORD:-tepla_secret}@postgres:5432/tepla
       REDIS_URL: redis://redis:6379
       KAFKA_BROKERS: kafka:29092
+      JWT_SECRET: ${JWT_SECRET:-tepla-jwt-secret-change-me}
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:3080,http://127.0.0.1:3080}
     depends_on:
       postgres:
         condition: service_healthy
@@ -228,6 +232,8 @@ services:
       DATABASE_URL: postgres://tepla:${POSTGRES_PASSWORD:-tepla_secret}@postgres:5432/tepla
       REDIS_URL: redis://redis:6379
       KAFKA_BROKERS: kafka:29092
+      JWT_SECRET: ${JWT_SECRET:-tepla-jwt-secret-change-me}
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:3080,http://127.0.0.1:3080}
       S3_ENDPOINT: http://minio:9000
       S3_ACCESS_KEY: ${S3_ACCESS_KEY:-tepla_minio}
       S3_SECRET_KEY: ${S3_SECRET_KEY:-tepla_minio_secret}
@@ -265,6 +271,8 @@ services:
       DATABASE_URL: postgres://tepla:${POSTGRES_PASSWORD:-tepla_secret}@postgres:5432/tepla
       REDIS_URL: redis://redis:6379
       KAFKA_BROKERS: kafka:29092
+      JWT_SECRET: ${JWT_SECRET:-tepla-jwt-secret-change-me}
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:3080,http://127.0.0.1:3080}
       LIVEKIT_URL: ws://livekit:7880
       LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:-devkey}
       LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:-devsecret}

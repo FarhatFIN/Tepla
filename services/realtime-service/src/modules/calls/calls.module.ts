@@ -29,9 +29,13 @@ const logger = createLogger('calls-module');
 
 // ─── Config ────────────────────────────────
 const LIVEKIT_API_URL = process.env.LIVEKIT_API_URL || 'http://livekit:7880';
-const LIVEKIT_API_KEY = process.env.LIVEKIT_API_KEY || 'devkey';
-const LIVEKIT_API_SECRET = process.env.LIVEKIT_API_SECRET || 'devsecret';
+const LIVEKIT_API_KEY = process.env.LIVEKIT_API_KEY;
+const LIVEKIT_API_SECRET = process.env.LIVEKIT_API_SECRET;
 const MAX_GROUP_CALL_PARTICIPANTS = 100;
+
+if (!LIVEKIT_API_KEY || !LIVEKIT_API_SECRET) {
+  throw new Error('FATAL: LIVEKIT_API_KEY and LIVEKIT_API_SECRET environment variables are required');
+}
 
 // ─── Repository ────────────────────────────
 export class CallRepository extends BaseRepository {

@@ -9,6 +9,11 @@ import { KafkaProducer } from './kafka';
 import { RedisClient } from './redis';
 import { HealthStatus } from '@tepla/types';
 
+const allowedCorsOrigins = (process.env.CORS_ORIGIN || '')
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+
 export interface ServiceConfig {
   name: string;
   port: number;
@@ -35,9 +40,19 @@ export abstract class BaseService {
   }
 
   private setupMiddleware(): void {
+    if (allowedCorsOrigins.length === 0) {
+      this.logger.warn('CORS_ORIGIN is not set; browser CORS requests with credentials will be rejected');
+    }
+
     this.app.use(helmet());
     this.app.use(cors({
-      origin: process.env.CORS_ORIGIN || '*',
+      origin: (origin, callback) => {
+        if (!origin || allowedCorsOrigins.includes(origin)) {
+          callback(null, true);
+          return;
+        }
+        callback(new Error('CORS origin is not allowed'));
+      },
       credentials: true,
     }));
     this.app.use(compression());
@@ -118,13 +133,18 @@ export abstract class BaseService {
 
   async start(): Promise<void> {
     try {
+      if (!process.env.JWT_SECRET) {
+        this.logger.error('FATAL: JWT_SECRET environment variable is required');
+        process.exit(1);
+      }
+
       await this.initInfrastructure();
       await this.setup();
 
       // Error handler must be last
       this.app.use(errorHandler);
 
-      this.app.listen(this.config.port, '0.0.0.0', () => {
+      this.app.listen(this.config.port, () => {
         this.logger.info(`${this.config.name} running on port ${this.config.port}`);
       });
 

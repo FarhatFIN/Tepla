@@ -27,6 +27,83 @@ import { gifRouter } from './modules/gifs/gifs.module';
 import { storiesRouter, StoryRepository, startStoryCleanup } from './modules/stories/stories.module';
 
 const logger = createLogger('media-service');
+const MAX_UPLOAD_SIZE_BYTES = 4 * 1024 * 1024 * 1024;
+const ALLOWED_MIME_TYPES = new Set([
+  'image/jpeg',
+  'image/png',
+  'image/gif',
+  'image/webp',
+  'video/mp4',
+  'video/quicktime',
+  'video/x-msvideo',
+  'video/webm',
+  'video/x-matroska',
+  'audio/mpeg',
+  'audio/wav',
+  'audio/wave',
+  'audio/ogg',
+  'audio/webm',
+  'audio/mp4',
+  'audio/x-m4a',
+]);
+const MIME_EXTENSIONS: Record<string, string[]> = {
+  'image/jpeg': ['jpg', 'jpeg'],
+  'image/png': ['png'],
+  'image/gif': ['gif'],
+  'image/webp': ['webp'],
+  'video/mp4': ['mp4'],
+  'video/quicktime': ['mov'],
+  'video/x-msvideo': ['avi'],
+  'video/webm': ['webm'],
+  'video/x-matroska': ['mkv'],
+  'audio/mpeg': ['mp3'],
+  'audio/wav': ['wav'],
+  'audio/wave': ['wav'],
+  'audio/ogg': ['ogg'],
+  'audio/webm': ['webm'],
+  'audio/mp4': ['m4a'],
+  'audio/x-m4a': ['m4a'],
+};
+
+function safeExtension(originalName: string, mimeType: string): string | null {
+  const extension = (originalName.split('.').pop() || '').toLowerCase();
+  if (!/^[a-z0-9]{1,8}$/.test(extension)) return null;
+  return MIME_EXTENSIONS[mimeType]?.includes(extension) ? extension : null;
+}
+
+function detectMediaFamily(buffer: Buffer): 'image' | 'video' | 'audio' | 'iso' | null {
+  if (buffer.length < 12) return null;
+  if (buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) return 'image';
+  if (buffer.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return 'image';
+  if (buffer.subarray(0, 3).toString('ascii') === 'GIF') return 'image';
+  if (buffer.subarray(0, 4).toString('ascii') === 'RIFF' && buffer.subarray(8, 12).toString('ascii') === 'WEBP') return 'image';
+  if (buffer.subarray(4, 8).toString('ascii') === 'ftyp') return 'iso';
+  if (buffer.subarray(0, 4).equals(Buffer.from([0x1a, 0x45, 0xdf, 0xa3]))) return 'video';
+  if (buffer.subarray(0, 4).toString('ascii') === 'RIFF' && buffer.subarray(8, 12).toString('ascii') === 'AVI ') return 'video';
+  if (buffer.subarray(0, 3).toString('ascii') === 'ID3' || (buffer[0] === 0xff && (buffer[1] & 0xe0) === 0xe0)) return 'audio';
+  if (buffer.subarray(0, 4).toString('ascii') === 'RIFF' && buffer.subarray(8, 12).toString('ascii') === 'WAVE') return 'audio';
+  if (buffer.subarray(0, 4).toString('ascii') === 'OggS') return 'audio';
+  return null;
+}
+
+function validateUpload(file: Express.Multer.File): { mimeType: string; extension: string } {
+  if (!ALLOWED_MIME_TYPES.has(file.mimetype)) {
+    throw new Error('UNSUPPORTED_MEDIA_TYPE');
+  }
+
+  const extension = safeExtension(file.originalname, file.mimetype);
+  const detectedFamily = detectMediaFamily(file.buffer);
+  const declaredFamily = file.mimetype.split('/')[0] as 'image' | 'video' | 'audio';
+
+  const familyMatches = detectedFamily === declaredFamily ||
+    (detectedFamily === 'iso' && (declaredFamily === 'audio' || declaredFamily === 'video'));
+
+  if (!extension || !detectedFamily || !familyMatches) {
+    throw new Error('INVALID_MEDIA_SIGNATURE');
+  }
+
+  return { mimeType: file.mimetype, extension };
+}
 
 async function generateImageThumbnails(
   buffer: Buffer,
@@ -156,19 +233,21 @@ class MediaService extends BaseService {
     const bucket = process.env.S3_BUCKET || 'tepla-media';
     await this.ensureBucket(bucket);
 
-    const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
+    const upload = multer({
+      storage: multer.memoryStorage(),
+      limits: { fileSize: MAX_UPLOAD_SIZE_BYTES },
+      fileFilter: (_req, file, cb) => cb(null, ALLOWED_MIME_TYPES.has(file.mimetype)),
+    });
     const router = Router();
     const auth = authMiddleware();
 
     router.post('/upload', auth, async (req: Request, res: Response, next: NextFunction) => {
       try {
-        const maxSize = 4 * 1024 * 1024 * 1024;
-
         const contentLength = parseInt(req.headers['content-length'] || '0');
-        if (contentLength > maxSize) {
+        if (contentLength > MAX_UPLOAD_SIZE_BYTES) {
           return res.status(413).json({
             success: false,
-            error: { code: 'FILE_TOO_LARGE', message: `Max file size: ${maxSize / 1024 / 1024} MB` },
+            error: { code: 'FILE_TOO_LARGE', message: `Max file size: ${MAX_UPLOAD_SIZE_BYTES / 1024 / 1024} MB` },
           });
         }
 
@@ -182,16 +261,16 @@ class MediaService extends BaseService {
           return res.status(400).json({ success: false, error: { code: 'NO_FILE', message: 'No file uploaded' } });
         }
 
-        if (file.size > maxSize) {
+        if (file.size > MAX_UPLOAD_SIZE_BYTES) {
           return res.status(413).json({
             success: false,
-            error: { code: 'FILE_TOO_LARGE', message: `Max file size: ${maxSize / 1024 / 1024} MB` },
+            error: { code: 'FILE_TOO_LARGE', message: `Max file size: ${MAX_UPLOAD_SIZE_BYTES / 1024 / 1024} MB` },
           });
         }
 
+        const { mimeType, extension } = validateUpload(file);
         const fileId = uuid();
-        const ext = file.originalname.split('.').pop() || 'bin';
-        const key = `uploads/${req.user!.sub}/${fileId}.${ext}`;
+        const key = `uploads/${req.user!.sub}/${fileId}.${extension}`;
 
         const passThrough = new PassThrough();
         const s3Upload = new Upload({
@@ -200,7 +279,8 @@ class MediaService extends BaseService {
             Bucket: bucket,
             Key: key,
             Body: passThrough,
-            ContentType: file.mimetype,
+            ContentType: mimeType,
+            ContentDisposition: 'attachment',
           },
           queueSize: 4,
           partSize: 10 * 1024 * 1024,
@@ -217,7 +297,7 @@ class MediaService extends BaseService {
         const thumbnails: Record<string, string> = {};
         const baseUrl = process.env.S3_PUBLIC_URL || process.env.S3_ENDPOINT;
 
-        if (file.mimetype.startsWith('image/')) {
+        if (mimeType.startsWith('image/')) {
           const cleanBuffer = await stripExif(file.buffer);
           const meta = await getImageMetadata(cleanBuffer);
           width = meta.width;
@@ -235,9 +315,9 @@ class MediaService extends BaseService {
             thumbnails[thumb.size] = `${baseUrl}/${bucket}/${thumbKey}`;
           }
           thumbnailUrl = thumbnails['md'] || thumbnails['sm'] || null;
-        } else if (file.mimetype.startsWith('video/') || file.mimetype.startsWith('audio/')) {
+        } else if (mimeType.startsWith('video/') || mimeType.startsWith('audio/')) {
           const tmpDir = await mkdtemp(join(tmpdir(), 'tepla-upload-'));
-          const tmpPath = join(tmpDir, `input.${ext}`);
+          const tmpPath = join(tmpDir, `input.${extension}`);
           await writeFile(tmpPath, file.buffer);
 
           try {
@@ -246,7 +326,7 @@ class MediaService extends BaseService {
             width = probe.width || null;
             height = probe.height || null;
 
-            if (file.mimetype.startsWith('video/')) {
+            if (mimeType.startsWith('video/')) {
               try {
                 const videoThumb = await extractVideoThumbnail(tmpPath);
                 const { readFile: rf } = await import('fs/promises');
@@ -262,7 +342,7 @@ class MediaService extends BaseService {
               }
             }
 
-            if (file.mimetype.startsWith('audio/') || file.mimetype === 'audio/ogg' || file.mimetype === 'audio/webm') {
+            if (mimeType.startsWith('audio/') || mimeType === 'audio/ogg' || mimeType === 'audio/webm') {
               try {
                 waveform = await generateWaveform(tmpPath);
               } catch {
@@ -284,7 +364,7 @@ class MediaService extends BaseService {
             thumbnailUrl,
             thumbnails,
             key,
-            mimeType: file.mimetype,
+            mimeType,
             sizeBytes: file.size,
             fileName: file.originalname,
             width,

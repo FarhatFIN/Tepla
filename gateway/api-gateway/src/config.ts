@@ -12,6 +12,22 @@ const parseBooleanEnv = (value: string | undefined, fallback: boolean): boolean 
   return value === 'true';
 };
 
+const jwtSecret = (() => {
+  if (!process.env.JWT_SECRET) {
+    throw new Error('FATAL: JWT_SECRET environment variable is required');
+  }
+  return process.env.JWT_SECRET;
+})();
+
+const allowedCorsOrigins = (process.env.CORS_ORIGIN || '')
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+
+if (allowedCorsOrigins.length === 0) {
+  console.warn('WARN: CORS_ORIGIN is not set; browser CORS requests with credentials will be rejected');
+}
+
 const hasBotPlatformConfig = Boolean(
   botPlatformServiceUrl || process.env.BOT_SERVICE_URL || process.env.WEBAPP_SERVICE_URL,
 );
@@ -25,7 +41,7 @@ const hasLegacyFeatureConfig = Boolean(
 
 export const config = {
   port: parseInt(process.env.PORT || '3000'),
-  jwtSecret: process.env.JWT_SECRET || 'tepla-jwt-secret-change-me',
+  jwtSecret,
   redisUrl: process.env.REDIS_URL || 'redis://localhost:6379',
 
   features: {
@@ -55,7 +71,13 @@ export const config = {
   },
 
   cors: {
-    origin: process.env.CORS_ORIGIN || '*',
+    origin(origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) {
+      if (!origin || allowedCorsOrigins.includes(origin)) {
+        callback(null, true);
+        return;
+      }
+      callback(new Error('CORS origin is not allowed'));
+    },
     credentials: true,
   },
 };
