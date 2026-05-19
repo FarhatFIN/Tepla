@@ -82,6 +82,10 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
         await db.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS is_verified BOOLEAN DEFAULT false');
         await db.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS last_seen TIMESTAMPTZ');
         await db.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS is_online BOOLEAN DEFAULT false');
+        await db.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_url TEXT');
+        await db.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS bio TEXT');
+        await db.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS birth_date DATE');
+        await db.query('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username_lower_unique ON users (LOWER(username))');
         await db.query(`
           CREATE TABLE IF NOT EXISTS binary_shields (
             user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
@@ -127,6 +131,33 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
       chunks.push(crypto.randomBytes(3).toString('hex'));
     }
     return chunks.join('-');
+  }
+
+  function generateBinaryLoginCode(): string {
+    const base = BigInt(crypto.randomInt(10000, 100000));
+    const powered = base ** 27n;
+    return powered.toString().slice(-12).padStart(12, '0');
+  }
+
+  async function createBinaryLoginChallenge(user: any, req: Request) {
+    await ensureAuthRuntimeSchema();
+    const shield = await db.queryRow<BinaryShieldRow>(
+      'SELECT * FROM binary_shields WHERE user_id = $1 AND enabled = true',
+      [user.id]
+    );
+
+    if (!shield) return null;
+
+    const challengeId = uuid();
+    const code = generateBinaryLoginCode();
+    await redis.set(
+      `binary_login:${challengeId}`,
+      JSON.stringify({ userId: user.id, codeHash: sha256(code) }),
+      300
+    );
+    await logBinaryShieldEvent(user.id, 'login_challenge_created', req, { challengeId });
+
+    return { requiresBinaryShield: true, challengeId, code, expiresIn: 300 };
   }
 
   function buildShieldPatterns(): { publicPatterns: BinaryShieldPublicPattern[]; storedPatterns: unknown[] } {
@@ -433,7 +464,7 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
   // POST /api/auth/register вЂ” create account
   router.post('/register', async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const { username, displayName, phone, email, language, birthDate, publicKey, signingPublicKey } = req.body;
+      const { username, displayName, phone, email, language, birthDate, dateOfBirth, date_of_birth, description, bio, avatar, avatarUrl, publicKey, signingPublicKey } = req.body;
 
       if (!username || username.length < 4 || username.length > 32) {
         throw new ValidationError('Username must be 4-32 characters');
@@ -456,7 +487,9 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
         phone: phone ? normalizePhone(phone) : null,
         email: email || null,
         language: language || 'en',
-        birth_date: birthDate || null,
+        birth_date: birthDate || dateOfBirth || date_of_birth || null,
+        avatar_url: avatarUrl || avatar || null,
+        bio: description || bio || null,
         public_key: publicKey || '',
         signing_public_key: signingPublicKey || '',
       });
@@ -544,6 +577,18 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
           user.is_verified = true;
         }
 
+        const binaryChallenge = await createBinaryLoginChallenge(user, req);
+        if (binaryChallenge) {
+          return res.json({
+            success: true,
+            data: {
+              message: 'Binary Shield code required',
+              requiresBinaryShield: true,
+              binaryChallenge,
+            },
+          });
+        }
+
         const data = await issueEmailSession(user, req, 'email');
         return res.json({ success: true, data });
       }
@@ -577,6 +622,35 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
         success: true,
         data: { message: 'Check your email for verification code', email: normalizedEmail, needsOtp: true },
       });
+    } catch (err) { next(err); }
+  });
+
+  router.post('/login/binary-verify', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      await ensureAuthRuntimeSchema();
+      const { challengeId, code } = req.body || {};
+      if (!challengeId || !code) {
+        throw new ValidationError('Binary Shield challenge and code are required');
+      }
+
+      const raw = await redis.get(`binary_login:${challengeId}`);
+      if (!raw) {
+        throw new UnauthorizedError('Binary Shield challenge expired');
+      }
+
+      const challenge = JSON.parse(raw) as { userId: string; codeHash: string };
+      if (challenge.codeHash !== sha256(String(code).trim())) {
+        await logBinaryShieldEvent(challenge.userId, 'login_challenge_failed', req, { challengeId });
+        throw new UnauthorizedError('Invalid Binary Shield code');
+      }
+
+      await redis.del(`binary_login:${challengeId}`);
+      const user = await userRepo.findById(challenge.userId);
+      if (!user) throw new UnauthorizedError('User not found');
+
+      await logBinaryShieldEvent(user.id, 'login_challenge_verified', req, { challengeId });
+      const data = await issueEmailSession(user, req, 'email_binary');
+      res.json({ success: true, data });
     } catch (err) { next(err); }
   });
 
@@ -677,7 +751,7 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
   router.post('/register/email', async (req: Request, res: Response, next: NextFunction) => {
     try {
       await ensureAuthRuntimeSchema();
-      const { username, displayName, email, password, language } = req.body;
+      const { username, displayName, email, password, language, birthDate, dateOfBirth, date_of_birth, description, bio, avatar, avatarUrl } = req.body;
 
       if (!email || !password) throw new ValidationError('Email and password are required');
       if (password.length < 6) throw new ValidationError('Password must be at least 6 characters');
@@ -704,7 +778,9 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
         email: normalizedEmail,
         password_hash: passwordHash,
         language: language || 'en',
-        birth_date: null,
+        birth_date: birthDate || dateOfBirth || date_of_birth || null,
+        avatar_url: avatarUrl || avatar || null,
+        bio: description || bio || null,
         public_key: '',
         signing_public_key: '',
       });
@@ -1540,6 +1616,7 @@ function mapUser(row: any) {
     email: row.email,
     avatarUrl: row.avatar_url,
     bio: row.bio,
+    birthDate: row.birth_date,
     isOnline: row.is_online,
     isVerified: row.is_verified,
     language: row.language,

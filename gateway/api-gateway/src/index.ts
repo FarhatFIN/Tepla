@@ -184,6 +184,11 @@ app.use(
   forwardAuthRequest,
 );
 
+app.use(
+  '/api/v2/users/check-username',
+  proxy(config.services.authUser, { '^/': '/api/users/check-username' }),
+);
+
 registerRoutes([
   {
     path: '/api/v2/users',

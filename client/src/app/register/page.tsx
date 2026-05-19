@@ -37,6 +37,9 @@ export default function RegisterPage() {
   const [name, setName] = useState("");
   const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
+  const [birthDate, setBirthDate] = useState("");
+  const [description, setDescription] = useState("");
+  const [avatarUrl, setAvatarUrl] = useState("");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -69,10 +72,10 @@ export default function RegisterPage() {
     setUsername(clean);
     if (clean.length < 4) { setUsernameStatus("idle"); return; }
     setUsernameStatus("checking");
-    const taken = ["admin", "tepla", "support", "help"];
-    setTimeout(() => {
-      setUsernameStatus(taken.includes(clean) ? "taken" : "available");
-    }, 500);
+    fetch(`/api/v2/users/check-username?username=${encodeURIComponent(clean)}`)
+      .then((res) => res.json())
+      .then((res) => setUsernameStatus(res.data?.available ? "available" : "taken"))
+      .catch(() => setUsernameStatus("idle"));
   }
 
   function validate() {
@@ -95,7 +98,11 @@ export default function RegisterPage() {
     if (Object.keys(e).length) return;
     setLoading(true);
     try {
-      const result = await register(name, email, password, language, username);
+      const result = await register(name, email, password, language, username, {
+        birthDate,
+        bio: description,
+        avatarUrl,
+      });
       if (result.ok) {
         if (result.binaryShield) {
           setBinaryShield(result.binaryShield);
@@ -265,6 +272,18 @@ export default function RegisterPage() {
             <div className="mt-2">
               <input type="email" placeholder={t("your_email")} value={email} onChange={(e) => setEmail(e.target.value)} className={inputClass} autoComplete="email" />
               {errors.email && <p className="mt-1 text-[12px] text-[#EF4444]">{errors.email}</p>}
+            </div>
+
+            <div className="mt-2">
+              <input type="date" value={birthDate} onChange={(e) => setBirthDate(e.target.value)} className={inputClass} />
+            </div>
+
+            <div className="mt-2">
+              <input type="url" placeholder="Avatar URL" value={avatarUrl} onChange={(e) => setAvatarUrl(e.target.value)} className={inputClass} />
+            </div>
+
+            <div className="mt-2">
+              <textarea placeholder="Description" value={description} onChange={(e) => setDescription(e.target.value.slice(0, 240))} className={`${inputClass} min-h-[76px] resize-none py-4`} />
             </div>
 
             {/* Language */}

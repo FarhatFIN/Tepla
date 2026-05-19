@@ -9,6 +9,8 @@ interface CreateUserInput {
   password_hash?: string | null;
   language: string;
   birth_date: string | null;
+  avatar_url?: string | null;
+  bio?: string | null;
   public_key: string;
   signing_public_key: string;
 }
@@ -37,14 +39,14 @@ export class UserRepository extends BaseRepository {
   async create(input: CreateUserInput): Promise<any> {
     const id = uuid();
     const sql = `
-      INSERT INTO users (id, username, display_name, phone, email, password_hash, language, birth_date, public_key, signing_public_key, created_at)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
+      INSERT INTO users (id, username, display_name, phone, email, password_hash, language, birth_date, avatar_url, bio, public_key, signing_public_key, created_at)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW())
       RETURNING *
     `;
     return this.queryOne(sql, [
       id, input.username, input.display_name, input.phone,
       input.email, input.password_hash, input.language, input.birth_date,
-      input.public_key, input.signing_public_key,
+      input.avatar_url || null, input.bio || null, input.public_key, input.signing_public_key,
     ]);
   }
 

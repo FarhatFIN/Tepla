@@ -21,6 +21,12 @@ interface BinaryShieldIssue {
   nextManualRotationAt: string;
 }
 
+interface BinaryChallenge {
+  challengeId: string;
+  code: string;
+  expiresIn: number;
+}
+
 interface AuthState {
   user: User | null;
   token: string | null;
@@ -28,8 +34,9 @@ interface AuthState {
   language: string;
   savedAccounts: SavedAccount[];
   otpPending: OtpPending | null;
-  login: (email: string, password: string) => Promise<{ ok: boolean; needsOtp?: boolean; needsVerification?: boolean; email?: string; binaryShield?: BinaryShieldIssue }>;
-  register: (name: string, email: string, password: string, language: string, username: string) => Promise<{ ok: boolean; needsOtp?: boolean; email?: string; binaryShield?: BinaryShieldIssue }>;
+  login: (email: string, password: string) => Promise<{ ok: boolean; needsOtp?: boolean; needsVerification?: boolean; requiresBinaryShield?: boolean; binaryChallenge?: BinaryChallenge; email?: string; binaryShield?: BinaryShieldIssue }>;
+  register: (name: string, email: string, password: string, language: string, username: string, profile?: { birthDate?: string; bio?: string; avatarUrl?: string }) => Promise<{ ok: boolean; needsOtp?: boolean; email?: string; binaryShield?: BinaryShieldIssue }>;
+  verifyBinaryShield: (challengeId: string, code: string) => Promise<{ ok: boolean; binaryShield?: BinaryShieldIssue }>;
   verifyOtp: (email: string, code: string, type: 'login' | 'register' | 'verify') => Promise<boolean>;
   resendCode: (email: string) => Promise<boolean>;
   setOtpPending: (pending: OtpPending | null) => void;
@@ -105,6 +112,11 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       const res = await api.post<{ success: boolean; data: any }>("/auth/login", { email, password });
       const data = res.data;
 
+      if (data.requiresBinaryShield && data.binaryChallenge) {
+        set({ isLoading: false });
+        return { ok: false, requiresBinaryShield: true, binaryChallenge: data.binaryChallenge };
+      }
+
       // Server sends OTP — needs verification step
       if (data.needsOtp || data.needsVerification) {
         const type = data.needsVerification ? 'verify' : 'login';
@@ -120,6 +132,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
           name: raw.displayName || raw.username || email.split("@")[0],
           username: raw.username,
           avatar: raw.avatarUrl,
+          bio: raw.bio,
+          birthDate: raw.birthDate,
           phone: raw.phone,
           status: "online",
             language: raw.language || get().language,
@@ -141,12 +155,12 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     }
   },
 
-  register: async (name, email, password, language, username) => {
+  register: async (name, email, password, language, username, profile) => {
     set({ isLoading: true });
     try {
       const res = await api.post<{ success: boolean; data: any }>(
         "/auth/register/email",
-        { email, password, username, displayName: name, language }
+        { email, password, username, displayName: name, language, dateOfBirth: profile?.birthDate, description: profile?.bio, avatarUrl: profile?.avatarUrl }
       );
       const data = res.data;
 
@@ -163,6 +177,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
           id: raw.id,
           name: raw.displayName || name,
           username: raw.username || username,
+          avatar: raw.avatarUrl,
+          bio: raw.bio,
+          birthDate: raw.birthDate,
           status: "online",
           language: raw.language || language,
           phone: raw.phone,
@@ -184,6 +201,35 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     }
   },
 
+  verifyBinaryShield: async (challengeId, code) => {
+    set({ isLoading: true });
+    try {
+      const res = await api.post<{ success: boolean; data: any }>("/auth/login/binary-verify", { challengeId, code });
+      const { tokens: { accessToken }, user: raw, binaryShield } = res.data;
+      const user: User = {
+        id: raw.id,
+        name: raw.displayName || raw.username,
+        username: raw.username,
+        avatar: raw.avatarUrl,
+        bio: raw.bio,
+        birthDate: raw.birthDate,
+        phone: raw.phone,
+        status: "online",
+        language: raw.language || get().language,
+      };
+      api.setToken(accessToken);
+      connectSocket(accessToken);
+      persist(user, accessToken, user.language || get().language);
+      saveAccountToList(user, accessToken, user.language || get().language);
+      set({ user, token: accessToken, isLoading: false, savedAccounts: getSavedAccounts() });
+      return { ok: true, binaryShield };
+    } catch (err) {
+      console.warn("[auth] Binary Shield verify failed:", err);
+      set({ isLoading: false });
+      throw err;
+    }
+  },
+
   verifyOtp: async (email, code, type) => {
     set({ isLoading: true });
     try {
@@ -198,6 +244,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         name: raw.displayName || raw.username || email.split("@")[0],
         username: raw.username,
         avatar: raw.avatarUrl,
+        bio: raw.bio,
+        birthDate: raw.birthDate,
         phone: raw.phone,
         status: "online",
         language: raw.language || get().language,
