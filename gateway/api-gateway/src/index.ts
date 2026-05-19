@@ -1,6 +1,6 @@
 ﻿import compression from 'compression';
 import cors from 'cors';
-import express, { type Request, type RequestHandler, type Response } from 'express';
+import express, { type NextFunction, type Request, type RequestHandler, type Response } from 'express';
 import { createProxyMiddleware, fixRequestBody, type Options as ProxyOptions } from 'http-proxy-middleware';
 import {
   authMiddleware,
@@ -134,6 +134,40 @@ function registerRoutes(routes: RouteDefinition[]): void {
   }
 }
 
+async function forwardAuthRequest(req: GatewayRequest, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const targetUrl = new URL(`/api/auth${req.path}`, config.services.authUser);
+    for (const [key, value] of Object.entries(req.query)) {
+      if (Array.isArray(value)) {
+        for (const item of value) targetUrl.searchParams.append(key, String(item));
+      } else if (value !== undefined) {
+        targetUrl.searchParams.set(key, String(value));
+      }
+    }
+
+    const headers = new Headers();
+    headers.set('Content-Type', 'application/json');
+    if (req.headers.authorization) headers.set('Authorization', req.headers.authorization);
+    if (req.correlationId) headers.set('X-Correlation-Id', req.correlationId);
+    if (req.deviceFingerprint) headers.set('X-Device-Fingerprint', req.deviceFingerprint);
+    if (req.securityAnomaly) headers.set('X-Security-Anomaly', JSON.stringify(req.securityAnomaly));
+
+    const upstream = await fetch(targetUrl, {
+      method: req.method,
+      headers,
+      body: ['GET', 'HEAD'].includes(req.method) ? undefined : JSON.stringify(req.body || {}),
+    });
+
+    const contentType = upstream.headers.get('content-type');
+    if (contentType) res.setHeader('Content-Type', contentType);
+
+    const text = await upstream.text();
+    res.status(upstream.status).send(text);
+  } catch (err) {
+    next(err);
+  }
+}
+
 const auth = authMiddleware(config.jwtSecret);
 
 const protectedMiddleware: RequestHandler[] = [
@@ -147,7 +181,7 @@ app.use(
   express.json({ limit: '1mb' }),
   securityMiddleware.authRateLimit(),
   securityMiddleware.auditSensitive('auth'),
-  proxy(config.services.authUser, { '^/': '/api/auth/' }),
+  forwardAuthRequest,
 );
 
 registerRoutes([
