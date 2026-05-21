@@ -2,13 +2,19 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState, type FormEvent } from "react";
-import { ArrowLeft, BadgeCheck, Sparkles } from "lucide-react";
+import { useMemo, useRef, useState, type ChangeEvent, type FormEvent } from "react";
+import { AnimatePresence, motion } from "framer-motion";
+import { ArrowLeft, ArrowRight, Eye, EyeOff, Loader2, User } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Select } from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
 import { useAuthStore } from "@/stores/auth.store";
-import { DEFAULT_LANGUAGE, SUPPORTED_LANGUAGES } from "@/lib/languages";
+import { BinaryShieldStep } from "@/components/auth/BinaryShieldStep";
+import {
+  createDemoBinaryShield,
+  parseBinaryShieldFromResponse,
+  type BinaryShieldIssue,
+} from "@/lib/binary-shield-demo";
 import {
   Card,
   CardContent,
@@ -17,51 +23,132 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 
-const createHandleFromName = (value: string) =>
+const BIO_MAX = 150;
+
+const normalizeUsername = (value: string) =>
   value
-    .toLowerCase()
-    .trim()
-    .replace(/[^a-z0-9_ ]/g, "")
-    .replace(/\s+/g, "_")
-    .slice(0, 24);
-
-export default function RegisterPage() {
-  const router = useRouter();
-  const { setSession } = useAuthStore();
-  const [phone, setPhone] = useState("");
-  const [email, setEmail] = useState("");
-  const [username, setUsername] = useState("");
-  const [displayName, setDisplayName] = useState("");
-  const [language, setLanguage] = useState(DEFAULT_LANGUAGE);
-  const [birthDate, setBirthDate] = useState("");
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const normalizedDisplayName = displayName.trim();
-  const normalizedUsername = username
     .replace(/^@+/, "")
     .toLowerCase()
     .replace(/[^a-z0-9_]/g, "")
     .slice(0, 24);
-  const suggestedHandle = createHandleFromName(normalizedDisplayName || "tepla_founder");
-  const hasContact = phone.trim().length > 0 || email.trim().length > 0;
-  const usernameValid = normalizedUsername.length >= 4;
+
+const validateStep1 = (email: string, password: string, username: string) => {
+  const errors: Record<string, string> = {};
+  if (!email.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+    errors.email = "Enter a valid email address.";
+  }
+  if (!password || password.length < 6) {
+    errors.password = "Password must be at least 6 characters.";
+  }
+  const handle = normalizeUsername(username);
+  if (!handle || handle.length < 4) {
+    errors.username = "Username must be at least 4 characters.";
+  } else if (!/^[a-z0-9_]+$/.test(handle)) {
+    errors.username = "Use only letters, numbers, and underscores.";
+  }
+  return errors;
+};
+
+const pageTransition = {
+  initial: { opacity: 0, x: 24 },
+  animate: { opacity: 1, x: 0 },
+  exit: { opacity: 0, x: -24 },
+  transition: { duration: 0.25, ease: [0.25, 0.1, 0.25, 1] as const },
+};
+
+export default function RegisterPage() {
+  const router = useRouter();
+  const { setSession } = useAuthStore();
+  const avatarInputRef = useRef<HTMLInputElement | null>(null);
+
+  const [step, setStep] = useState<1 | 2 | 3>(1);
+  const [binaryShield, setBinaryShield] = useState<BinaryShieldIssue | null>(null);
+  const [registeredUser, setRegisteredUser] = useState<{
+    id: string;
+    username: string;
+    displayName: string | null;
+    avatarUrl: string | null;
+    language: string;
+    birthDate: string | null;
+    usernameColor: string | null;
+    animatedAvatarEnabled: boolean;
+    voiceStatusUrl: string | null;
+    voiceStatusDurationSeconds: number | null;
+    statusEmoji: string | null;
+  } | null>(null);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [username, setUsername] = useState("");
+  const [bio, setBio] = useState("");
+  const [birthDate, setBirthDate] = useState("");
+  const [avatarFile, setAvatarFile] = useState<File | null>(null);
+  const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
+  const [showPassword, setShowPassword] = useState(false);
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [globalError, setGlobalError] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const normalizedUsername = useMemo(() => normalizeUsername(username), [username]);
+
+  const handleAvatarPick = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file || !file.type.startsWith("image/")) {
+      setErrors((prev) => ({ ...prev, avatar: "Please choose an image file." }));
+      return;
+    }
+    setAvatarFile(file);
+    setErrors((prev) => {
+      const next = { ...prev };
+      delete next.avatar;
+      return next;
+    });
+    const reader = new FileReader();
+    reader.onload = () => setAvatarPreview(reader.result as string);
+    reader.readAsDataURL(file);
+  };
+
+  const goToStep2 = () => {
+    const stepErrors = validateStep1(email, password, username);
+    setErrors(stepErrors);
+    if (Object.keys(stepErrors).length > 0) return;
+    setStep(2);
+  };
+
+  const uploadAvatarAfterRegister = async (file: File, userId: string) => {
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("type", "avatar");
+    formData.append("userId", userId);
+
+    const uploadResponse = await fetch("/api/upload", {
+      method: "POST",
+      body: formData,
+    });
+
+    if (!uploadResponse.ok) {
+      return null;
+    }
+
+    const payload = (await uploadResponse.json()) as { url: string };
+    await fetch(`/api/users/${userId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ avatarUrl: payload.url }),
+    });
+    return payload.url;
+  };
 
   const handleRegister = async (event: FormEvent) => {
     event.preventDefault();
+    setGlobalError(null);
 
-    if (!hasContact) {
-      setError("Add a phone number or email so your team can recover access.");
-      return;
-    }
-
-    if (!usernameValid) {
-      setError("Username must be at least 4 characters using letters, numbers, or underscores.");
+    if (bio.length > BIO_MAX) {
+      setErrors({ bio: `Bio must be ${BIO_MAX} characters or less.` });
       return;
     }
 
     setIsSubmitting(true);
-    setError(null);
 
     try {
       const response = await fetch("/api/auth", {
@@ -69,11 +156,10 @@ export default function RegisterPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           mode: "register",
-          phone: phone.trim() || undefined,
-          email: email.trim() || undefined,
+          email: email.trim(),
           username: normalizedUsername,
-          displayName: normalizedDisplayName || undefined,
-          language,
+          password,
+          displayName: bio.trim() || undefined,
           birthDate: birthDate || undefined,
         }),
       });
@@ -104,183 +190,270 @@ export default function RegisterPage() {
         throw new Error("Account created, but no user session was returned.");
       }
 
-      setSession({
-        user: payload.user,
-        accessToken: `session-${payload.user.id}`,
-        refreshToken: `refresh-${payload.user.id}`,
-      });
-      router.replace("/");
+      let avatarUrl = payload.user.avatarUrl;
+      if (avatarFile) {
+        avatarUrl = (await uploadAvatarAfterRegister(avatarFile, payload.user.id)) ?? avatarUrl;
+      }
+
+      const user = { ...payload.user, avatarUrl };
+      setRegisteredUser(user);
+
+      const shieldFromApi = parseBinaryShieldFromResponse(payload);
+      setBinaryShield(shieldFromApi ?? createDemoBinaryShield());
+      setStep(3);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Registration failed.");
+      setGlobalError(err instanceof Error ? err.message : "Registration failed.");
     } finally {
       setIsSubmitting(false);
     }
   };
 
+  const finishRegistration = () => {
+    if (!registeredUser) return;
+    setSession({
+      user: registeredUser,
+      accessToken: `session-${registeredUser.id}`,
+      refreshToken: `refresh-${registeredUser.id}`,
+    });
+    router.replace("/");
+  };
+
   return (
-    <Card className="overflow-hidden border-white/10 bg-[linear-gradient(180deg,rgba(2,6,23,0.9),rgba(2,8,26,0.82))]">
-      <CardHeader className="space-y-4 border-white/10">
+    <Card className="overflow-hidden border-tepla-border/80 bg-tepla-bg-secondary/90 shadow-glass">
+      <CardHeader className="space-y-3 border-tepla-border/70 pb-2">
         <div className="flex items-center justify-between gap-3">
-          <Link
-            href="/login"
-            className="inline-flex items-center gap-1 text-xs text-tepla-text-muted transition-colors hover:text-white"
-          >
-            <ArrowLeft className="h-3.5 w-3.5" />
-            Back to login
-          </Link>
-          <span className="rounded-full border border-white/10 bg-white/[0.05] px-3 py-1 text-[10px] font-medium uppercase tracking-[0.18em] text-sky-300">
-            Founder-ready onboarding
+          {step < 3 ? (
+            <Link
+              href="/login"
+              className="inline-flex items-center gap-1 text-xs text-tepla-text-muted tepla-interactive hover:text-tepla-text"
+            >
+              <ArrowLeft className="h-3.5 w-3.5" />
+              Sign in
+            </Link>
+          ) : (
+            <span className="text-xs text-tepla-text-muted">Защищённый экран</span>
+          )}
+          <span className="text-xs font-medium text-tepla-text-muted">
+            Step {step} of 3
           </span>
         </div>
-
         <div>
-          <CardTitle className="text-2xl">Create your Tepla account</CardTitle>
-          <CardDescription className="mt-2 text-sm leading-6">
-            Set up a strong handle, add a recovery path, and get your team into a product
-            that already feels launch-ready.
+          <CardTitle className="text-xl">
+            {step === 3 ? "Tepla Binary Shield" : "Create account"}
+          </CardTitle>
+          <CardDescription className="mt-1.5 text-sm">
+            {step === 1
+              ? "Start with your login details."
+              : step === 2
+                ? "Add a few details to finish your profile."
+                : "Сохраните коды восстановления перед входом в приложение."}
           </CardDescription>
         </div>
-
-        <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-4">
-          <div className="flex items-start gap-3">
-            <Sparkles className="mt-0.5 h-4 w-4 shrink-0 text-sky-300" />
-            <div className="space-y-1">
-              <p className="text-sm font-medium text-white">What strong onboarding looks like</p>
-              <p className="text-xs leading-5 text-tepla-text-muted">
-                Clear identity, reliable recovery, and a handle your team can remember in one
-                pass.
-              </p>
-            </div>
-          </div>
+        <div className="flex gap-2">
+          <span
+            className={`h-1 flex-1 rounded-full tepla-interactive ${step >= 1 ? "bg-tepla-accent" : "bg-tepla-bg-tertiary"}`}
+          />
+          <span
+            className={`h-1 flex-1 rounded-full tepla-interactive ${step >= 2 ? "bg-tepla-accent" : "bg-tepla-bg-tertiary"}`}
+          />
+          <span
+            className={`h-1 flex-1 rounded-full tepla-interactive ${step >= 3 ? "bg-tepla-accent" : "bg-tepla-bg-tertiary"}`}
+          />
         </div>
       </CardHeader>
 
-      <CardContent className="space-y-4">
-        <form onSubmit={handleRegister} className="space-y-3">
-          <div className="space-y-1.5">
-            <label className="text-xs font-medium text-tepla-text-secondary">
-              Username
-            </label>
-            <Input
-              value={username}
-              onChange={(event) => setUsername(event.target.value)}
-              placeholder="@handle"
-              required
+      <CardContent>
+        <AnimatePresence mode="wait">
+          {step === 3 && binaryShield ? (
+            <BinaryShieldStep
+              key="step-3"
+              shield={binaryShield}
+              onContinue={finishRegistration}
             />
-            <p className="text-[11px] text-tepla-text-muted">
-              Public handle: @{normalizedUsername || suggestedHandle}
-            </p>
-          </div>
+          ) : step === 1 ? (
+            <motion.div key="step-1" {...pageTransition} className="space-y-4">
+              <div className="space-y-1.5">
+                <label htmlFor="email" className="text-xs font-medium text-tepla-text-secondary">
+                  Email
+                </label>
+                <Input
+                  id="email"
+                  type="email"
+                  autoComplete="email"
+                  value={email}
+                  onChange={(event) => setEmail(event.target.value)}
+                  placeholder="you@example.com"
+                />
+                {errors.email ? (
+                  <p className="text-xs text-tepla-danger">{errors.email}</p>
+                ) : null}
+              </div>
 
-          <div className="space-y-1.5">
-            <label className="text-xs font-medium text-tepla-text-secondary">
-              Display name
-            </label>
-            <Input
-              value={displayName}
-              onChange={(event) => setDisplayName(event.target.value)}
-              placeholder="How should your team see you?"
-            />
-          </div>
+              <div className="space-y-1.5">
+                <label
+                  htmlFor="password"
+                  className="text-xs font-medium text-tepla-text-secondary"
+                >
+                  Password
+                </label>
+                <Input
+                  id="password"
+                  type={showPassword ? "text" : "password"}
+                  autoComplete="new-password"
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                  placeholder="••••••••"
+                  rightIcon={
+                    showPassword ? (
+                      <EyeOff className="h-4 w-4" />
+                    ) : (
+                      <Eye className="h-4 w-4" />
+                    )
+                  }
+                  onRightIconClick={() => setShowPassword((value) => !value)}
+                />
+                {errors.password ? (
+                  <p className="text-xs text-tepla-danger">{errors.password}</p>
+                ) : null}
+              </div>
 
-          <div className="space-y-1.5">
-            <label className="text-xs font-medium text-tepla-text-secondary">
-              Interface language
-            </label>
-            <Select value={language} onChange={(event) => setLanguage(event.target.value)}>
-              {SUPPORTED_LANGUAGES.map((item) => (
-                <option key={item.code} value={item.code}>
-                  {item.label}
-                </option>
-              ))}
-            </Select>
-          </div>
-
-          <div className="space-y-1.5">
-            <label className="text-xs font-medium text-tepla-text-secondary">
-              Birth date
-            </label>
-            <Input
-              type="date"
-              value={birthDate}
-              onChange={(event) => setBirthDate(event.target.value)}
-            />
-          </div>
-
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div className="space-y-1.5">
-              <label className="text-xs font-medium text-tepla-text-secondary">
-                Phone number
-              </label>
-              <Input
-                type="tel"
-                value={phone}
-                onChange={(event) => setPhone(event.target.value)}
-                placeholder="+1 555 000 0000"
-              />
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="text-xs font-medium text-tepla-text-secondary">
-                Email
-              </label>
-              <Input
-                type="email"
-                value={email}
-                onChange={(event) => setEmail(event.target.value)}
-                placeholder="you@tepla.app"
-              />
-            </div>
-          </div>
-
-          {error ? <p className="text-xs text-tepla-danger">{error}</p> : null}
-
-          <Button
-            type="submit"
-            disabled={isSubmitting || !hasContact || !usernameValid}
-            className="w-full"
-          >
-            Create account
-          </Button>
-        </form>
-
-        <div className="rounded-[28px] border border-white/10 bg-white/[0.03] p-4">
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <p className="text-[11px] uppercase tracking-[0.18em] text-tepla-text-muted">
-                Profile preview
-              </p>
-              <p className="mt-2 text-lg font-semibold text-white">
-                {normalizedDisplayName || "Your Name"}
-              </p>
-              <p className="text-sm text-slate-300">@{normalizedUsername || suggestedHandle}</p>
-              <p className="mt-1 text-xs text-tepla-text-muted">
-                Language: {SUPPORTED_LANGUAGES.find((item) => item.code === language)?.label}
-              </p>
-              {birthDate ? (
-                <p className="mt-1 text-xs text-tepla-text-muted">
-                  Birth date: {birthDate}
+              <div className="space-y-1.5">
+                <label
+                  htmlFor="username"
+                  className="text-xs font-medium text-tepla-text-secondary"
+                >
+                  Username
+                </label>
+                <Input
+                  id="username"
+                  value={username}
+                  onChange={(event) => setUsername(event.target.value)}
+                  placeholder="your_handle"
+                />
+                <p className="text-[11px] text-tepla-text-muted">
+                  @{normalizedUsername || "your_handle"}
                 </p>
-              ) : null}
-            </div>
-            <span className="inline-flex items-center gap-1 rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[10px] font-medium uppercase tracking-[0.12em] text-sky-300">
-              <BadgeCheck className="h-3.5 w-3.5" />
-              Premium-ready
-            </span>
-          </div>
-          <p className="mt-3 text-xs leading-5 text-tepla-text-muted">
-            Clean handles make mentions, search, and contact sharing feel much more polished.
-          </p>
-        </div>
+                {errors.username ? (
+                  <p className="text-xs text-tepla-danger">{errors.username}</p>
+                ) : null}
+              </div>
 
-        <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-tepla-text-muted">
-          <Link href="/login" className="transition-colors hover:text-white">
-            Already have an account?
-          </Link>
-          <Link href="/qr" className="transition-colors hover:text-white">
-            Pair by QR instead
-          </Link>
-        </div>
+              <Button type="button" className="w-full gap-2" onClick={goToStep2}>
+                Next
+                <ArrowRight className="h-4 w-4" />
+              </Button>
+            </motion.div>
+          ) : step === 2 ? (
+            <motion.form
+              key="step-2"
+              {...pageTransition}
+              onSubmit={(event) => {
+                void handleRegister(event);
+              }}
+              className="space-y-4"
+            >
+              <div className="flex flex-col items-center gap-3 py-2">
+                <button
+                  type="button"
+                  onClick={() => avatarInputRef.current?.click()}
+                  className="group relative h-24 w-24 overflow-hidden rounded-full border-2 border-tepla-border bg-tepla-bg-tertiary tepla-interactive hover:border-tepla-accent"
+                >
+                  {avatarPreview ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={avatarPreview}
+                      alt="Avatar preview"
+                      className="h-full w-full object-cover"
+                    />
+                  ) : (
+                    <span className="flex h-full w-full items-center justify-center text-tepla-text-muted">
+                      <User className="h-10 w-10" />
+                    </span>
+                  )}
+                </button>
+                <input
+                  ref={avatarInputRef}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={handleAvatarPick}
+                />
+                <Button
+                  type="button"
+                  variant="subtle"
+                  size="sm"
+                  onClick={() => avatarInputRef.current?.click()}
+                >
+                  Upload avatar
+                </Button>
+                {errors.avatar ? (
+                  <p className="text-xs text-tepla-danger">{errors.avatar}</p>
+                ) : null}
+              </div>
+
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <label htmlFor="bio" className="text-xs font-medium text-tepla-text-secondary">
+                    Bio
+                  </label>
+                  <span className="text-[11px] text-tepla-text-muted">
+                    {bio.length}/{BIO_MAX}
+                  </span>
+                </div>
+                <Textarea
+                  id="bio"
+                  value={bio}
+                  maxLength={BIO_MAX}
+                  onChange={(event) => setBio(event.target.value)}
+                  placeholder="A short intro about you"
+                  rows={3}
+                />
+                {errors.bio ? (
+                  <p className="text-xs text-tepla-danger">{errors.bio}</p>
+                ) : null}
+              </div>
+
+              <div className="space-y-1.5">
+                <label
+                  htmlFor="birthDate"
+                  className="text-xs font-medium text-tepla-text-secondary"
+                >
+                  Date of birth
+                </label>
+                <Input
+                  id="birthDate"
+                  type="date"
+                  value={birthDate}
+                  onChange={(event) => setBirthDate(event.target.value)}
+                />
+              </div>
+
+              {globalError ? (
+                <p className="text-xs text-tepla-danger">{globalError}</p>
+              ) : null}
+
+              <div className="flex gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="flex-1"
+                  disabled={isSubmitting}
+                  onClick={() => setStep(1)}
+                >
+                  <ArrowLeft className="h-4 w-4" />
+                  Back
+                </Button>
+                <Button type="submit" className="flex-[1.4]" disabled={isSubmitting}>
+                  {isSubmitting ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    "Create Account"
+                  )}
+                </Button>
+              </div>
+            </motion.form>
+          ) : null}
+        </AnimatePresence>
       </CardContent>
     </Card>
   );

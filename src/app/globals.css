@@ -3,13 +3,15 @@
 @tailwind utilities;
 
 :root {
+  --tepla-transition: 200ms ease;
+  --tepla-chat-background: #0f1117;
   --tepla-bg: #f5f5f5;
   --tepla-bg-secondary: #ffffff;
   --tepla-bg-tertiary: #e5e7eb;
   --tepla-surface: rgba(0, 0, 0, 0.04);
   --tepla-surface-hover: rgba(0, 0, 0, 0.08);
-  --tepla-accent: #6c63ff;
-  --tepla-accent-hover: #8b83ff;
+  --tepla-accent: #7b61ff;
+  --tepla-accent-hover: #9580ff;
   --tepla-text: #1a1a1a;
   --tepla-text-secondary: rgba(0, 0, 0, 0.7);
   --tepla-text-muted: rgba(0, 0, 0, 0.45);
@@ -21,13 +23,14 @@
 }
 
 :root[class~="dark"] {
+  --tepla-chat-background: #0f1117;
   --tepla-bg: #0f1117;
   --tepla-bg-secondary: #1a1d27;
   --tepla-bg-tertiary: #252836;
   --tepla-surface: rgba(255, 255, 255, 0.04);
   --tepla-surface-hover: rgba(255, 255, 255, 0.08);
-  --tepla-accent: #6c63ff;
-  --tepla-accent-hover: #8b83ff;
+  --tepla-accent: #7b61ff;
+  --tepla-accent-hover: #9580ff;
   --tepla-text: #ffffff;
   --tepla-text-secondary: rgba(255, 255, 255, 0.7);
   --tepla-text-muted: rgba(255, 255, 255, 0.45);
@@ -107,5 +110,39 @@ body {
   .tepla-scrollbar::-webkit-scrollbar-thumb {
     background-color: rgba(148, 163, 184, 0.7);
     border-radius: 999px;
+  }
+
+  .tepla-interactive {
+    transition:
+      background-color var(--tepla-transition),
+      border-color var(--tepla-transition),
+      color var(--tepla-transition),
+      opacity var(--tepla-transition),
+      transform var(--tepla-transition),
+      box-shadow var(--tepla-transition);
+  }
+
+  .tepla-field {
+    @apply flex h-10 w-full rounded-xl border border-tepla-border/80 bg-tepla-bg-tertiary/80 px-3 text-sm text-tepla-text placeholder:text-tepla-text-muted outline-none tepla-interactive;
+  }
+
+  .tepla-field:focus-visible {
+    border-color: var(--tepla-accent);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--tepla-accent) 35%, transparent);
+  }
+
+  .tepla-shield-protected {
+    -webkit-user-select: none;
+    user-select: none;
+  }
+
+  .tepla-shield-sensitive {
+    -webkit-touch-callout: none;
+  }
+
+  @media print {
+    .tepla-shield-protected {
+      visibility: hidden !important;
+    }
   }
 }
