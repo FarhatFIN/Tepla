@@ -5,11 +5,10 @@ export interface InputProps
   extends React.InputHTMLAttributes<HTMLInputElement> {
   leftIcon?: React.ReactNode;
   rightIcon?: React.ReactNode;
-  onRightIconClick?: () => void;
 }
 
 export const Input = React.forwardRef<HTMLInputElement, InputProps>(
-  ({ className, type, leftIcon, rightIcon, onRightIconClick, ...props }, ref) => {
+  ({ className, type, leftIcon, rightIcon, ...props }, ref) => {
     return (
       <div className="relative flex items-center">
         {leftIcon ? (
@@ -21,7 +20,7 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(
           ref={ref}
           type={type}
           className={cn(
-            "tepla-field h-10 shadow-sm",
+            "flex h-9 w-full rounded-full border border-tepla-border/80 bg-black/40 px-3 text-sm text-tepla-text placeholder:text-tepla-text-muted shadow-sm outline-none transition-colors focus-visible:border-tepla-accent focus-visible:ring-2 focus-visible:ring-tepla-accent/60 focus-visible:ring-offset-0",
             leftIcon && "pl-9",
             rightIcon && "pr-9",
             className,
@@ -32,8 +31,7 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(
           <button
             type="button"
             tabIndex={-1}
-            onClick={onRightIconClick}
-            className="absolute inset-y-0 right-2 flex items-center justify-center rounded-lg bg-transparent px-1 text-tepla-text-muted hover:text-tepla-text tepla-interactive"
+            className="absolute inset-y-0 right-2 flex items-center justify-center rounded-full bg-transparent px-1 text-tepla-text-muted hover:text-tepla-text"
           >
             {rightIcon}
           </button>

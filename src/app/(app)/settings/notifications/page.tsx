@@ -1,81 +1,63 @@
 "use client";
 
-import { MessageSquare, Users, Volume2 } from "lucide-react";
-import { Card, CardContent } from "@/components/ui/card";
-import { Switch } from "@/components/ui/switch";
-import { SettingsSubpageShell } from "@/components/settings/SettingsSubpageShell";
-import { useUIStore } from "@/stores/ui.store";
-
-function NotificationRow({
-  icon: Icon,
-  label,
-  description,
-  checked,
-  onCheckedChange,
-}: {
-  icon: typeof MessageSquare;
-  label: string;
-  description: string;
-  checked: boolean;
-  onCheckedChange: (value: boolean) => void;
-}) {
-  return (
-    <div className="flex items-center justify-between gap-4 py-1">
-      <div className="flex min-w-0 items-center gap-3">
-        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-tepla-accent/15 text-tepla-accent">
-          <Icon className="h-4 w-4" />
-        </span>
-        <div>
-          <p className="text-sm font-medium text-tepla-text">{label}</p>
-          <p className="text-xs text-tepla-text-muted">{description}</p>
-        </div>
-      </div>
-      <Switch checked={checked} onCheckedChange={onCheckedChange} />
-    </div>
-  );
-}
+import { motion } from "framer-motion";
+import { Bell, BellOff, Volume2 } from "lucide-react";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { useNotifications } from "@/hooks/useNotifications";
 
 export default function NotificationsSettingsPage() {
-  const notifyMessages = useUIStore((s) => s.notifyMessages);
-  const notifyGroups = useUIStore((s) => s.notifyGroups);
-  const notifySound = useUIStore((s) => s.notifySound);
-  const setNotifyMessages = useUIStore((s) => s.setNotifyMessages);
-  const setNotifyGroups = useUIStore((s) => s.setNotifyGroups);
-  const setNotifySound = useUIStore((s) => s.setNotifySound);
+  const { permission, isSubscribed, enableNotifications } = useNotifications();
 
   return (
-    <SettingsSubpageShell title="Notifications">
+    <motion.div
+      initial={{ opacity: 0, x: 8 }}
+      animate={{ opacity: 1, x: 0 }}
+      className="mx-auto max-w-lg p-4"
+    >
       <Card>
-        <CardContent className="divide-y divide-tepla-border/60 space-y-0 pt-2">
-          <div className="py-3">
-            <NotificationRow
-              icon={MessageSquare}
-              label="Message notifications"
-              description="Alerts for new direct messages"
-              checked={notifyMessages}
-              onCheckedChange={setNotifyMessages}
-            />
+        <CardHeader>
+          <CardTitle>Notifications</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-5 text-sm">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              {permission === "granted" ? (
+                <Bell className="h-4 w-4 text-tepla-accent" />
+              ) : (
+                <BellOff className="h-4 w-4 text-tepla-text-muted" />
+              )}
+              <div>
+                <p className="font-medium text-tepla-text">Push notifications</p>
+                <p className="text-xs text-tepla-text-muted">
+                  {permission === "granted"
+                    ? isSubscribed
+                      ? "Enabled and subscribed"
+                      : "Permission granted, subscribing..."
+                    : permission === "denied"
+                      ? "Blocked by browser. Enable in site settings."
+                      : "Not enabled yet"}
+                </p>
+              </div>
+            </div>
+            {permission === "default" ? (
+              <Button size="sm" onClick={enableNotifications}>
+                Enable
+              </Button>
+            ) : null}
           </div>
-          <div className="py-3">
-            <NotificationRow
-              icon={Users}
-              label="Group notifications"
-              description="Alerts for group activity"
-              checked={notifyGroups}
-              onCheckedChange={setNotifyGroups}
-            />
-          </div>
-          <div className="py-3">
-            <NotificationRow
-              icon={Volume2}
-              label="Sound"
-              description="Play sound for new messages"
-              checked={notifySound}
-              onCheckedChange={setNotifySound}
-            />
+
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <Volume2 className="h-4 w-4 text-tepla-text-muted" />
+              <div>
+                <p className="font-medium text-tepla-text">Sound</p>
+                <p className="text-xs text-tepla-text-muted">Default</p>
+              </div>
+            </div>
           </div>
         </CardContent>
       </Card>
-    </SettingsSubpageShell>
+    </motion.div>
   );
 }
