@@ -11,26 +11,39 @@ function verifyJwtAccessToken(token: string): { userId: string } | null {
   const secret = process.env.JWT_SECRET;
   if (!secret) return null;
 
-  const parts = token.split('.');
-  if (parts.length !== 3) return null;
+  try {
+    const parts = token.split('.');
+    if (parts.length !== 3) return null;
 
-  const [header, payload, signature] = parts;
-  const expected = crypto
-    .createHmac('sha256', secret)
-    .update(`${header}.${payload}`)
-    .digest('base64url');
+    const [header, payload, signature] = parts;
+    
+    // Verify signature using HMAC-SHA256
+    const expected = crypto
+      .createHmac('sha256', secret)
+      .update(`${header}.${payload}`)
+      .digest('base64url');
 
-  const actualBuffer = Buffer.from(signature);
-  const expectedBuffer = Buffer.from(expected);
-  if (actualBuffer.length !== expectedBuffer.length || !crypto.timingSafeEqual(actualBuffer, expectedBuffer)) {
+    const actualBuffer = Buffer.from(signature, 'base64url');
+    const expectedBuffer = Buffer.from(expected, 'base64url');
+    
+    if (actualBuffer.length !== expectedBuffer.length || !crypto.timingSafeEqual(actualBuffer, expectedBuffer)) {
+      return null;
+    }
+
+    // Decode and validate payload
+    const decoded = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')) as { sub?: string; userId?: string; exp?: number; iat?: number };
+    
+    // Support both 'sub' (standard) and 'userId' (custom) claims
+    const userId = decoded.sub || decoded.userId;
+    if (!userId) return null;
+    
+    // Check expiration if present
+    if (decoded.exp && decoded.exp * 1000 <= Date.now()) return null;
+
+    return { userId };
+  } catch {
     return null;
   }
-
-  const decoded = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')) as { sub?: string; exp?: number };
-  if (!decoded.sub) return null;
-  if (decoded.exp && decoded.exp * 1000 <= Date.now()) return null;
-
-  return { userId: decoded.sub };
 }
 
 /**
@@ -50,16 +63,20 @@ export function socketSecurity(redis: Redis) {
         throw new Error('Authentication token required');
       }
 
-      // 2. Validate session
-      const session = await sessionManager.validate(token);
-      const jwtSession = session ? null : verifyJwtAccessToken(token);
+      // 2. Validate session or JWT token
+      let session = await sessionManager.validate(token);
+      let jwtSession: { userId: string } | null = null;
+      
+      // If session not found, try JWT verification
       if (!session) {
+        jwtSession = verifyJwtAccessToken(token);
         if (!jwtSession) {
           await AuditLogger.log('ws_auth_failed', {
             ip: socket.handshake.address,
-            reason: 'invalid_session',
+            reason: 'invalid_token',
+            tokenType: 'unknown',
           });
-          throw new Error('Invalid or expired session');
+          throw new Error('Invalid or expired authentication token');
         }
       }
 
@@ -102,10 +119,12 @@ export function socketSecurity(redis: Redis) {
       (socket as any).userId = userId;
       (socket as any).sessionToken = token;
       (socket as any).deviceFingerprint = fingerprint;
+      (socket as any).tokenType = session ? 'session' : 'jwt';
 
       await AuditLogger.log('ws_connected', {
         userId,
         socketId: socket.id,
+        tokenType: session ? 'session' : 'jwt',
       });
 
       next();
