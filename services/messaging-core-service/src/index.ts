@@ -1,7 +1,7 @@
 import { Router, type Request, type Response, type NextFunction } from 'express';
 import { Pool } from 'pg';
 import { v4 as uuid } from 'uuid';
-import { BaseService, KafkaProducer, UnauthorizedError, ValidationError } from '@tepla/common';
+import { BaseService, KafkaProducer, ForbiddenError, UnauthorizedError, ValidationError } from '@tepla/common';
 import { EventTopic, EventType, UserId } from '@tepla/types';
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
@@ -41,7 +41,7 @@ async function requireMember(chatId: string, userId: string): Promise<void> {
     'SELECT 1 FROM chat_members WHERE chat_id = $1 AND user_id = $2',
     [chatId, userId],
   );
-  if (!member.rows[0]) throw new UnauthorizedError('Chat access denied');
+  if (!member.rows[0]) throw new ForbiddenError('Not a member');
 }
 
 async function requireAdmin(chatId: string, userId: string): Promise<void> {
@@ -49,7 +49,7 @@ async function requireAdmin(chatId: string, userId: string): Promise<void> {
     "SELECT 1 FROM chat_members WHERE chat_id = $1 AND user_id = $2 AND role IN ('owner', 'admin')",
     [chatId, userId],
   );
-  if (!member.rows[0]) throw new UnauthorizedError('Admin access required');
+  if (!member.rows[0]) throw new ForbiddenError('Admin access required');
 }
 
 async function refreshMembersCount(chatId: string): Promise<void> {
@@ -143,14 +143,15 @@ function router(kafka: KafkaProducer): Router {
   r.post('/chats', async (req: Request, res: Response, next: NextFunction) => {
     try {
       const userId = userIdFrom(req);
-      const { type, targetUserId, name, description, avatarUrl } = req.body;
+      const { type, targetUserId, name, description, avatarUrl } = req.body || {};
+      const chatType = type || (targetUserId ? 'direct' : undefined);
 
-      if (!type || !['direct', 'group', 'channel'].includes(type)) {
+      if (!chatType || !['direct', 'group', 'channel'].includes(chatType)) {
         throw new ValidationError('type must be "direct", "group", or "channel"');
       }
 
       // Handle direct chat creation
-      if (type === 'direct') {
+      if (chatType === 'direct') {
         if (!targetUserId) throw new ValidationError('targetUserId is required for direct chats');
         if (targetUserId === userId) throw new ValidationError('Cannot create direct chat with yourself');
 
@@ -189,7 +190,7 @@ function router(kafka: KafkaProducer): Router {
       }
 
       // Handle group creation
-      if (type === 'group') {
+      if (chatType === 'group') {
         if (!name || String(name).trim().length < 2) throw new ValidationError('Group name is required');
 
         const chat = await pool.query(
@@ -208,7 +209,7 @@ function router(kafka: KafkaProducer): Router {
       }
 
       // Handle channel creation
-      if (type === 'channel') {
+      if (chatType === 'channel') {
         if (!name || String(name).trim().length < 2) throw new ValidationError('Channel name is required');
 
         const chat = await pool.query(

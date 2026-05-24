@@ -118,6 +118,37 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
     await authSchemaInit;
   }
 
+  async function getOrCreateSavedMessages(userId: string): Promise<any> {
+    const existing = await db.queryRow(
+      `SELECT c.*
+       FROM chats c
+       LEFT JOIN chat_members cm ON cm.chat_id = c.id
+       WHERE c.type = 'saved'
+         AND (c.created_by = $1 OR (cm.user_id = $1 AND cm.role = 'owner'))
+       ORDER BY c.created_at ASC
+       LIMIT 1`,
+      [userId]
+    );
+    if (existing) return existing;
+
+    const chat = await db.queryRow(
+      `INSERT INTO chats (id, type, name, created_by, members_count)
+       VALUES ($1, 'saved', 'Saved Messages', $2, 1)
+       RETURNING *`,
+      [uuid(), userId]
+    );
+    if (!chat) throw new Error('Failed to create Saved Messages chat');
+
+    await db.query(
+      `INSERT INTO chat_members (chat_id, user_id, role)
+       VALUES ($1, $2, 'owner')
+       ON CONFLICT DO NOTHING`,
+      [chat.id, userId]
+    );
+
+    return chat;
+  }
+
   function generateBinaryPattern(length = 16): string {
     let out = '';
     for (let i = 0; i < length; i += 1) {
@@ -266,6 +297,7 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
     });
 
     await redis.set(`session:${tokens.refreshToken}`, user.id, 30 * 24 * 3600);
+    await getOrCreateSavedMessages(user.id);
     await userRepo.updateLastSeen(user.id);
     await deviceSecurity.registerDevice(user.id, deviceFingerprint, {
       userAgent: req.headers['user-agent'] || 'unknown',
@@ -434,6 +466,7 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
 
       // Also store refresh token mapping
       await redis.set(`session:${tokens.refreshToken}`, user.id, 30 * 24 * 3600);
+      await getOrCreateSavedMessages(user.id);
       await userRepo.updateLastSeen(user.id);
 
       // Register device
@@ -539,6 +572,7 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
       });
 
       await redis.set(`session:${tokens.refreshToken}`, user.id, 30 * 24 * 3600);
+      await getOrCreateSavedMessages(user.id);
 
       // Register first device as trusted
       await deviceSecurity.registerDevice(user.id, deviceFingerprint, {
@@ -726,6 +760,7 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
       });
 
       await redis.set(`session:${tokens.refreshToken}`, user.id, 30 * 24 * 3600);
+      await getOrCreateSavedMessages(user.id);
       await userRepo.updateLastSeen(user.id);
       await deviceSecurity.registerDevice(user.id, deviceFingerprint, {
         userAgent: req.headers['user-agent'] || 'unknown',
@@ -893,6 +928,7 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
       });
 
       await redis.set(`session:${tokens.refreshToken}`, user.id, 30 * 24 * 3600);
+      await getOrCreateSavedMessages(user.id);
       await deviceSecurity.registerDevice(user.id, deviceFingerprint, {
         userAgent: req.headers['user-agent'] || 'unknown',
         ip: req.ip || 'unknown',
@@ -913,27 +949,42 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
   // POST /api/auth/refresh вЂ” refresh tokens
   router.post('/refresh', async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const { refreshToken } = req.body;
-      if (!refreshToken) throw new ValidationError('Refresh token required');
+      const { refreshToken } = req.body || {};
+      const token = refreshToken || req.cookies?.refreshToken;
+      if (!token) throw new ValidationError('Refresh token required');
 
-      const userId = await redis.get(`session:${refreshToken}`);
+      const userId = await redis.get(`session:${token}`);
       if (!userId) throw new UnauthorizedError('Invalid or expired refresh token');
 
       const user = await userRepo.findById(userId);
       if (!user) throw new UnauthorizedError('User not found');
 
       // Rotate tokens
-      await redis.del(`session:${refreshToken}`);
+      await redis.del(`session:${token}`);
       const tokens = tokenService.generateTokens({
         sub: user.id as UserId,
         username: user.username,
       });
       await redis.set(`session:${tokens.refreshToken}`, user.id, 30 * 24 * 3600);
+      await getOrCreateSavedMessages(user.id);
 
       await AuditLogger.log('token_refreshed', { userId: user.id, ip: req.ip });
 
       setAuthCookies(res, tokens);
       res.json({ success: true, data: { tokens, token: tokens.accessToken, accessToken: tokens.accessToken } });
+    } catch (err) { next(err); }
+  });
+
+  router.get('/me', authMiddleware(), async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const userId = req.user?.sub;
+      if (!userId) throw new UnauthorizedError('No user in request');
+
+      const user = await userRepo.findById(userId);
+      if (!user) throw new UnauthorizedError('User not found');
+
+      const savedMessages = await getOrCreateSavedMessages(user.id);
+      res.json({ success: true, data: { user: mapUser(user), savedMessages } });
     } catch (err) { next(err); }
   });
 
@@ -1665,4 +1716,3 @@ function mapUser(row: any) {
     createdAt: row.created_at,
   };
 }
-

@@ -34,8 +34,8 @@ interface AuthState {
   language: string;
   savedAccounts: SavedAccount[];
   otpPending: OtpPending | null;
-  login: (email: string, password: string) => Promise<{ ok: boolean; needsOtp?: boolean; needsVerification?: boolean; requiresBinaryShield?: boolean; binaryChallenge?: BinaryChallenge; email?: string; binaryShield?: BinaryShieldIssue }>;
-  register: (name: string, email: string, password: string, language: string, username: string, profile?: { birthDate?: string; bio?: string; avatarUrl?: string }) => Promise<{ ok: boolean; needsOtp?: boolean; email?: string; binaryShield?: BinaryShieldIssue }>;
+  login: (email: string, password: string, shieldCode?: string) => Promise<{ ok: boolean; needsOtp?: boolean; needsVerification?: boolean; requiresBinaryShield?: boolean; binaryChallenge?: BinaryChallenge; email?: string; binaryShield?: BinaryShieldIssue }>;
+  register: (name: string, email: string, password: string, language: string, username: string, profile?: { birthDate?: string; bio?: string; avatarUrl?: string; shieldCode?: string }) => Promise<{ ok: boolean; needsOtp?: boolean; email?: string; binaryShield?: BinaryShieldIssue }>;
   verifyBinaryShield: (challengeId: string, code: string) => Promise<{ ok: boolean; binaryShield?: BinaryShieldIssue }>;
   verifyOtp: (email: string, code: string, type: 'login' | 'register' | 'verify') => Promise<boolean>;
   resendCode: (email: string) => Promise<boolean>;
@@ -48,6 +48,9 @@ interface AuthState {
   setAvatar: (avatarDataUrl: string) => void;
   setBio: (bio: string) => void;
   setBirthDate: (birthDate: string) => void;
+  reset: () => void;
+  loginWithToken: (token: string) => Promise<void>;
+  fullAuthReset: (newToken?: string) => Promise<void>;
   hydrate: () => void;
 }
 
@@ -79,6 +82,33 @@ function removeAccountFromList(userId: string) {
   localStorage.setItem("tepla-accounts", JSON.stringify(accounts));
 }
 
+function clearLocalRuntimeState() {
+  const keep = localStorage.getItem("tepla-accounts");
+  const keys = Array.from({ length: localStorage.length }, (_, index) => localStorage.key(index)).filter(Boolean) as string[];
+  for (const key of keys) {
+    if (key === "tepla-accounts") continue;
+    if (key === "tepla-auth" || key.startsWith("tepla-draft:") || key.startsWith("tepla-chat:")) {
+      localStorage.removeItem(key);
+    }
+  }
+  if (keep) localStorage.setItem("tepla-accounts", keep);
+}
+
+function mapAuthUser(raw: any, fallbackName = "User"): User {
+  return {
+    id: raw.id,
+    name: raw.displayName || raw.display_name || raw.username || fallbackName,
+    username: raw.username,
+    avatar: raw.avatarUrl || raw.avatar_url,
+    bio: raw.bio,
+    birthDate: raw.birthDate || raw.birth_date,
+    phone: raw.phone,
+    status: "online",
+    language: raw.language || "en",
+    isVerified: raw.isVerified ?? raw.is_verified,
+  };
+}
+
 export const useAuthStore = create<AuthState>((set, get) => ({
   user: null,
   token: null,
@@ -86,6 +116,42 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   language: "en",
   savedAccounts: [],
   otpPending: null,
+
+  reset: () => {
+    api.setToken(null);
+    disconnectSocket();
+    set({ user: null, token: null, isLoading: false, otpPending: null, savedAccounts: getSavedAccounts() });
+  },
+
+  loginWithToken: async (newToken) => {
+    api.setToken(newToken);
+    const me = await api.get<{ success: boolean; data: { user: any } }>("/auth/me");
+    const user = mapAuthUser(me.data.user);
+    const language = user.language || get().language || "en";
+    persist(user, newToken, language);
+    saveAccountToList(user, newToken, language);
+    set({ user, token: newToken, language, isLoading: false, savedAccounts: getSavedAccounts() });
+    const { useChatStore } = await import("@/stores/chat-store");
+    await useChatStore.getState().loadChats();
+    connectSocket(newToken);
+    useChatStore.getState().bindSocket();
+  },
+
+  fullAuthReset: async (newToken) => {
+    disconnectSocket();
+    api.setToken(null);
+    try {
+      clearLocalRuntimeState();
+    } catch { /* ignore */ }
+    const { useChatStore } = await import("@/stores/chat-store");
+    useChatStore.getState().reset();
+    set({ user: null, token: null, otpPending: null, savedAccounts: [] });
+    if (newToken) {
+      await get().loginWithToken(newToken);
+    } else {
+      set({ isLoading: false });
+    }
+  },
 
   hydrate: () => {
     const accounts = getSavedAccounts();
@@ -106,10 +172,10 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   setOtpPending: (pending) => set({ otpPending: pending }),
 
-  login: async (email, password) => {
+  login: async (email, password, shieldCode) => {
     set({ isLoading: true });
     try {
-      const res = await api.post<{ success: boolean; data: any }>("/auth/login", { email, password });
+      const res = await api.post<{ success: boolean; data: any }>("/auth/login", { email, password, shield_code: shieldCode });
       const data = res.data;
 
       if (data.requiresBinaryShield && data.binaryChallenge) {
@@ -126,23 +192,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
       // Shouldn't happen with new flow, but handle direct token response for backwards compat
       if (data.tokens) {
-        const { tokens: { accessToken }, user: raw } = data;
-        const user: User = {
-          id: raw.id,
-          name: raw.displayName || raw.username || email.split("@")[0],
-          username: raw.username,
-          avatar: raw.avatarUrl,
-          bio: raw.bio,
-          birthDate: raw.birthDate,
-          phone: raw.phone,
-          status: "online",
-            language: raw.language || get().language,
-        };
-        api.setToken(accessToken);
-        connectSocket(accessToken);
-        persist(user, accessToken, user.language || get().language);
-        saveAccountToList(user, accessToken, user.language || get().language);
-        set({ user, token: accessToken, isLoading: false, savedAccounts: getSavedAccounts() });
+        const { tokens: { accessToken } } = data;
+        await get().fullAuthReset(accessToken);
         return { ok: true, binaryShield: data.binaryShield };
       }
 
@@ -160,7 +211,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     try {
       const res = await api.post<{ success: boolean; data: any }>(
         "/auth/register/email",
-        { email, password, username, displayName: name, language, dateOfBirth: profile?.birthDate, description: profile?.bio, avatarUrl: profile?.avatarUrl }
+        { email, password, username, displayName: name, language, dateOfBirth: profile?.birthDate, description: profile?.bio, avatarUrl: profile?.avatarUrl, shield_code: profile?.shieldCode }
       );
       const data = res.data;
 
@@ -172,23 +223,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
       // Backwards compat: direct token
       if (data.tokens) {
-        const { tokens: { accessToken }, user: raw } = data;
-        const user: User = {
-          id: raw.id,
-          name: raw.displayName || name,
-          username: raw.username || username,
-          avatar: raw.avatarUrl,
-          bio: raw.bio,
-          birthDate: raw.birthDate,
-          status: "online",
-          language: raw.language || language,
-          phone: raw.phone,
-        };
-        api.setToken(accessToken);
-        connectSocket(accessToken);
-        persist(user, accessToken, language);
-        saveAccountToList(user, accessToken, language);
-        set({ user, token: accessToken, isLoading: false, language, savedAccounts: getSavedAccounts() });
+        const { tokens: { accessToken } } = data;
+        await get().fullAuthReset(accessToken);
         return { ok: true, binaryShield: data.binaryShield };
       }
 
@@ -205,23 +241,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     set({ isLoading: true });
     try {
       const res = await api.post<{ success: boolean; data: any }>("/auth/login/binary-verify", { challengeId, code });
-      const { tokens: { accessToken }, user: raw, binaryShield } = res.data;
-      const user: User = {
-        id: raw.id,
-        name: raw.displayName || raw.username,
-        username: raw.username,
-        avatar: raw.avatarUrl,
-        bio: raw.bio,
-        birthDate: raw.birthDate,
-        phone: raw.phone,
-        status: "online",
-        language: raw.language || get().language,
-      };
-      api.setToken(accessToken);
-      connectSocket(accessToken);
-      persist(user, accessToken, user.language || get().language);
-      saveAccountToList(user, accessToken, user.language || get().language);
-      set({ user, token: accessToken, isLoading: false, savedAccounts: getSavedAccounts() });
+      const { tokens: { accessToken }, binaryShield } = res.data;
+      await get().fullAuthReset(accessToken);
       return { ok: true, binaryShield };
     } catch (err) {
       console.warn("[auth] Binary Shield verify failed:", err);
@@ -238,23 +259,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         endpoint,
         { email, code }
       );
-      const { tokens: { accessToken }, user: raw } = res.data;
-      const user: User = {
-        id: raw.id,
-        name: raw.displayName || raw.username || email.split("@")[0],
-        username: raw.username,
-        avatar: raw.avatarUrl,
-        bio: raw.bio,
-        birthDate: raw.birthDate,
-        phone: raw.phone,
-        status: "online",
-        language: raw.language || get().language,
-      };
-      api.setToken(accessToken);
-      connectSocket(accessToken);
-      persist(user, accessToken, user.language || get().language);
-      saveAccountToList(user, accessToken, user.language || get().language);
-      set({ user, token: accessToken, isLoading: false, otpPending: null, savedAccounts: getSavedAccounts() });
+      const { tokens: { accessToken } } = res.data;
+      await get().fullAuthReset(accessToken);
+      set({ otpPending: null });
       return true;
     } catch (err) {
       console.warn("[auth] OTP verify failed:", err);
@@ -274,21 +281,19 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   logout: () => {
+    const accounts = getSavedAccounts();
     api.setToken(null);
     disconnectSocket();
     localStorage.removeItem("tepla-auth");
-    set({ user: null, token: null, savedAccounts: getSavedAccounts() });
+    import("@/stores/chat-store").then(({ useChatStore }) => useChatStore.getState().reset()).catch(() => {});
+    set({ user: null, token: null, savedAccounts: accounts, otpPending: null });
   },
 
   switchAccount: (accountId) => {
     const accounts = getSavedAccounts();
     const target = accounts.find((a) => a.user.id === accountId);
     if (!target) return;
-    disconnectSocket();
-    api.setToken(target.token);
-    connectSocket(target.token);
-    persist(target.user, target.token, target.language);
-    set({ user: target.user, token: target.token, language: target.language, savedAccounts: accounts });
+    get().fullAuthReset(target.token).catch((err) => console.warn("[auth] switch account failed:", err));
   },
 
   removeSavedAccount: (accountId) => {

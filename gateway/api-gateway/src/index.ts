@@ -148,6 +148,7 @@ async function forwardAuthRequest(req: GatewayRequest, res: Response, next: Next
     const headers = new Headers();
     headers.set('Content-Type', 'application/json');
     if (req.headers.authorization) headers.set('Authorization', req.headers.authorization);
+    if (req.headers.cookie) headers.set('Cookie', req.headers.cookie);
     if (req.correlationId) headers.set('X-Correlation-Id', req.correlationId);
     if (req.deviceFingerprint) headers.set('X-Device-Fingerprint', req.deviceFingerprint);
     if (req.securityAnomaly) headers.set('X-Security-Anomaly', JSON.stringify(req.securityAnomaly));
@@ -471,4 +472,3 @@ start().catch((err: Error) => {
   logger.error('Failed to start API Gateway', { error: err.message });
   process.exit(1);
 });
-

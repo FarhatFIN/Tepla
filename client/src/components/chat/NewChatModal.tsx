@@ -7,6 +7,14 @@ import { useTranslation } from "@/hooks/useTranslation";
 
 type Tab = "contact" | "group" | "channel";
 
+interface SearchUser {
+  id: string;
+  username: string;
+  displayName?: string;
+  avatarUrl?: string;
+  isOnline?: boolean;
+}
+
 interface Props {
   open: boolean;
   onClose: () => void;
@@ -17,7 +25,8 @@ export default function NewChatModal({ open, onClose, initialTab = "contact" }: 
   const t = useTranslation();
   const [tab, setTab] = useState<Tab>(initialTab);
   const [search, setSearch] = useState("");
-  const [searchResults, setSearchResults] = useState<any[]>([]);
+  const [searchResults, setSearchResults] = useState<SearchUser[]>([]);
+  const [selectedUser, setSelectedUser] = useState<SearchUser | null>(null);
   const [searching, setSearching] = useState(false);
   const [groupName, setGroupName] = useState("");
   const [channelName, setChannelName] = useState("");
@@ -38,8 +47,17 @@ export default function NewChatModal({ open, onClose, initialTab = "contact" }: 
       console.log("[NewChatModal] searchUsers query:", search);
       const res = await api.get<{ success: boolean; data: any[] }>(`/users/search?q=${encodeURIComponent(search)}`);
       console.log("[NewChatModal] searchUsers response:", res.data);
-      setSearchResults(res.data || []);
-      if (!res.data?.length) {
+      const users = (res.data || [])
+        .map((user) => ({
+          id: String(user.id || user.userId || user.user_id || ""),
+          username: String(user.username || ""),
+          displayName: user.displayName || user.display_name,
+          avatarUrl: user.avatarUrl || user.avatar_url,
+          isOnline: Boolean(user.isOnline ?? user.is_online),
+        }))
+        .filter((user) => user.id && user.username);
+      setSearchResults(users);
+      if (!users.length) {
         console.log("[NewChatModal] no users found");
         setError(t("no_users_found"));
       }
@@ -50,18 +68,21 @@ export default function NewChatModal({ open, onClose, initialTab = "contact" }: 
     setSearching(false);
   }
 
-  async function startDirectChat(userId: string) {
+  async function startDirectChat(user: SearchUser | null = selectedUser) {
+    console.log("selectedUser", user);
+    console.log("selectedUser.id", user?.id);
+    if (!user?.id) {
+      console.error("Missing selectedUser.id", user);
+      setError(t("failed_create_chat"));
+      return;
+    }
+
     setCreating(true);
     setError("");
     try {
-      // Debug logs
-      console.log("[NewChatModal] startDirectChat userId:", userId);
-      const payload = {
-        type: "direct",
-        targetUserId: userId,
-      };
+      const payload = { targetUserId: user.id };
       console.log("[NewChatModal] payload:", payload);
-      
+
       const res = await api.post<{ success: boolean; data: any }>("/chats", payload);
       console.log("[NewChatModal] createChat response:", res);
       
@@ -123,6 +144,7 @@ export default function NewChatModal({ open, onClose, initialTab = "contact" }: 
   function reset() {
     setSearch("");
     setSearchResults([]);
+    setSelectedUser(null);
     setGroupName("");
     setChannelName("");
     setChannelUsername("");
@@ -199,23 +221,26 @@ export default function NewChatModal({ open, onClose, initialTab = "contact" }: 
             {searchResults.map((u) => (
               <button
                 key={u.id}
-                onClick={() => startDirectChat(u.id)}
+                onClick={() => {
+                  setSelectedUser(u);
+                  startDirectChat(u);
+                }}
                 disabled={creating}
                 className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-colors hover:bg-[var(--bg-hover)] disabled:opacity-50"
               >
-                {u.avatar_url ? (
-                  <img src={u.avatar_url} alt="" className="h-10 w-10 rounded-full object-cover" />
+                {u.avatarUrl ? (
+                  <img src={u.avatarUrl} alt="" className="h-10 w-10 rounded-full object-cover" />
                 ) : (
                   <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[var(--accent)] text-sm font-bold text-white">
-                    {(u.display_name || u.username || "?")[0].toUpperCase()}
+                    {(u.displayName || u.username || "?")[0].toUpperCase()}
                   </div>
                 )}
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-medium">{u.display_name || u.username}</p>
+                  <p className="truncate text-sm font-medium">{u.displayName || u.username}</p>
                   {u.username && <p className="truncate text-xs text-[var(--text-tertiary)]">@{u.username}</p>}
                 </div>
                 <div className="flex items-center gap-2">
-                  {u.is_online && <div className="h-2 w-2 rounded-full bg-emerald-400" />}
+                  {u.isOnline && <div className="h-2 w-2 rounded-full bg-emerald-400" />}
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" className="shrink-0"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
                 </div>
               </button>

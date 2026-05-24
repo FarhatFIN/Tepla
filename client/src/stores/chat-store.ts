@@ -51,6 +51,7 @@ interface ChatState {
   loadChats: () => Promise<void>;
   loadMessages: (chatId: string) => Promise<void>;
   bindSocket: () => void;
+  reset: () => void;
   getDraft: (chatId: string) => string;
   setDraft: (chatId: string, text: string) => void;
 }
@@ -173,6 +174,28 @@ export const useChatStore = create<ChatState>((set, get) => ({
   showWBIT: false,
   showThread: false,
   _socketBound: false,
+
+  reset: () => set({
+    chats: [],
+    messages: {},
+    activeChatId: null,
+    activeThreadId: null,
+    folders: [],
+    activeFolderId: null,
+    stories: [],
+    searchQuery: "",
+    replyingTo: null,
+    editingMessage: null,
+    showProfile: false,
+    showStickers: false,
+    showCalls: false,
+    callType: "voice",
+    showSettings: false,
+    showWallet: false,
+    showWBIT: false,
+    showThread: false,
+    _socketBound: false,
+  }),
 
   // ─── Load chats from API ────────────────────────
   loadChats: async () => {
