@@ -140,6 +140,94 @@ function router(kafka: KafkaProducer): Router {
     } catch (err) { next(err); }
   });
 
+  r.post('/chats', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const userId = userIdFrom(req);
+      const { type, targetUserId, name, description, avatarUrl } = req.body;
+
+      if (!type || !['direct', 'group', 'channel'].includes(type)) {
+        throw new ValidationError('type must be "direct", "group", or "channel"');
+      }
+
+      // Handle direct chat creation
+      if (type === 'direct') {
+        if (!targetUserId) throw new ValidationError('targetUserId is required for direct chats');
+        if (targetUserId === userId) throw new ValidationError('Cannot create direct chat with yourself');
+
+        const target = await pool.query('SELECT id FROM users WHERE id = $1', [targetUserId]);
+        if (!target.rows[0]) throw new ValidationError('User not found');
+
+        const existing = await pool.query(
+          `SELECT c.*
+           FROM chats c
+           JOIN chat_members a ON a.chat_id = c.id AND a.user_id = $1
+           JOIN chat_members b ON b.chat_id = c.id AND b.user_id = $2
+           WHERE c.type = 'direct'
+           LIMIT 1`,
+          [userId, targetUserId],
+        );
+        if (existing.rows[0]) {
+          return res.json({ success: true, data: existing.rows[0] });
+        }
+
+        const chat = await pool.query(
+          `INSERT INTO chats (id, type, created_by, members_count)
+           VALUES ($1, 'direct', $2, 2)
+           RETURNING *`,
+          [uuid(), userId],
+        );
+        await pool.query(
+          `INSERT INTO chat_members (chat_id, user_id, role)
+           VALUES ($1, $2, 'member'), ($1, $3, 'member')
+           ON CONFLICT DO NOTHING`,
+          [chat.rows[0].id, userId, targetUserId],
+        );
+
+        await publishMemberJoined(kafka, req, chat.rows[0].id, userId);
+        await publishMemberJoined(kafka, req, chat.rows[0].id, targetUserId);
+        return res.status(201).json({ success: true, data: chat.rows[0] });
+      }
+
+      // Handle group creation
+      if (type === 'group') {
+        if (!name || String(name).trim().length < 2) throw new ValidationError('Group name is required');
+
+        const chat = await pool.query(
+          `INSERT INTO chats (id, type, name, avatar_url, created_by, members_count)
+           VALUES ($1, 'group', $2, $3, $4, 1)
+           RETURNING *`,
+          [uuid(), String(name).trim(), avatarUrl || null, userId],
+        );
+        await pool.query(
+          `INSERT INTO chat_members (chat_id, user_id, role) VALUES ($1, $2, 'owner')
+           ON CONFLICT DO NOTHING`,
+          [chat.rows[0].id, userId],
+        );
+        await publishMemberJoined(kafka, req, chat.rows[0].id, userId);
+        return res.status(201).json({ success: true, data: chat.rows[0] });
+      }
+
+      // Handle channel creation
+      if (type === 'channel') {
+        if (!name || String(name).trim().length < 2) throw new ValidationError('Channel name is required');
+
+        const chat = await pool.query(
+          `INSERT INTO chats (id, type, name, description, created_by, members_count)
+           VALUES ($1, 'channel', $2, $3, $4, 1)
+           RETURNING *`,
+          [uuid(), String(name).trim(), description || null, userId],
+        );
+        await pool.query(
+          `INSERT INTO chat_members (chat_id, user_id, role) VALUES ($1, $2, 'owner')
+           ON CONFLICT DO NOTHING`,
+          [chat.rows[0].id, userId],
+        );
+        await publishMemberJoined(kafka, req, chat.rows[0].id, userId);
+        return res.status(201).json({ success: true, data: chat.rows[0] });
+      }
+    } catch (err) { next(err); }
+  });
+
   r.post('/dm/:userId', async (req: Request, res: Response, next: NextFunction) => {
     try {
       const currentUserId = userIdFrom(req);
