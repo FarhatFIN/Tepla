@@ -76,6 +76,7 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
       authSchemaInit = (async () => {
         await db.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified_at TIMESTAMPTZ');
         await db.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash TEXT');
+        await db.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS shield_code_hash VARCHAR(255)');
         await db.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS language TEXT DEFAULT 'en'");
         await db.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS public_key TEXT DEFAULT ''");
         await db.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS signing_public_key TEXT DEFAULT ''");
@@ -286,7 +287,32 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
       ? await createBinaryShield(user.id, req)
       : await rotateBinaryShieldAfterLogin(user.id, req);
 
-    return { user: mapUser(user), tokens, sessionId: session, binaryShield };
+    return {
+      user: mapUser(user),
+      tokens,
+      token: tokens.accessToken,
+      accessToken: tokens.accessToken,
+      sessionId: session,
+      binaryShield,
+    };
+  }
+
+  function setAuthCookies(res: Response, tokens: { accessToken: string; refreshToken: string; expiresIn: number }): void {
+    const secure = process.env.NODE_ENV === 'production';
+    res.cookie('accessToken', tokens.accessToken, {
+      httpOnly: true,
+      secure,
+      sameSite: 'lax',
+      path: '/',
+      maxAge: tokens.expiresIn * 1000,
+    });
+    res.cookie('refreshToken', tokens.refreshToken, {
+      httpOnly: true,
+      secure,
+      sameSite: 'lax',
+      path: '/',
+      maxAge: 30 * 24 * 60 * 60 * 1000,
+    });
   }
 
   // в”Ђв”Ђв”Ђ Email OTP Helpers в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
@@ -464,7 +490,8 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
   // POST /api/auth/register вЂ” create account
   router.post('/register', async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const { username, displayName, phone, email, language, birthDate, dateOfBirth, date_of_birth, description, bio, avatar, avatarUrl, publicKey, signingPublicKey } = req.body;
+      await ensureAuthRuntimeSchema();
+      const { username, displayName, phone, email, language, birthDate, dateOfBirth, date_of_birth, description, bio, avatar, avatarUrl, publicKey, signingPublicKey, shield_code, shieldCode } = req.body;
 
       if (!username || username.length < 4 || username.length > 32) {
         throw new ValidationError('Username must be 4-32 characters');
@@ -486,6 +513,7 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
         display_name: displayName || null,
         phone: phone ? normalizePhone(phone) : null,
         email: email || null,
+        shield_code_hash: shield_code || shieldCode ? await bcrypt.hash(String(shield_code || shieldCode), 12) : null,
         language: language || 'en',
         birth_date: birthDate || dateOfBirth || date_of_birth || null,
         avatar_url: avatarUrl || avatar || null,
@@ -537,9 +565,10 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
         payload: { userId: user.id },
       });
 
+      setAuthCookies(res, tokens);
       res.status(201).json({
         success: true,
-        data: { user: mapUser(user), tokens, sessionId: session },
+        data: { user: mapUser(user), tokens, token: tokens.accessToken, accessToken: tokens.accessToken, sessionId: session },
       });
     } catch (err) { next(err); }
   });
@@ -548,7 +577,7 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
   router.post('/login', async (req: Request, res: Response, next: NextFunction) => {
     try {
       await ensureAuthRuntimeSchema();
-      const { email, password } = req.body;
+      const { email, password, shield_code, shieldCode } = req.body;
       if (!email || !password) throw new ValidationError('Email and password are required');
 
       const normalizedEmail = email.toLowerCase().trim();
@@ -571,25 +600,31 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
       await rateLimiter.clearAuthFailures(normalizedEmail);
       await SecurityMetrics.authSuccess(rawRedis);
 
+      const submittedShieldCode = shield_code || shieldCode;
+      if (user.shield_code_hash) {
+        const shieldOk = submittedShieldCode
+          ? await bcrypt.compare(String(submittedShieldCode), user.shield_code_hash)
+          : false;
+        if (!shieldOk) {
+          await rateLimiter.recordAuthFailure(normalizedEmail);
+          await SecurityMetrics.authFailure(rawRedis);
+          throw new ForbiddenError('Неверный Shield-код');
+        }
+      } else if (submittedShieldCode) {
+        await db.query('UPDATE users SET shield_code_hash = $2 WHERE id = $1', [
+          user.id,
+          await bcrypt.hash(String(submittedShieldCode), 12),
+        ]);
+      }
+
       if (!shouldRequireEmailOtp()) {
         if (!user.is_verified) {
           await userRepo.markEmailVerified(user.id);
           user.is_verified = true;
         }
 
-        const binaryChallenge = await createBinaryLoginChallenge(user, req);
-        if (binaryChallenge) {
-          return res.json({
-            success: true,
-            data: {
-              message: 'Binary Shield code required',
-              requiresBinaryShield: true,
-              binaryChallenge,
-            },
-          });
-        }
-
         const data = await issueEmailSession(user, req, 'email');
+        setAuthCookies(res, data.tokens);
         return res.json({ success: true, data });
       }
 
@@ -650,6 +685,7 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
 
       await logBinaryShieldEvent(user.id, 'login_challenge_verified', req, { challengeId });
       const data = await issueEmailSession(user, req, 'email_binary');
+      setAuthCookies(res, data.tokens);
       res.json({ success: true, data });
     } catch (err) { next(err); }
   });
@@ -751,7 +787,7 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
   router.post('/register/email', async (req: Request, res: Response, next: NextFunction) => {
     try {
       await ensureAuthRuntimeSchema();
-      const { username, displayName, email, password, language, birthDate, dateOfBirth, date_of_birth, description, bio, avatar, avatarUrl } = req.body;
+      const { username, displayName, email, password, language, birthDate, dateOfBirth, date_of_birth, description, bio, avatar, avatarUrl, shield_code, shieldCode } = req.body;
 
       if (!email || !password) throw new ValidationError('Email and password are required');
       if (password.length < 6) throw new ValidationError('Password must be at least 6 characters');
@@ -777,6 +813,7 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
         phone: null,
         email: normalizedEmail,
         password_hash: passwordHash,
+        shield_code_hash: shield_code || shieldCode ? await bcrypt.hash(String(shield_code || shieldCode), 12) : null,
         language: language || 'en',
         birth_date: birthDate || dateOfBirth || date_of_birth || null,
         avatar_url: avatarUrl || avatar || null,
@@ -805,6 +842,7 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
         user.is_verified = true;
 
         const data = await issueEmailSession(user, req, 'email_register');
+        setAuthCookies(res, data.tokens);
         return res.status(201).json({ success: true, data });
       }
 
@@ -864,9 +902,10 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
 
       await AuditLogger.log('email_verified', { userId: user.id, ip: req.ip });
 
+      setAuthCookies(res, tokens);
       res.json({
         success: true,
-        data: { user: mapUser(user), tokens, sessionId: session, binaryShield: await createBinaryShield(user.id, req) },
+        data: { user: mapUser(user), tokens, token: tokens.accessToken, accessToken: tokens.accessToken, sessionId: session, binaryShield: await createBinaryShield(user.id, req) },
       });
     } catch (err) { next(err); }
   });
@@ -893,7 +932,8 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
 
       await AuditLogger.log('token_refreshed', { userId: user.id, ip: req.ip });
 
-      res.json({ success: true, data: { tokens } });
+      setAuthCookies(res, tokens);
+      res.json({ success: true, data: { tokens, token: tokens.accessToken, accessToken: tokens.accessToken } });
     } catch (err) { next(err); }
   });
 

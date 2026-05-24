@@ -145,6 +145,14 @@ function formatDate(iso: string | undefined): string {
 
 let pendingMessages = new Set<string>(); // clientMessageIds to deduplicate socket echos
 
+function joinChatRooms(chats: Chat[]): void {
+  const socket = getSocket();
+  if (!socket?.connected) return;
+  for (const chat of chats) {
+    socket.emit("presence:join", chat.id);
+  }
+}
+
 export const useChatStore = create<ChatState>((set, get) => ({
   chats: [],
   messages: {},
@@ -172,6 +180,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const res = await api.get<{ success: boolean; data: any[] }>("/chats");
       const chats = res.data.map(mapBackendChat);
       set({ chats });
+      joinChatRooms(chats);
     } catch (err: any) {
       // Warn instead of error to avoid triggering Next.js dev error overlay
       console.warn("[chat-store] loadChats failed:", err?.message || err);
@@ -200,6 +209,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     if (!socket) return;
 
     set({ _socketBound: true });
+    joinChatRooms(get().chats);
 
     // New message from another user (or echo of own)
     socket.on("message:new", (data: { chatId: string; message: any }) => {

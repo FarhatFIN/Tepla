@@ -28,11 +28,19 @@ export function authMiddleware(jwtSecret?: string) {
 
   return (req: Request, _res: Response, next: NextFunction) => {
     const authHeader = req.headers.authorization;
-    if (!authHeader?.startsWith('Bearer ')) {
+    const cookieToken = req.headers.cookie
+      ?.split(';')
+      .map((part) => part.trim())
+      .find((part) => part.startsWith('accessToken='))
+      ?.slice('accessToken='.length);
+
+    if (!authHeader?.startsWith('Bearer ') && !cookieToken) {
       throw new UnauthorizedError('Missing or invalid authorization header');
     }
 
-    const token = authHeader.slice(7);
+    const token = authHeader?.startsWith('Bearer ')
+      ? authHeader.slice(7)
+      : decodeURIComponent(cookieToken || '');
     try {
       const payload = jwt.verify(token, secret) as JwtPayload;
       req.user = payload;

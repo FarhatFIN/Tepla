@@ -48,6 +48,27 @@ export function userRouter(redis: RedisClient, kafka: KafkaProducer): Router {
     } catch (err) { next(err); }
   });
 
+  router.get('/contacts', auth, async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const contacts = await userRepo.getContacts(req.user!.sub);
+      res.json({ success: true, data: contacts });
+    } catch (err) { next(err); }
+  });
+
+  router.post('/contacts/:userId', auth, async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const userId = req.user!.sub;
+      const contactUserId = req.params.userId;
+      if (contactUserId === userId) throw new ValidationError('Cannot add yourself');
+
+      const targetUser = await userRepo.findById(contactUserId);
+      if (!targetUser) throw new NotFoundError('User', contactUserId);
+
+      await userRepo.addContact(userId, contactUserId);
+      res.status(201).json({ success: true, data: { contactUserId } });
+    } catch (err) { next(err); }
+  });
+
   // GET /api/users/:id
   router.get('/:id', auth, async (req: Request, res: Response, next: NextFunction) => {
     try {

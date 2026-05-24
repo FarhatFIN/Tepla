@@ -5,6 +5,33 @@ import { DeviceSecurity } from './device-security';
 import { AuditLogger } from './audit-logger';
 import { SecurityConfig } from './config';
 import Redis from 'ioredis';
+import crypto from 'crypto';
+
+function verifyJwtAccessToken(token: string): { userId: string } | null {
+  const secret = process.env.JWT_SECRET;
+  if (!secret) return null;
+
+  const parts = token.split('.');
+  if (parts.length !== 3) return null;
+
+  const [header, payload, signature] = parts;
+  const expected = crypto
+    .createHmac('sha256', secret)
+    .update(`${header}.${payload}`)
+    .digest('base64url');
+
+  const actualBuffer = Buffer.from(signature);
+  const expectedBuffer = Buffer.from(expected);
+  if (actualBuffer.length !== expectedBuffer.length || !crypto.timingSafeEqual(actualBuffer, expectedBuffer)) {
+    return null;
+  }
+
+  const decoded = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')) as { sub?: string; exp?: number };
+  if (!decoded.sub) return null;
+  if (decoded.exp && decoded.exp * 1000 <= Date.now()) return null;
+
+  return { userId: decoded.sub };
+}
 
 /**
  * Socket.IO Security Middleware
@@ -25,17 +52,21 @@ export function socketSecurity(redis: Redis) {
 
       // 2. Validate session
       const session = await sessionManager.validate(token);
+      const jwtSession = session ? null : verifyJwtAccessToken(token);
       if (!session) {
-        await AuditLogger.log('ws_auth_failed', {
-          ip: socket.handshake.address,
-          reason: 'invalid_session',
-        });
-        throw new Error('Invalid or expired session');
+        if (!jwtSession) {
+          await AuditLogger.log('ws_auth_failed', {
+            ip: socket.handshake.address,
+            reason: 'invalid_session',
+          });
+          throw new Error('Invalid or expired session');
+        }
       }
 
       // 3. Rate limit WebSocket connections per user
+      const userId = session?.userId || jwtSession!.userId;
       await rateLimiter.check(
-        `ws_conn:${session.userId}`,
+        `ws_conn:${userId}`,
         SecurityConfig.WS_CONNECTION_LIMIT
       );
 
@@ -47,14 +78,14 @@ export function socketSecurity(redis: Redis) {
 
       // Check for anomaly on WebSocket connection
       const anomaly = await deviceSecurity.detectAnomaly(
-        session.userId,
+        userId,
         fingerprint,
         socket.handshake.address
       );
 
       if (anomaly.suspicious) {
         await AuditLogger.log('ws_anomaly_detected', {
-          userId: session.userId,
+          userId,
           reason: anomaly.reason,
           ip: socket.handshake.address,
         });
@@ -62,18 +93,18 @@ export function socketSecurity(redis: Redis) {
       }
 
       // Register device activity
-      await deviceSecurity.registerDevice(session.userId, fingerprint, {
+      await deviceSecurity.registerDevice(userId, fingerprint, {
         userAgent: socket.handshake.headers['user-agent'] || 'unknown',
         ip: socket.handshake.address,
       });
 
       // 5. Attach user info to socket
-      (socket as any).userId = session.userId;
+      (socket as any).userId = userId;
       (socket as any).sessionToken = token;
       (socket as any).deviceFingerprint = fingerprint;
 
       await AuditLogger.log('ws_connected', {
-        userId: session.userId,
+        userId,
         socketId: socket.id,
       });
 

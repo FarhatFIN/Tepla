@@ -160,6 +160,11 @@ async function forwardAuthRequest(req: GatewayRequest, res: Response, next: Next
 
     const contentType = upstream.headers.get('content-type');
     if (contentType) res.setHeader('Content-Type', contentType);
+    const setCookies = (upstream.headers as unknown as { getSetCookie?: () => string[] }).getSetCookie?.()
+      || (upstream.headers.get('set-cookie') ? [upstream.headers.get('set-cookie') as string] : []);
+    for (const cookie of setCookies) {
+      res.append('Set-Cookie', cookie);
+    }
 
     const text = await upstream.text();
     res.status(upstream.status).send(text);
@@ -191,6 +196,12 @@ app.use(
 
 registerRoutes([
   {
+    path: '/api/v2/contacts',
+    middleware: protectedMiddleware,
+    target: config.services.authUser,
+    rewrite: '/api/users/contacts/',
+  },
+  {
     path: '/api/v2/users',
     middleware: protectedMiddleware,
     target: config.services.authUser,
@@ -219,6 +230,24 @@ registerRoutes([
     middleware: protectedMiddleware,
     target: config.services.messaging,
     rewrite: '/api/chats/',
+  },
+  {
+    path: '/api/v2/dm',
+    middleware: protectedMiddleware,
+    target: config.services.messaging,
+    rewrite: '/api/dm/',
+  },
+  {
+    path: '/api/v2/groups',
+    middleware: protectedMiddleware,
+    target: config.services.messaging,
+    rewrite: '/api/groups/',
+  },
+  {
+    path: '/api/v2/channels',
+    middleware: protectedMiddleware,
+    target: config.services.messaging,
+    rewrite: '/api/channels/',
   },
   {
     path: '/api/v2/messages',
@@ -261,6 +290,12 @@ registerRoutes([
     middleware: protectedMiddleware,
     target: config.services.messaging,
     rewrite: '/api/search/',
+  },
+  {
+    path: '/api/v2/stats',
+    middleware: protectedMiddleware,
+    target: config.services.messaging,
+    rewrite: '/api/stats/',
   },
   {
     path: '/api/v2/moderation',

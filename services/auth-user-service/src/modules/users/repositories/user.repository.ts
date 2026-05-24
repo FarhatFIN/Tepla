@@ -13,7 +13,7 @@ export class UserRepository extends BaseRepository {
     const sql = `
       SELECT id, username, display_name, avatar_url, bio, is_online, is_verified, last_seen
       FROM users
-      WHERE username ILIKE $1 OR display_name ILIKE $1
+      WHERE username ILIKE $1 OR email ILIKE $1 OR display_name ILIKE $1
       ORDER BY
         CASE WHEN username = $2 THEN 0
              WHEN username ILIKE $2 || '%' THEN 1
