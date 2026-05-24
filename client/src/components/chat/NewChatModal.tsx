@@ -35,10 +35,16 @@ export default function NewChatModal({ open, onClose, initialTab = "contact" }: 
     setSearching(true);
     setError("");
     try {
+      console.log("[NewChatModal] searchUsers query:", search);
       const res = await api.get<{ success: boolean; data: any[] }>(`/users/search?q=${encodeURIComponent(search)}`);
+      console.log("[NewChatModal] searchUsers response:", res.data);
       setSearchResults(res.data || []);
-      if (!res.data?.length) setError(t("no_users_found"));
-    } catch {
+      if (!res.data?.length) {
+        console.log("[NewChatModal] no users found");
+        setError(t("no_users_found"));
+      }
+    } catch (err) {
+      console.error("[NewChatModal] searchUsers error:", err);
       setError(t("search_failed"));
     }
     setSearching(false);
@@ -48,14 +54,22 @@ export default function NewChatModal({ open, onClose, initialTab = "contact" }: 
     setCreating(true);
     setError("");
     try {
-      const res = await api.post<{ success: boolean; data: any }>("/chats", {
+      // Debug logs
+      console.log("[NewChatModal] startDirectChat userId:", userId);
+      const payload = {
         type: "direct",
-        memberIds: [userId],
-      });
+        targetUserId: userId,
+      };
+      console.log("[NewChatModal] payload:", payload);
+      
+      const res = await api.post<{ success: boolean; data: any }>("/chats", payload);
+      console.log("[NewChatModal] createChat response:", res);
+      
       await loadChats();
       setActiveChat(res.data.id);
       onClose();
-    } catch {
+    } catch (err) {
+      console.error("[NewChatModal] createChat error:", err);
       setError(t("failed_create_chat"));
     }
     setCreating(false);
