@@ -1,11 +1,13 @@
 "use client";
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { Message } from "@/types";
 import MessageBubble from "./MessageBubble";
 
 interface MessageListProps {
   messages: Message[];
   currentUserId: string;
+  searchMatchIds?: string[];
+  activeSearchMessageId?: string;
 }
 
 function DateSeparator({ date }: { date: string }) {
@@ -27,9 +29,17 @@ function DateSeparator({ date }: { date: string }) {
   );
 }
 
-export default function MessageList({ messages, currentUserId }: MessageListProps) {
+export default function MessageList({ messages, currentUserId, searchMatchIds = [], activeSearchMessageId }: MessageListProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
+  const messageRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const searchMatchSet = useMemo(() => new Set(searchMatchIds), [searchMatchIds]);
+
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages]);
+
+  useEffect(() => {
+    if (!activeSearchMessageId) return;
+    messageRefs.current[activeSearchMessageId]?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [activeSearchMessageId]);
 
   if (messages.length === 0) {
     return (
@@ -54,7 +64,17 @@ export default function MessageList({ messages, currentUserId }: MessageListProp
     const isOwn = msg.senderId === currentUserId;
     const isFirstInGroup = !prev || prev.senderId !== msg.senderId || prev.date !== msg.date;
     const isLastInGroup = !next || next.senderId !== msg.senderId || next.date !== msg.date;
-    elements.push(<MessageBubble key={msg.id} message={msg} isOwn={isOwn} isFirstInGroup={isFirstInGroup} isLastInGroup={isLastInGroup} />);
+    const isSearchMatch = searchMatchSet.has(msg.id);
+    const isActiveSearchMatch = activeSearchMessageId === msg.id;
+    elements.push(
+      <div
+        key={msg.id}
+        ref={(node) => { messageRefs.current[msg.id] = node; }}
+        className={`${isSearchMatch ? "rounded-2xl transition-shadow" : ""} ${isActiveSearchMatch ? "ring-2 ring-[var(--accent)] ring-offset-2 ring-offset-[#130D24]" : isSearchMatch ? "ring-1 ring-[var(--accent)]/40" : ""}`}
+      >
+        <MessageBubble message={msg} isOwn={isOwn} isFirstInGroup={isFirstInGroup} isLastInGroup={isLastInGroup} />
+      </div>
+    );
   });
 
   return (

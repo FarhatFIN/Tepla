@@ -13,13 +13,11 @@ import WBITPanel from "@/components/layout/WBITPanel";
 import CallOverlay from "@/components/calls/CallOverlay";
 import StickerPicker from "@/components/stickers/StickerPicker";
 import LockScreen, { useAutoLock } from "@/components/auth/LockScreen";
-import { useTranslation } from "@/hooks/useTranslation";
 
 export default function Home() {
   const { user, isLoading, hydrate } = useAuthStore();
   const { chats, activeChatId, setActiveChat, messages, loadChats, bindSocket } = useChatStore(useShallow(s => ({ chats: s.chats, activeChatId: s.activeChatId, setActiveChat: s.setActiveChat, messages: s.messages, loadChats: s.loadChats, bindSocket: s.bindSocket })));
   const router = useRouter();
-  const t = useTranslation();
   const { locked, unlock } = useAutoLock();
 
   useEffect(() => { hydrate(); }, [hydrate]);

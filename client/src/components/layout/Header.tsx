@@ -5,9 +5,9 @@ import IconButton from "@/components/ui/IconButton";
 import { useChatStore } from "@/stores/chat-store";
 import { useTranslation } from "@/hooks/useTranslation";
 
-interface HeaderProps { chat: Chat; onBack: () => void; }
+interface HeaderProps { chat: Chat; onBack: () => void; onSearch: () => void; }
 
-export default function Header({ chat, onBack }: HeaderProps) {
+export default function Header({ chat, onBack, onSearch }: HeaderProps) {
   const { toggleProfile, toggleCalls, toggleTranslation } = useChatStore();
   const t = useTranslation();
   const user = chat.user;
@@ -57,7 +57,7 @@ export default function Header({ chat, onBack }: HeaderProps) {
             <polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>
           </svg>
         </IconButton>
-        <IconButton label={t("search")} size="sm">
+        <IconButton label={t("search")} onClick={onSearch} size="sm">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
         </IconButton>
         <IconButton label={t("info")} onClick={toggleProfile} size="sm">

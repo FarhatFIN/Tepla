@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useCallback, useEffect, useState } from "react";
 import api from "@/lib/api";
 import { useTranslation } from "@/hooks/useTranslation";
 
@@ -14,18 +14,21 @@ export default function WBITPriceCard() {
   const t = useTranslation();
   const [price, setPrice] = useState<PriceData | null>(null);
 
-  useEffect(() => {
-    loadPrice();
-    const interval = setInterval(loadPrice, 60000); // Refresh every minute
-    return () => clearInterval(interval);
-  }, []);
-
-  async function loadPrice() {
+  const loadPrice = useCallback(async () => {
     try {
       const res = await api.get<{ data: PriceData }>("/wbit/price");
       setPrice(res.data);
     } catch {}
-  }
+  }, []);
+
+  useEffect(() => {
+    const initialLoad = window.setTimeout(loadPrice, 0);
+    const interval = window.setInterval(loadPrice, 60000);
+    return () => {
+      window.clearTimeout(initialLoad);
+      window.clearInterval(interval);
+    };
+  }, [loadPrice]);
 
   if (!price) return null;
 

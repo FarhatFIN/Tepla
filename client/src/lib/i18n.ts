@@ -68,6 +68,8 @@ const translations: Record<string, Record<string, string>> = {
 
     // Chat area
     "pinned_messages": "Pinned Messages",
+    "search_messages": "Search messages...",
+    "no_matches": "No matches",
     "select_chat": "Select a chat to start messaging",
     "e2e_encrypted": "E2E Encrypted",
     "voice_video_calls": "Voice & Video Calls",
@@ -1199,4 +1201,3 @@ export function t(key: string, lang: string, params?: Record<string, string | nu
 export function useT(lang: string) {
   return (key: string, params?: Record<string, string | number>) => t(key, lang, params);
 }
-
