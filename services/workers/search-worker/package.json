@@ -1,0 +1,24 @@
+{
+  "name": "@tepla/search-worker",
+  "version": "2.0.0",
+  "description": "Tepla Messenger — search-worker (Kafka consumer)",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsx watch src/index.ts"
+  },
+  "dependencies": {
+    "@tepla/common": "workspace:*",
+    "@tepla/types": "workspace:*",
+    "kafkajs": "^2.2.4",
+    "ioredis": "^5.3.2",
+    "pg": "^8.12.0",
+    "uuid": "^9.0.0",
+    "@elastic/elasticsearch": "^8.13.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.7.0",
+    "typescript": "^5.4.0"
+  }
+}

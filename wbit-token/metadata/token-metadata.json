@@ -1,0 +1,13 @@
+{
+  "name": "WBIT",
+  "description": "Native token of Tepla messenger. Used for Premium subscriptions, payments, and rewards.",
+  "symbol": "WBIT",
+  "decimals": "9",
+  "image": "https://tepla.app/wbit-logo.png",
+  "image_data": "",
+  "uri": "https://tepla.app/wbit-metadata.json",
+  "social_links": [
+    "https://t.me/tepla_official",
+    "https://tepla.app"
+  ]
+}

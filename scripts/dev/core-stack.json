@@ -1,0 +1,108 @@
+{
+  "clientUrl": "http://localhost:3080",
+  "gatewayHealthUrl": "http://localhost:3000/health",
+  "repoMarkers": [
+    "package.json",
+    "client/package.json",
+    "infrastructure/docker-compose.yml"
+  ],
+  "infra": {
+    "composeFiles": [
+      "infrastructure/docker-compose.yml",
+      "infrastructure/docker-compose.dev.yml"
+    ]
+  },
+  "services": [
+    {
+      "id": "gateway",
+      "name": "API Gateway",
+      "workdir": ".",
+      "command": "corepack pnpm run dev:gateway",
+      "env": {
+        "PORT": "3000",
+        "AUTH_USER_SERVICE_URL": "http://localhost:3001",
+        "MESSAGING_SERVICE_URL": "http://localhost:3004",
+        "MEDIA_SERVICE_URL": "http://localhost:3007",
+        "REALTIME_SERVICE_URL": "http://localhost:3100",
+        "TEPLA_ENABLE_BOT_PLATFORM": "false",
+        "TEPLA_ENABLE_LEGACY_FEATURES": "false"
+      }
+    },
+    {
+      "id": "auth-user",
+      "name": "Auth/User Service",
+      "workdir": ".",
+      "command": "corepack pnpm run dev:auth-user",
+      "env": {
+        "PORT": "3001",
+        "AUTH_EMAIL_OTP_REQUIRED": "false"
+      }
+    },
+    {
+      "id": "messaging",
+      "name": "Messaging Service",
+      "workdir": ".",
+      "command": "corepack pnpm run dev:messaging",
+      "env": {
+        "PORT": "3004"
+      }
+    },
+    {
+      "id": "media",
+      "name": "Media Service",
+      "workdir": ".",
+      "command": "corepack pnpm run dev:media",
+      "env": {
+        "PORT": "3007",
+        "S3_ENDPOINT": "http://localhost:9000",
+        "S3_REGION": "us-east-1",
+        "S3_ACCESS_KEY": "tepla_minio",
+        "S3_SECRET_KEY": "tepla_minio_secret",
+        "S3_BUCKET": "tepla-media"
+      }
+    },
+    {
+      "id": "realtime",
+      "name": "Realtime Service",
+      "workdir": ".",
+      "command": "corepack pnpm run dev:realtime",
+      "env": {
+        "PORT": "3100"
+      }
+    },
+    {
+      "id": "bot-platform",
+      "name": "Bot Platform",
+      "workdir": ".",
+      "command": "echo Bot platform service is not present in this repository",
+      "env": {
+        "PORT": "3013"
+      }
+    },
+    {
+      "id": "client",
+      "name": "Tepla Client",
+      "workdir": ".",
+      "command": "corepack pnpm run dev",
+      "env": {
+        "NEXT_PUBLIC_API_URL": "http://localhost:3000/api/v2"
+      }
+    }
+  ],
+  "sharedEnv": {
+    "NODE_ENV": "development",
+    "DATABASE_URL": "postgresql://tepla:tepla_secret@localhost:5432/tepla",
+    "REDIS_URL": "redis://localhost:6379",
+    "REDIS_CACHE_URL": "redis://localhost:6379",
+    "REDIS_PERSIST_URL": "redis://localhost:6379",
+    "KAFKA_BROKERS": "localhost:9092",
+    "ELASTICSEARCH_URL": "http://localhost:9200",
+    "JWT_SECRET": "tepla-jwt-secret-change-me",
+    "CORS_ORIGIN": "*",
+    "S3_ENDPOINT": "http://localhost:9000",
+    "S3_REGION": "us-east-1",
+    "S3_ACCESS_KEY": "tepla_minio",
+    "S3_SECRET_KEY": "tepla_minio_secret",
+    "S3_BUCKET": "tepla-media"
+  }
+}

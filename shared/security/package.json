@@ -1,0 +1,25 @@
+{
+  "name": "@tepla/security",
+  "version": "2.0.0",
+  "description": "Tepla Messenger — Security framework (E2E encryption, Double Ratchet, replay protection, device fingerprinting, audit logging)",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./*": "./src/*"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch"
+  },
+  "dependencies": {
+    "@tepla/common": "workspace:*",
+    "@tepla/types": "workspace:*",
+    "ioredis": "^5.3.2",
+    "libsodium-wrappers": "^0.7.13"
+  },
+  "devDependencies": {
+    "@types/libsodium-wrappers": "^0.7.14",
+    "typescript": "^5.4.0"
+  }
+}

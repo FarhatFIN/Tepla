@@ -1,0 +1,390 @@
+@import "tailwindcss";
+
+:root {
+  /* ─── Tepla Purple-Green Theme ─── */
+  --tepla-purple-dark: #1A0F2E;
+  --tepla-purple-bg: #130D24;
+  --tepla-purple-surface: #1E1535;
+  --tepla-purple-hover: #2A1D4A;
+  --tepla-purple-border: #3D2B6B;
+  --tepla-purple-main: #6C3DE8;
+  --tepla-purple-light: #8B5CF6;
+  --tepla-purple-pale: #C4B5FD;
+  --tepla-green-main: #00D46A;
+  --tepla-green-soft: #00B85A;
+  --tepla-green-pale: #86EFAC;
+  --tepla-green-glow: rgba(0,212,106,0.15);
+  --tepla-white: #FFFFFF;
+  --tepla-text-primary: #F0EAFF;
+  --tepla-text-secondary: #9B89C4;
+  --tepla-text-muted: #5C4D87;
+
+  /* ─── Mapped to existing var names ─── */
+  --bg-main: #130D24;
+  --bg-sidebar: #1E1535;
+  --bg-card: #1E1535;
+  --bg-input: #1A1230;
+  --bg-hover: #2A1D4A;
+  --bg-active: rgba(108,61,232,0.15);
+  --bg-bubble-own: linear-gradient(135deg, #5B21B6, #6C3DE8);
+  --bg-bubble-own-solid: #6C3DE8;
+  --bg-bubble-other: #1E1535;
+  --bg-overlay: rgba(10,6,20,0.85);
+  --bg-glass: rgba(19,13,36,0.92);
+  --bg-toast: rgba(30,21,53,0.9);
+
+  --accent: #6C3DE8;
+  --accent-hover: #8B5CF6;
+  --accent-soft: rgba(108,61,232,0.15);
+  --accent-gradient: linear-gradient(135deg, #5B21B6, #6C3DE8);
+  --premium-gradient: linear-gradient(135deg, #6C3DE8, #00D46A);
+
+  --success: #00D46A;
+  --warning: #F59E0B;
+  --danger: #EF4444;
+
+  --text-primary: #F0EAFF;
+  --text-secondary: #9B89C4;
+  --text-tertiary: #5C4D87;
+  --text-on-accent: #FFFFFF;
+
+  --border: rgba(108,61,232,0.3);
+  --border-light: rgba(108,61,232,0.15);
+  --border-solid: #3D2B6B;
+
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.3);
+  --shadow-md: 0 4px 12px rgba(0,0,0,0.4);
+  --shadow-lg: 0 8px 32px rgba(0,0,0,0.5);
+
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 20px;
+  --radius-full: 9999px;
+  --transition: 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+
+  /* Message bubbles */
+  --bubble-sent-bg: linear-gradient(135deg, #5B21B6, #6C3DE8);
+  --bubble-sent-radius: 18px 18px 4px 18px;
+  --bubble-recv-bg: #1E1535;
+  --bubble-recv-radius: 18px 18px 18px 4px;
+
+  /* Typography */
+  --font-primary: 'Inter', system-ui, -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+}
+
+/* Light mode */
+.light {
+  --bg-main: #F5F0FF;
+  --bg-sidebar: #FFFFFF;
+  --bg-card: #FFFFFF;
+  --bg-input: #F0EBFF;
+  --bg-hover: #E8E0F8;
+  --bg-active: rgba(108,61,232,0.1);
+  --bg-bubble-own-solid: #6C3DE8;
+  --bg-bubble-other: #F0EBFF;
+  --bg-overlay: rgba(0,0,0,0.5);
+  --bg-glass: rgba(255,255,255,0.92);
+  --bg-toast: rgba(0,0,0,0.8);
+  --text-primary: #1A0F2E;
+  --text-secondary: #5C4D87;
+  --text-tertiary: #9B89C4;
+  --border: #E2D9F3;
+  --border-light: #F0EBFF;
+  --border-solid: #E2D9F3;
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.05);
+  --shadow-md: 0 4px 12px rgba(0,0,0,0.08);
+  --shadow-lg: 0 8px 32px rgba(0,0,0,0.12);
+}
+
+/* Dark is default — .dark alias */
+.dark {
+  --bg-main: #130D24;
+  --bg-sidebar: #1E1535;
+  --bg-card: #1E1535;
+  --bg-input: #1A1230;
+  --bg-hover: #2A1D4A;
+  --bg-active: rgba(108,61,232,0.15);
+  --bg-bubble-own-solid: #6C3DE8;
+  --bg-bubble-other: #1E1535;
+  --bg-overlay: rgba(10,6,20,0.85);
+  --bg-glass: rgba(19,13,36,0.92);
+  --text-primary: #F0EAFF;
+  --text-secondary: #9B89C4;
+  --text-tertiary: #5C4D87;
+  --border: rgba(108,61,232,0.3);
+  --border-light: rgba(108,61,232,0.15);
+  --border-solid: #3D2B6B;
+}
+
+html, body {
+  height: 100%;
+  overflow: hidden;
+  margin: 0;
+}
+
+body {
+  background: var(--bg-main);
+  color: var(--text-primary);
+  font-family: var(--font-primary, 'Inter', system-ui, -apple-system, sans-serif);
+  transition: background-color var(--transition), color var(--transition);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ─── Scrollbar ─── */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--tepla-purple-main) transparent;
+}
+*::-webkit-scrollbar { width: 4px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb {
+  background: var(--tepla-text-muted);
+  border-radius: var(--radius-full);
+}
+
+::selection {
+  background: var(--tepla-purple-main);
+  color: white;
+}
+
+input, textarea, select, button {
+  font-family: inherit;
+}
+
+/* ─── Animations ─── */
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slideInRight {
+  from { opacity: 0; transform: translateX(20px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes scaleIn {
+  from { opacity: 0; transform: scale(0.95); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@keyframes pulse-ring {
+  0% { transform: scale(0.8); opacity: 1; }
+  100% { transform: scale(2); opacity: 0; }
+}
+
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  10%, 50%, 90% { transform: translateX(-4px); }
+  30%, 70% { transform: translateX(4px); }
+}
+
+@keyframes typing-dots {
+  0%, 60%, 100% { opacity: 0.3; transform: translateY(0); }
+  30% { opacity: 1; transform: translateY(-4px); }
+}
+
+@keyframes online-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(0,212,106,0.5); }
+  70% { box-shadow: 0 0 0 6px rgba(0,212,106,0); }
+  100% { box-shadow: 0 0 0 0 rgba(0,212,106,0); }
+}
+
+@keyframes breathe {
+  0%, 100% { opacity: 0.6; transform: scale(1); }
+  50% { opacity: 1; transform: scale(1.05); }
+}
+
+.animate-fade-in { animation: fadeIn 0.2s ease-out; }
+.animate-slide-up { animation: slideUp 0.3s ease-out; }
+.animate-slide-in-right { animation: slideInRight 0.3s ease-out; }
+.animate-scale-in { animation: scaleIn 0.2s ease-out; }
+.animate-shake { animation: shake 0.4s ease-in-out; }
+.animate-online-pulse { animation: online-pulse 2s ease-in-out 3; }
+.animate-breathe { animation: breathe 3s ease-in-out infinite; }
+
+/* ─── Glass morphism ─── */
+.glass {
+  background: var(--bg-glass);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid var(--border);
+}
+
+/* ─── Gradient text ─── */
+.gradient-text {
+  background: var(--accent-gradient);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.premium-text {
+  background: var(--premium-gradient);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* ─── Tepla specific ─── */
+.tepla-btn-primary {
+  background: linear-gradient(135deg, #5B21B6, #6C3DE8);
+  color: white;
+  border: none;
+  border-radius: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: filter 0.15s, transform 0.1s;
+}
+.tepla-btn-primary:hover { filter: brightness(1.1); }
+.tepla-btn-primary:active { transform: scale(0.97); }
+.tepla-btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.tepla-input {
+  height: 52px;
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(108,61,232,0.3);
+  border-radius: 12px;
+  color: var(--tepla-text-primary);
+  padding: 0 16px 0 44px;
+  font-size: 15px;
+  transition: border-color 0.15s, box-shadow 0.15s;
+  outline: none;
+  width: 100%;
+}
+.tepla-input::placeholder { color: var(--tepla-text-muted); }
+.tepla-input:focus {
+  border-color: rgba(108,61,232,0.8);
+  box-shadow: 0 0 0 3px rgba(108,61,232,0.15);
+}
+
+.tepla-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl);
+}
+
+.tepla-surface {
+  background: var(--tepla-purple-surface);
+}
+
+/* ─── Chat wallpaper ─── */
+.chat-wallpaper {
+  position: relative;
+}
+.chat-wallpaper::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image: url('/wallpaper/tepla-pattern.svg');
+  background-size: 400px 400px;
+  background-repeat: repeat;
+  opacity: 0.03;
+  pointer-events: none;
+}
+.chat-wallpaper-overlay {
+  position: relative;
+  z-index: 1;
+}
+
+/* ─── Message bubbles ─── */
+.bubble-sent {
+  background: linear-gradient(135deg, #5B21B6, #6C3DE8);
+  border-radius: 18px 18px 4px 18px;
+  color: white;
+  max-width: 65%;
+}
+.bubble-received {
+  background: var(--tepla-purple-surface);
+  border-radius: 18px 18px 18px 4px;
+  color: var(--tepla-text-primary);
+  max-width: 65%;
+}
+
+/* Wallpaper override */
+.chat-wallpaper .bubble-sent {
+  background: rgba(92,33,182,0.95);
+}
+.chat-wallpaper .bubble-received {
+  background: rgba(30,21,53,0.95);
+}
+
+/* ─── Online indicator ─── */
+.online-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--tepla-green-main);
+  border: 2px solid var(--bg-sidebar);
+}
+
+/* ─── Sidebar active ─── */
+.sidebar-item-active {
+  background: rgba(108,61,232,0.15);
+  border-left: 3px solid var(--tepla-purple-main);
+}
+
+.sidebar-icon-active {
+  background: rgba(108,61,232,0.2);
+  color: var(--tepla-purple-main);
+  border-left: 3px solid var(--tepla-purple-main);
+  border-radius: 0 8px 8px 0;
+}
+
+/* ─── Unread badge ─── */
+.unread-badge {
+  background: var(--tepla-purple-main);
+  color: white;
+  border-radius: 9999px;
+  font-size: 11px;
+  font-weight: 600;
+  min-width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 6px;
+}
+
+/* ─── Reactions ─── */
+.reaction-bubble {
+  background: var(--tepla-purple-surface);
+  border: 1px solid var(--border-solid);
+  border-radius: 100px;
+  padding: 4px 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
+}
+.reaction-bubble.own {
+  background: var(--bg-hover);
+  border-color: var(--tepla-purple-main);
+}
+
+/* ─── Auth card ─── */
+.auth-card {
+  background: rgba(19,13,36,0.92);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid rgba(108,61,232,0.25);
+  border-radius: 24px;
+  max-width: 420px;
+  width: 100%;
+}
+
+/* ─── Hover lift ─── */
+.hover-lift {
+  transition: transform var(--transition), box-shadow var(--transition);
+}
+.hover-lift:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-md);
+}

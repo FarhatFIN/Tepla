@@ -1,0 +1,22 @@
+{
+  "name": "@tepla/crypto",
+  "version": "2.0.0",
+  "description": "Tepla Messenger — cryptographic utilities (merkle tree, key transparency)",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./merkle": "./src/merkle.ts"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsc -w -p tsconfig.json"
+  },
+  "dependencies": {
+    "@noble/ed25519": "^3.0.1",
+    "@noble/hashes": "^2.0.1"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0"
+  }
+}

@@ -1,0 +1,6 @@
+packages:
+  - 'client'
+  - 'shared/*'
+  - 'services/*'
+  - 'services/workers/*'
+  - 'gateway/*'

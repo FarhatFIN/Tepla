@@ -1,0 +1,68 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "tepla-client",
+      "runtimeExecutable": "cmd",
+      "runtimeArgs": ["/c", "cd client && npm run dev"],
+      "port": 3080
+    },
+    {
+      "name": "api-gateway",
+      "runtimeExecutable": "cmd",
+      "runtimeArgs": ["/c", "node_modules\\.bin\\tsx --tsconfig tsconfig.services.json watch gateway/api-gateway/src/index.ts"],
+      "port": 3000
+    },
+    {
+      "name": "auth-user-service",
+      "runtimeExecutable": "cmd",
+      "runtimeArgs": ["/c", "node_modules\\.bin\\tsx --tsconfig tsconfig.services.json watch services/auth-user-service/src/index.ts"],
+      "port": 3001
+    },
+    {
+      "name": "messaging-core-service",
+      "runtimeExecutable": "cmd",
+      "runtimeArgs": ["/c", "node_modules\\.bin\\tsx --tsconfig tsconfig.services.json watch services/messaging-core-service/src/index.ts"],
+      "port": 3004
+    },
+    {
+      "name": "media-service",
+      "runtimeExecutable": "cmd",
+      "runtimeArgs": ["/c", "node_modules\\.bin\\tsx --tsconfig tsconfig.services.json watch services/media-service/src/index.ts"],
+      "port": 3007
+    },
+    {
+      "name": "realtime-service",
+      "runtimeExecutable": "cmd",
+      "runtimeArgs": ["/c", "node_modules\\.bin\\tsx --tsconfig tsconfig.services.json watch services/realtime-service/src/index.ts"],
+      "port": 3100
+    },
+    {
+      "name": "bot-service",
+      "runtimeExecutable": "cmd",
+      "runtimeArgs": ["/c", "node_modules\\.bin\\tsx --tsconfig tsconfig.services.json watch services/bot-service/src/index.ts"],
+      "port": 3013
+    },
+    {
+      "name": "webapp-service",
+      "runtimeExecutable": "cmd",
+      "runtimeArgs": ["/c", "node_modules\\.bin\\tsx --tsconfig tsconfig.services.json watch services/webapp-service/src/index.ts"],
+      "port": 3017
+    },
+    {
+      "name": "search-worker",
+      "runtimeExecutable": "cmd",
+      "runtimeArgs": ["/c", "node_modules\\.bin\\tsx --tsconfig tsconfig.services.json watch services/workers/search-worker/src/index.ts"]
+    },
+    {
+      "name": "moderation-worker",
+      "runtimeExecutable": "cmd",
+      "runtimeArgs": ["/c", "node_modules\\.bin\\tsx --tsconfig tsconfig.services.json watch services/workers/moderation-worker/src/index.ts"]
+    },
+    {
+      "name": "analytics-worker",
+      "runtimeExecutable": "cmd",
+      "runtimeArgs": ["/c", "node_modules\\.bin\\tsx --tsconfig tsconfig.services.json watch services/workers/analytics-worker/src/index.ts"]
+    }
+  ]
+}

@@ -1,0 +1,250 @@
+<html>
+  <head>
+    <title>Tepla Launcher</title>
+    <hta:application
+      applicationname="Tepla Launcher"
+      border="thin"
+      caption="yes"
+      contextmenu="no"
+      maximizebutton="no"
+      minimizebutton="yes"
+      navigable="no"
+      scroll="no"
+      singleinstance="yes"
+      sysmenu="yes"
+      windowstate="normal"
+    />
+    <style>
+      body {
+        margin: 0;
+        font-family: "Segoe UI", sans-serif;
+        background: linear-gradient(180deg, #0c1526 0%, #121f36 100%);
+        color: #f5f7fb;
+      }
+
+      .shell {
+        padding: 28px;
+      }
+
+      .hero {
+        margin-bottom: 24px;
+      }
+
+      .eyebrow {
+        font-size: 12px;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        color: #8cb8ff;
+        margin-bottom: 8px;
+      }
+
+      h1 {
+        margin: 0 0 8px;
+        font-size: 30px;
+      }
+
+      .sub {
+        margin: 0;
+        color: #bfd0ee;
+        line-height: 1.5;
+      }
+
+      .status {
+        margin-top: 18px;
+        padding: 14px 16px;
+        border-radius: 16px;
+        background: rgba(255, 255, 255, 0.08);
+        color: #d8e5fa;
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 14px;
+        margin-top: 18px;
+      }
+
+      button {
+        border: 0;
+        border-radius: 16px;
+        padding: 16px 18px;
+        text-align: left;
+        background: #1a2a46;
+        color: #f5f7fb;
+        cursor: pointer;
+        transition: transform 120ms ease, background 120ms ease;
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.18);
+      }
+
+      button:hover {
+        transform: translateY(-1px);
+        background: #223557;
+      }
+
+      .primary {
+        background: linear-gradient(135deg, #4aa3ff 0%, #2d6df6 100%);
+      }
+
+      .danger {
+        background: linear-gradient(135deg, #a84242 0%, #7f2336 100%);
+      }
+
+      .caption {
+        display: block;
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.12em;
+        color: rgba(255, 255, 255, 0.7);
+        margin-bottom: 8px;
+      }
+
+      .title {
+        display: block;
+        font-size: 17px;
+        font-weight: 700;
+        margin-bottom: 4px;
+      }
+
+      .hint {
+        display: block;
+        color: #ccdaef;
+        line-height: 1.4;
+      }
+
+      .footer {
+        margin-top: 20px;
+        color: #9db3d7;
+        font-size: 12px;
+      }
+    </style>
+    <script language="javascript">
+      function launcherDir() {
+        var raw = decodeURIComponent(document.location.pathname).replace(/\//g, "\\");
+        if (raw.charAt(0) === "\\") {
+          raw = raw.substring(1);
+        }
+
+        var fso = new ActiveXObject("Scripting.FileSystemObject");
+        return fso.GetParentFolderName(raw);
+      }
+
+      function scriptPath() {
+        var fso = new ActiveXObject("Scripting.FileSystemObject");
+        var localPackaged = fso.BuildPath(launcherDir(), "tepla-dev.ps1");
+        if (fso.FileExists(localPackaged)) {
+          return localPackaged;
+        }
+
+        return fso.BuildPath(launcherDir(), "..\\..\\scripts\\dev\\tepla-dev.ps1");
+      }
+
+      function appDataState() {
+        var shell = new ActiveXObject("WScript.Shell");
+        return shell.ExpandEnvironmentStrings("%TEMP%\\TeplaLauncher\\state.json");
+      }
+
+      function readRepoRoot() {
+        try {
+          var fso = new ActiveXObject("Scripting.FileSystemObject");
+          var path = appDataState();
+          if (!fso.FileExists(path)) {
+            return "Repo root is not selected yet";
+          }
+
+          var stream = fso.OpenTextFile(path, 1, false);
+          var raw = stream.ReadAll();
+          stream.Close();
+          var state = JSON.parse(raw);
+          return state.repoRoot || "Repo root is not selected yet";
+        } catch (err) {
+          return "Repo root is not selected yet";
+        }
+      }
+
+      function runAction(action) {
+        var shell = new ActiveXObject("WScript.Shell");
+        var command = 'powershell.exe -ExecutionPolicy Bypass -File "' + scriptPath() + '" -Action ' + action;
+        shell.Run(command, 1, false);
+        setTimeout(refreshStatus, 300);
+      }
+
+      function refreshStatus() {
+        document.getElementById("repo-root").innerText = readRepoRoot();
+      }
+
+      window.onload = refreshStatus;
+    </script>
+  </head>
+  <body>
+    <div class="shell">
+      <div class="hero">
+        <div class="eyebrow">Tepla Beta Ops</div>
+        <h1>Tepla Launcher</h1>
+        <p class="sub">Starts the same Docker stack used on Windows, macOS, and Linux: databases, gateway, auth, messaging, realtime, media, and client UI.</p>
+      </div>
+
+      <div class="status">
+        <strong>Repository</strong>
+        <div id="repo-root">Loading...</div>
+      </div>
+
+      <div class="grid">
+        <button onclick="runAction('SelectRepo')">
+          <span class="caption">Setup</span>
+          <span class="title">Select Repo</span>
+          <span class="hint">Choose the Tepla repository root once and save it for future runs.</span>
+        </button>
+
+        <button class="primary" onclick="runAction('StartAll')">
+          <span class="caption">Docker</span>
+          <span class="title">Start Stack</span>
+          <span class="hint">Build and start Postgres, Redis, Kafka, services, and client.</span>
+        </button>
+
+        <button onclick="runAction('StartInfra')">
+          <span class="caption">Infrastructure</span>
+          <span class="title">Start Infra</span>
+          <span class="hint">Start Postgres, Redis, Kafka, Elasticsearch, MinIO, and LiveKit.</span>
+        </button>
+
+        <button onclick="runAction('StartCore')">
+          <span class="caption">Backend</span>
+          <span class="title">Start Core Services</span>
+          <span class="hint">For local pnpm dev only; Docker Start Stack is the normal path.</span>
+        </button>
+
+        <button onclick="runAction('StartClient')">
+          <span class="caption">Frontend</span>
+          <span class="title">Start Client</span>
+          <span class="hint">Run the standalone Tepla client on port 3080.</span>
+        </button>
+
+        <button onclick="runAction('StartBot')">
+          <span class="caption">Platform</span>
+          <span class="title">Start Bot Platform</span>
+          <span class="hint">Disabled until a real bot service exists in this repository.</span>
+        </button>
+
+        <button onclick="runAction('OpenApp')">
+          <span class="caption">Testing</span>
+          <span class="title">Open Tepla</span>
+          <span class="hint">Open the beta client in your browser.</span>
+        </button>
+
+        <button onclick="runAction('OpenHealth')">
+          <span class="caption">Observability</span>
+          <span class="title">Open Gateway Health</span>
+          <span class="hint">Check the API gateway health endpoint before beta runs.</span>
+        </button>
+
+        <button class="danger" onclick="runAction('StopAll')">
+          <span class="caption">Shutdown</span>
+          <span class="title">Stop Stack</span>
+          <span class="hint">Stop spawned service windows and bring Docker services down.</span>
+        </button>
+      </div>
+
+      <div class="footer">Cross-platform CLI: <code>node scripts/dev/tepla-dev.mjs start</code>. Windows UI wraps the same Docker stack.</div>
+    </div>
+  </body>
+</html>
