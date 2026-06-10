@@ -1050,7 +1050,65 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
 
       const sessions = await sessionManager.getActiveSessions(userId);
 
-      res.json({ success: true, data: sessions });
+      // SECURITY: never expose raw session tokens. Sessions are identified
+      // by a derived hash id; the client marks its own session by sending
+      // its token in the x-session-token header.
+      const currentToken = (req.headers['x-session-token'] as string) || '';
+      const sanitized = sessions
+        .map((session) => ({
+          id: sha256(session.token).slice(0, 16),
+          deviceFingerprint: session.deviceFingerprint || null,
+          ipAddress: session.ipAddress || null,
+          userAgent: session.userAgent || null,
+          created: session.created,
+          isCurrent: Boolean(currentToken) && session.token === currentToken,
+        }))
+        .sort((a, b) => b.created - a.created);
+
+      res.json({ success: true, data: sanitized });
+    } catch (err) { next(err); }
+  });
+
+  // DELETE /api/auth/sessions/:id - terminate a single session (Telegram-style)
+  router.delete('/sessions/:id', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const userId = req.headers['x-user-id'] as string;
+      if (!userId) throw new UnauthorizedError('User ID required');
+
+      const sessions = await sessionManager.getActiveSessions(userId);
+      const target = sessions.find((session) => sha256(session.token).slice(0, 16) === req.params.id);
+      if (!target) throw new ValidationError('Session not found');
+
+      await sessionManager.revoke(target.token);
+      await AuditLogger.log('session_terminated', { userId, sessionId: req.params.id, ip: req.ip });
+
+      res.json({ success: true, data: { id: req.params.id, revoked: true } });
+    } catch (err) { next(err); }
+  });
+
+  // POST /api/auth/sessions/revoke-others - terminate all sessions except the current one
+  router.post('/sessions/revoke-others', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const userId = req.headers['x-user-id'] as string;
+      if (!userId) throw new UnauthorizedError('User ID required');
+
+      const currentToken = (req.headers['x-session-token'] as string) || req.body?.currentToken;
+      if (!currentToken) throw new ValidationError('Current session token is required');
+
+      const sessions = await sessionManager.getActiveSessions(userId);
+      const current = sessions.find((session) => session.token === currentToken);
+      if (!current) throw new UnauthorizedError('Current session not found');
+
+      let revoked = 0;
+      for (const session of sessions) {
+        if (session.token !== currentToken) {
+          await sessionManager.revoke(session.token);
+          revoked += 1;
+        }
+      }
+      await AuditLogger.log('sessions_revoked_others', { userId, revoked, ip: req.ip });
+
+      res.json({ success: true, data: { revoked } });
     } catch (err) { next(err); }
   });
 

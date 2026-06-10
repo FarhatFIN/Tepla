@@ -371,16 +371,20 @@ function router(kafka: KafkaProducer): Router {
       const ids = Array.isArray(req.body?.userIds) ? req.body.userIds : [req.body?.userId].filter(Boolean);
       if (ids.length === 0) throw new ValidationError('userId is required');
 
+      const added: string[] = [];
       for (const userId of ids) {
+        const banned = await pool.query('SELECT 1 FROM chat_bans WHERE chat_id = $1 AND user_id = $2', [chatId, userId]);
+        if (banned.rows[0]) continue; // banned users must be unbanned before re-adding
         await pool.query(
           `INSERT INTO chat_members (chat_id, user_id, role) VALUES ($1, $2, 'member')
            ON CONFLICT DO NOTHING`,
           [chatId, userId],
         );
         await publishMemberJoined(kafka, req, chatId, userId);
+        added.push(userId);
       }
       await refreshMembersCount(chatId);
-      res.status(201).json({ success: true, data: { chatId, added: ids } });
+      res.status(201).json({ success: true, data: { chatId, added } });
     } catch (err) { next(err); }
   });
 
@@ -567,6 +571,8 @@ function router(kafka: KafkaProducer): Router {
       const chat = await pool.query("SELECT id, is_public FROM chats WHERE id = $1 AND type = 'channel'", [chatId]);
       if (!chat.rows[0]) throw new ValidationError('Channel not found');
       if (!chat.rows[0].is_public) throw new ForbiddenError('Channel is private');
+      const ban = await pool.query('SELECT 1 FROM chat_bans WHERE chat_id = $1 AND user_id = $2', [chatId, userId]);
+      if (ban.rows[0]) throw new ForbiddenError('You are banned from this channel');
       await pool.query(
         `INSERT INTO chat_members (chat_id, user_id, role) VALUES ($1, $2, 'member')
          ON CONFLICT DO NOTHING`,
@@ -709,10 +715,14 @@ function router(kafka: KafkaProducer): Router {
              LEFT JOIN users u ON u.id = m.sender_id
              WHERE m.chat_id = $1 AND m.is_deleted = false
                AND (m.expires_at IS NULL OR m.expires_at > NOW())
+               AND NOT EXISTS (
+                 SELECT 1 FROM message_hidden mh
+                 WHERE mh.message_id = m.id AND mh.user_id = $4
+               )
                AND m.created_at < $3
              ORDER BY m.created_at DESC
              LIMIT $2`,
-            [chatId, limit, before.toISOString()],
+            [chatId, limit, before.toISOString(), userId],
           )
         : await pool.query(
             `SELECT m.*, u.display_name AS sender_name
@@ -720,9 +730,13 @@ function router(kafka: KafkaProducer): Router {
              LEFT JOIN users u ON u.id = m.sender_id
              WHERE m.chat_id = $1 AND m.is_deleted = false
                AND (m.expires_at IS NULL OR m.expires_at > NOW())
+               AND NOT EXISTS (
+                 SELECT 1 FROM message_hidden mh
+                 WHERE mh.message_id = m.id AND mh.user_id = $3
+               )
              ORDER BY m.created_at DESC
              LIMIT $2`,
-            [chatId, limit],
+            [chatId, limit, userId],
           );
 
       const messages = await attachFiles(rows.rows.reverse());
@@ -758,10 +772,49 @@ function router(kafka: KafkaProducer): Router {
       }
       await requireMember(chatId, userId);
 
-      const chatRow = await pool.query('SELECT type, message_ttl_seconds FROM chats WHERE id = $1', [chatId]);
+      const chatRow = await pool.query('SELECT type, message_ttl_seconds, slow_mode_seconds FROM chats WHERE id = $1', [chatId]);
       // Channels are broadcast-only: subscribers read, only owner/admins post
       if (chatRow.rows[0]?.type === 'channel') {
         await requireAdmin(chatId, userId);
+      }
+
+      // Secret chats accept only E2E ciphertext: the server never sees plaintext.
+      // The client encrypts with Double Ratchet keys and sends the IV/envelope alongside.
+      const { contentIv, keyEnvelope } = req.body || {};
+      const isSecretChat = chatRow.rows[0]?.type === 'secret';
+      if (isSecretChat) {
+        if (typeof contentIv !== 'string' || contentIv.length === 0 || contentIv.length > 256) {
+          throw new ValidationError('Secret chat messages require contentIv (E2E encryption envelope)');
+        }
+        if (attachmentList.length > 0) {
+          throw new ValidationError('Plain attachments are not allowed in secret chats');
+        }
+      }
+
+      // Restricted (muted) members cannot send until muted_until passes
+      const membership = await pool.query(
+        'SELECT role, muted_until FROM chat_members WHERE chat_id = $1 AND user_id = $2',
+        [chatId, userId],
+      );
+      const me = membership.rows[0];
+      const isPrivileged = Boolean(me && ['owner', 'admin'].includes(me.role));
+      if (me?.muted_until && new Date(me.muted_until).getTime() > Date.now() && !isPrivileged) {
+        throw new ForbiddenError('You are restricted from sending messages in this chat');
+      }
+
+      // Slow mode: non-admin members must wait between messages
+      const slowMode = Number(chatRow.rows[0]?.slow_mode_seconds) || 0;
+      if (slowMode > 0 && !isPrivileged) {
+        const lastMessage = await pool.query(
+          'SELECT created_at FROM messages WHERE chat_id = $1 AND sender_id = $2 ORDER BY created_at DESC LIMIT 1',
+          [chatId, userId],
+        );
+        if (lastMessage.rows[0]) {
+          const elapsed = (Date.now() - new Date(lastMessage.rows[0].created_at).getTime()) / 1000;
+          if (elapsed < slowMode) {
+            throw new ValidationError(`Slow mode is enabled. Wait ${Math.ceil(slowMode - elapsed)}s before sending again`);
+          }
+        }
       }
 
       // Disappearing messages: honor the chat's message TTL when configured
@@ -771,11 +824,15 @@ function router(kafka: KafkaProducer): Router {
       const messageType = attachmentList.length > 0 && type === 'text' ? fileKind(attachmentList[0]) : type;
       // Dedup/replay protection: the same (chat, sender, clientMessageId) is inserted only once.
       const row = await pool.query(
-        `INSERT INTO messages (id, chat_id, sender_id, content, type, reply_to_id, ttl_seconds, expires_at, client_message_id)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        `INSERT INTO messages (id, chat_id, sender_id, content, type, reply_to_id, ttl_seconds, expires_at, client_message_id, content_iv, key_envelope)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
          ON CONFLICT (chat_id, sender_id, client_message_id) WHERE client_message_id IS NOT NULL DO NOTHING
          RETURNING *`,
-        [uuid(), chatId, userId, content, messageType, replyToId || null, ttlSeconds, expiresAt, clientMessageId || null],
+        [
+          uuid(), chatId, userId, content, messageType, replyToId || null, ttlSeconds, expiresAt, clientMessageId || null,
+          isSecretChat ? contentIv : null,
+          isSecretChat && keyEnvelope ? JSON.stringify(keyEnvelope) : null,
+        ],
       );
       if (!row.rows[0]) {
         // Duplicate delivery (retry or replay) — return the original message,
@@ -841,6 +898,16 @@ function router(kafka: KafkaProducer): Router {
         [messageId],
       );
       if (!original.rows[0]) throw new ValidationError('Message not found');
+
+      // Telegram behavior: secret chat content cannot leave the secret chat,
+      // and plaintext cannot be forwarded into an E2E chat
+      const chatTypes = await pool.query(
+        'SELECT id, type FROM chats WHERE id = ANY($1::uuid[])',
+        [[original.rows[0].chat_id, toChatId]],
+      );
+      if (chatTypes.rows.some((chat) => chat.type === 'secret')) {
+        throw new ForbiddenError('Forwarding is not allowed for secret chats');
+      }
 
       // Must be a member of both the source and the target chat
       await requireMember(original.rows[0].chat_id, userId);
@@ -979,6 +1046,7 @@ function router(kafka: KafkaProducer): Router {
          JOIN chat_members cm ON cm.chat_id = m.chat_id AND cm.user_id = $1
          JOIN chats c ON c.id = m.chat_id
          WHERE m.is_deleted = false AND m.content ILIKE $2
+           AND c.type <> 'secret'
          ORDER BY m.created_at DESC
          LIMIT 50`,
         [userId, like],
@@ -1120,6 +1188,17 @@ function router(kafka: KafkaProducer): Router {
       if (!existing.rows[0]) throw new ValidationError('Message not found');
       const chatId = existing.rows[0].chat_id;
 
+      // Telegram-style "delete for me": hides the message only for this user
+      const forMe = req.query.scope === 'me' || req.body?.forMe === true;
+      if (forMe) {
+        await requireMember(chatId, userId);
+        await pool.query(
+          'INSERT INTO message_hidden (message_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+          [req.params.id, userId],
+        );
+        return res.json({ success: true, data: { id: req.params.id, scope: 'me' } });
+      }
+
       // Senders may delete their own messages; group/channel admins may delete any.
       if (existing.rows[0].sender_id !== userId) {
         await requireAdmin(chatId, userId);
@@ -1213,6 +1292,504 @@ function router(kafka: KafkaProducer): Router {
         [req.params.messageId],
       );
       res.json({ success: true, data: rows.rows });
+    } catch (err) { next(err); }
+  });
+
+  // ─── Polls (Telegram-style, incl. quizzes) ──────────────────────
+
+  async function findPoll(idOrMessageId: string): Promise<any> {
+    const row = await pool.query('SELECT * FROM polls WHERE id = $1 OR message_id = $1', [idOrMessageId]);
+    if (!row.rows[0]) throw new ValidationError('Poll not found');
+    return row.rows[0];
+  }
+
+  async function pollResults(pollId: string): Promise<{ counts: Array<{ option_id: number; votes: number }>; totalVoters: number }> {
+    const counts = await pool.query(
+      `SELECT opt AS option_id, COUNT(*)::int AS votes
+       FROM poll_votes, unnest(option_ids) AS opt
+       WHERE poll_id = $1
+       GROUP BY opt ORDER BY opt`,
+      [pollId],
+    );
+    const total = await pool.query('SELECT COUNT(*)::int AS n FROM poll_votes WHERE poll_id = $1', [pollId]);
+    return { counts: counts.rows, totalVoters: total.rows[0].n };
+  }
+
+  r.post('/polls', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const userId = userIdFrom(req);
+      const {
+        chatId, question, options,
+        isAnonymous = true, allowsMultiple = false, isQuiz = false,
+        correctOption = null, closesInSeconds = null,
+      } = req.body || {};
+      if (!chatId || typeof question !== 'string' || question.trim().length < 1 || question.length > 300) {
+        throw new ValidationError('chatId and question (1-300 characters) are required');
+      }
+      const opts = (Array.isArray(options) ? options : [])
+        .map((option: unknown) => String(option).trim().slice(0, 100))
+        .filter((option: string) => option.length > 0);
+      if (opts.length < 2 || opts.length > 10) throw new ValidationError('Poll requires 2-10 options');
+      if (isQuiz === true && (!Number.isInteger(correctOption) || correctOption < 0 || correctOption >= opts.length)) {
+        throw new ValidationError('Quiz polls require a valid correctOption index');
+      }
+      if (closesInSeconds !== null && (!Number.isInteger(closesInSeconds) || closesInSeconds < 5 || closesInSeconds > 604800)) {
+        throw new ValidationError('closesInSeconds must be an integer between 5 and 604800');
+      }
+      await requireMember(chatId, userId);
+      const chat = await pool.query('SELECT type FROM chats WHERE id = $1', [chatId]);
+      if (chat.rows[0]?.type === 'channel') await requireAdmin(chatId, userId);
+
+      const messageId = uuid();
+      const messageRow = await pool.query(
+        `INSERT INTO messages (id, chat_id, sender_id, content, type)
+         VALUES ($1, $2, $3, $4, 'poll') RETURNING *`,
+        [messageId, chatId, userId, question.trim()],
+      );
+      const closesAt = closesInSeconds ? new Date(Date.now() + closesInSeconds * 1000).toISOString() : null;
+      const poll = await pool.query(
+        `INSERT INTO polls (id, message_id, chat_id, creator_id, question, options, is_anonymous, allows_multiple, is_quiz, correct_option, closes_at)
+         VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10, $11)
+         RETURNING *`,
+        [
+          uuid(), messageId, chatId, userId, question.trim(),
+          JSON.stringify(opts.map((text: string, id: number) => ({ id, text }))),
+          isAnonymous !== false, allowsMultiple === true, isQuiz === true,
+          isQuiz === true ? correctOption : null, closesAt,
+        ],
+      );
+
+      await kafka.publish({
+        id: uuid(),
+        type: EventType.MESSAGE_SENT,
+        topic: EventTopic.MESSAGE_EVENTS,
+        timestamp: new Date().toISOString(),
+        source: 'messaging-core-service',
+        correlationId: req.correlationId || uuid(),
+        userId: userId as UserId,
+        payload: { chatId, ...messageRow.rows[0], poll: poll.rows[0] },
+      });
+
+      res.status(201).json({ success: true, data: { message: messageRow.rows[0], poll: poll.rows[0] } });
+    } catch (err) { next(err); }
+  });
+
+  r.get('/polls/:id', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const userId = userIdFrom(req);
+      const poll = await findPoll(req.params.id);
+      await requireMember(poll.chat_id, userId);
+      const results = await pollResults(poll.id);
+      const mine = await pool.query('SELECT option_ids FROM poll_votes WHERE poll_id = $1 AND user_id = $2', [poll.id, userId]);
+      const hasVoted = Boolean(mine.rows[0]);
+      // Quiz correct answer is revealed only after voting or once the poll is closed
+      const exposeCorrect = !poll.is_quiz || hasVoted || poll.is_closed;
+      res.json({
+        success: true,
+        data: {
+          ...poll,
+          correct_option: exposeCorrect ? poll.correct_option : null,
+          ...results,
+          myOptionIds: mine.rows[0]?.option_ids || [],
+        },
+      });
+    } catch (err) { next(err); }
+  });
+
+  r.post('/polls/:id/vote', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const userId = userIdFrom(req);
+      const poll = await findPoll(req.params.id);
+      await requireMember(poll.chat_id, userId);
+      if (poll.is_closed || (poll.closes_at && new Date(poll.closes_at).getTime() <= Date.now())) {
+        throw new ValidationError('Poll is closed');
+      }
+      const optionCount = Array.isArray(poll.options) ? poll.options.length : 0;
+      const optionIds: number[] = [...new Set((Array.isArray(req.body?.optionIds) ? req.body.optionIds : []) as unknown[])]
+        .filter((value): value is number => Number.isInteger(value) && (value as number) >= 0 && (value as number) < optionCount);
+      if (optionIds.length === 0) throw new ValidationError('optionIds must contain valid option indexes');
+      if (!poll.allows_multiple && optionIds.length !== 1) throw new ValidationError('This poll allows a single choice');
+
+      if (poll.is_quiz) {
+        const existing = await pool.query('SELECT 1 FROM poll_votes WHERE poll_id = $1 AND user_id = $2', [poll.id, userId]);
+        if (existing.rows[0]) throw new ValidationError('Quiz answers cannot be changed');
+      }
+
+      await pool.query(
+        `INSERT INTO poll_votes (poll_id, user_id, option_ids) VALUES ($1, $2, $3)
+         ON CONFLICT (poll_id, user_id) DO UPDATE SET option_ids = EXCLUDED.option_ids, created_at = NOW()`,
+        [poll.id, userId, optionIds],
+      );
+      const results = await pollResults(poll.id);
+
+      await kafka.publish({
+        id: uuid(),
+        type: EventType.MESSAGE_EDITED,
+        topic: EventTopic.MESSAGE_EVENTS,
+        timestamp: new Date().toISOString(),
+        source: 'messaging-core-service',
+        correlationId: req.correlationId || uuid(),
+        userId: userId as UserId,
+        payload: { chatId: poll.chat_id, messageId: poll.message_id, poll: { ...poll, ...results } },
+      });
+
+      res.json({
+        success: true,
+        data: {
+          pollId: poll.id,
+          myOptionIds: optionIds,
+          isCorrect: poll.is_quiz ? optionIds.includes(poll.correct_option) : null,
+          ...results,
+        },
+      });
+    } catch (err) { next(err); }
+  });
+
+  r.delete('/polls/:id/vote', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const userId = userIdFrom(req);
+      const poll = await findPoll(req.params.id);
+      await requireMember(poll.chat_id, userId);
+      if (poll.is_quiz) throw new ValidationError('Quiz answers cannot be retracted');
+      if (poll.is_closed) throw new ValidationError('Poll is closed');
+      await pool.query('DELETE FROM poll_votes WHERE poll_id = $1 AND user_id = $2', [poll.id, userId]);
+      const results = await pollResults(poll.id);
+      res.json({ success: true, data: { pollId: poll.id, ...results } });
+    } catch (err) { next(err); }
+  });
+
+  r.post('/polls/:id/close', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const userId = userIdFrom(req);
+      const poll = await findPoll(req.params.id);
+      await requireMember(poll.chat_id, userId);
+      if (poll.creator_id !== userId) {
+        await requireAdmin(poll.chat_id, userId);
+      }
+      const row = await pool.query('UPDATE polls SET is_closed = true WHERE id = $1 RETURNING *', [poll.id]);
+      const results = await pollResults(poll.id);
+
+      await kafka.publish({
+        id: uuid(),
+        type: EventType.MESSAGE_EDITED,
+        topic: EventTopic.MESSAGE_EVENTS,
+        timestamp: new Date().toISOString(),
+        source: 'messaging-core-service',
+        correlationId: req.correlationId || uuid(),
+        userId: userId as UserId,
+        payload: { chatId: poll.chat_id, messageId: poll.message_id, poll: { ...row.rows[0], ...results } },
+      });
+
+      res.json({ success: true, data: { ...row.rows[0], ...results } });
+    } catch (err) { next(err); }
+  });
+
+  r.get('/polls/:id/voters', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const userId = userIdFrom(req);
+      const poll = await findPoll(req.params.id);
+      await requireMember(poll.chat_id, userId);
+      if (poll.is_anonymous) throw new ForbiddenError('This poll is anonymous');
+      const rows = await pool.query(
+        `SELECT pv.user_id, pv.option_ids, pv.created_at, u.username, u.display_name, u.avatar_url
+         FROM poll_votes pv
+         LEFT JOIN users u ON u.id = pv.user_id
+         WHERE pv.poll_id = $1
+         ORDER BY pv.created_at ASC`,
+        [poll.id],
+      );
+      res.json({ success: true, data: rows.rows });
+    } catch (err) { next(err); }
+  });
+
+  // ─── Invite links (Telegram-style) ───────────────────────────
+
+  r.post('/chats/:id/invites', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const userId = userIdFrom(req);
+      const chatId = req.params.id;
+      await requireAdmin(chatId, userId);
+      const { expiresInSeconds = null, memberLimit = null } = req.body || {};
+      if (expiresInSeconds !== null && (!Number.isInteger(expiresInSeconds) || expiresInSeconds < 60 || expiresInSeconds > 31536000)) {
+        throw new ValidationError('expiresInSeconds must be an integer between 60 and 31536000');
+      }
+      if (memberLimit !== null && (!Number.isInteger(memberLimit) || memberLimit < 1 || memberLimit > 100000)) {
+        throw new ValidationError('memberLimit must be an integer between 1 and 100000');
+      }
+      const code = uuid().replace(/-/g, '');
+      const expiresAt = expiresInSeconds ? new Date(Date.now() + expiresInSeconds * 1000).toISOString() : null;
+      const row = await pool.query(
+        `INSERT INTO chat_invites (code, chat_id, created_by, expires_at, member_limit)
+         VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+        [code, chatId, userId, expiresAt, memberLimit],
+      );
+      res.status(201).json({ success: true, data: { ...row.rows[0], link: `/invite/${code}` } });
+    } catch (err) { next(err); }
+  });
+
+  r.get('/chats/:id/invites', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const userId = userIdFrom(req);
+      const chatId = req.params.id;
+      await requireAdmin(chatId, userId);
+      const rows = await pool.query(
+        `SELECT * FROM chat_invites WHERE chat_id = $1 AND revoked = false ORDER BY created_at DESC`,
+        [chatId],
+      );
+      res.json({ success: true, data: rows.rows.map((invite) => ({ ...invite, link: `/invite/${invite.code}` })) });
+    } catch (err) { next(err); }
+  });
+
+  r.delete('/invites/:code', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const userId = userIdFrom(req);
+      const invite = await pool.query('SELECT * FROM chat_invites WHERE code = $1', [req.params.code]);
+      if (!invite.rows[0]) throw new ValidationError('Invite not found');
+      await requireAdmin(invite.rows[0].chat_id, userId);
+      await pool.query('UPDATE chat_invites SET revoked = true WHERE code = $1', [req.params.code]);
+      res.json({ success: true, data: { code: req.params.code, revoked: true } });
+    } catch (err) { next(err); }
+  });
+
+  r.get('/invites/:code', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      userIdFrom(req);
+      const rows = await pool.query(
+        `SELECT i.code, i.expires_at, i.member_limit, i.uses, i.revoked,
+                c.id AS chat_id, c.type, c.name, c.avatar_url, c.description, c.members_count
+         FROM chat_invites i JOIN chats c ON c.id = i.chat_id
+         WHERE i.code = $1`,
+        [req.params.code],
+      );
+      const invite = rows.rows[0];
+      if (!invite || invite.revoked) throw new ValidationError('Invite link is invalid or revoked');
+      if (invite.expires_at && new Date(invite.expires_at).getTime() <= Date.now()) {
+        throw new ValidationError('Invite link has expired');
+      }
+      res.json({ success: true, data: invite });
+    } catch (err) { next(err); }
+  });
+
+  r.post('/invites/:code/join', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const userId = userIdFrom(req);
+      const rows = await pool.query('SELECT * FROM chat_invites WHERE code = $1', [req.params.code]);
+      const invite = rows.rows[0];
+      if (!invite || invite.revoked) throw new ValidationError('Invite link is invalid or revoked');
+      if (invite.expires_at && new Date(invite.expires_at).getTime() <= Date.now()) {
+        throw new ValidationError('Invite link has expired');
+      }
+      if (invite.member_limit !== null && invite.uses >= invite.member_limit) {
+        throw new ValidationError('Invite link usage limit reached');
+      }
+      const ban = await pool.query('SELECT 1 FROM chat_bans WHERE chat_id = $1 AND user_id = $2', [invite.chat_id, userId]);
+      if (ban.rows[0]) throw new ForbiddenError('You are banned from this chat');
+
+      const inserted = await pool.query(
+        `INSERT INTO chat_members (chat_id, user_id, role) VALUES ($1, $2, 'member')
+         ON CONFLICT DO NOTHING RETURNING user_id`,
+        [invite.chat_id, userId],
+      );
+      if (inserted.rows[0]) {
+        await pool.query('UPDATE chat_invites SET uses = uses + 1 WHERE code = $1', [req.params.code]);
+        await refreshMembersCount(invite.chat_id);
+        await publishMemberJoined(kafka, req, invite.chat_id, userId);
+      }
+      res.status(201).json({ success: true, data: { chatId: invite.chat_id, joined: Boolean(inserted.rows[0]) } });
+    } catch (err) { next(err); }
+  });
+
+  // ─── Bans & restrictions (Telegram-style moderation) ────────────
+
+  r.post('/chats/:id/members/:userId/ban', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const currentUserId = userIdFrom(req);
+      const chatId = req.params.id;
+      const targetUserId = req.params.userId;
+      if (targetUserId === currentUserId) throw new ValidationError('Cannot ban yourself');
+      await requireAdmin(chatId, currentUserId);
+
+      const target = await pool.query('SELECT role FROM chat_members WHERE chat_id = $1 AND user_id = $2', [chatId, targetUserId]);
+      const me = await pool.query('SELECT role FROM chat_members WHERE chat_id = $1 AND user_id = $2', [chatId, currentUserId]);
+      if (target.rows[0]?.role === 'owner') throw new ForbiddenError('Cannot ban the owner');
+      if (target.rows[0]?.role === 'admin' && me.rows[0]?.role !== 'owner') {
+        throw new ForbiddenError('Only the owner can ban admins');
+      }
+
+      const reason = typeof req.body?.reason === 'string' ? req.body.reason.slice(0, 500) : null;
+      await pool.query(
+        `INSERT INTO chat_bans (chat_id, user_id, banned_by, reason) VALUES ($1, $2, $3, $4)
+         ON CONFLICT (chat_id, user_id) DO UPDATE SET banned_by = EXCLUDED.banned_by, reason = EXCLUDED.reason, created_at = NOW()`,
+        [chatId, targetUserId, currentUserId, reason],
+      );
+      await pool.query('DELETE FROM chat_members WHERE chat_id = $1 AND user_id = $2', [chatId, targetUserId]);
+      await refreshMembersCount(chatId);
+      await publishMemberLeft(kafka, req, chatId, targetUserId);
+      res.json({ success: true, data: { chatId, userId: targetUserId, banned: true } });
+    } catch (err) { next(err); }
+  });
+
+  r.delete('/chats/:id/members/:userId/ban', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const currentUserId = userIdFrom(req);
+      const chatId = req.params.id;
+      await requireAdmin(chatId, currentUserId);
+      await pool.query('DELETE FROM chat_bans WHERE chat_id = $1 AND user_id = $2', [chatId, req.params.userId]);
+      res.json({ success: true, data: { chatId, userId: req.params.userId, banned: false } });
+    } catch (err) { next(err); }
+  });
+
+  r.get('/chats/:id/bans', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const currentUserId = userIdFrom(req);
+      const chatId = req.params.id;
+      await requireAdmin(chatId, currentUserId);
+      const rows = await pool.query(
+        `SELECT b.user_id, b.banned_by, b.reason, b.created_at, u.username, u.display_name, u.avatar_url
+         FROM chat_bans b LEFT JOIN users u ON u.id = b.user_id
+         WHERE b.chat_id = $1 ORDER BY b.created_at DESC`,
+        [chatId],
+      );
+      res.json({ success: true, data: rows.rows });
+    } catch (err) { next(err); }
+  });
+
+  r.patch('/chats/:id/members/:userId/restrict', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const currentUserId = userIdFrom(req);
+      const chatId = req.params.id;
+      const targetUserId = req.params.userId;
+      await requireAdmin(chatId, currentUserId);
+
+      const target = await pool.query('SELECT role FROM chat_members WHERE chat_id = $1 AND user_id = $2', [chatId, targetUserId]);
+      if (!target.rows[0]) throw new ValidationError('Member not found');
+      if (['owner', 'admin'].includes(target.rows[0].role)) throw new ForbiddenError('Cannot restrict admins');
+
+      const raw = req.body?.mutedForSeconds;
+      const seconds = raw === null || raw === undefined || raw === 0 ? null : Number(raw);
+      if (seconds !== null && (!Number.isInteger(seconds) || seconds < 30 || seconds > 31536000)) {
+        throw new ValidationError('mutedForSeconds must be null or an integer between 30 and 31536000');
+      }
+      const mutedUntil = seconds ? new Date(Date.now() + seconds * 1000).toISOString() : null;
+      const row = await pool.query(
+        'UPDATE chat_members SET muted_until = $3 WHERE chat_id = $1 AND user_id = $2 RETURNING user_id, muted_until',
+        [chatId, targetUserId, mutedUntil],
+      );
+
+      await kafka.publish({
+        id: uuid(),
+        type: EventType.MEMBER_ROLE_CHANGED,
+        topic: EventTopic.CHAT_EVENTS,
+        timestamp: new Date().toISOString(),
+        source: 'messaging-core-service',
+        correlationId: req.correlationId || uuid(),
+        userId: currentUserId as UserId,
+        payload: { chatId, userId: targetUserId, mutedUntil: row.rows[0].muted_until },
+      });
+
+      res.json({ success: true, data: { chatId, userId: targetUserId, mutedUntil: row.rows[0].muted_until } });
+    } catch (err) { next(err); }
+  });
+
+  // ─── Slow mode (Telegram-style) ──────────────────────────────
+
+  r.patch('/chats/:id/slowmode', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const userId = userIdFrom(req);
+      const chatId = req.params.id;
+      const seconds = Number(req.body?.seconds);
+      if (!Number.isInteger(seconds) || seconds < 0 || seconds > 21600) {
+        throw new ValidationError('seconds must be an integer between 0 and 21600');
+      }
+      const chat = await pool.query('SELECT type FROM chats WHERE id = $1', [chatId]);
+      if (!chat.rows[0]) throw new ValidationError('Chat not found');
+      if (chat.rows[0].type !== 'group') throw new ValidationError('Slow mode is only available in groups');
+      await requireAdmin(chatId, userId);
+
+      const row = await pool.query('UPDATE chats SET slow_mode_seconds = $2 WHERE id = $1 RETURNING *', [chatId, seconds]);
+
+      await kafka.publish({
+        id: uuid(),
+        type: EventType.CHAT_UPDATED,
+        topic: EventTopic.CHAT_EVENTS,
+        timestamp: new Date().toISOString(),
+        source: 'messaging-core-service',
+        correlationId: req.correlationId || uuid(),
+        userId: userId as UserId,
+        payload: { chatId, slowModeSeconds: seconds },
+      });
+
+      res.json({ success: true, data: row.rows[0] });
+    } catch (err) { next(err); }
+  });
+
+  // ─── Secret chats (E2E encrypted, Telegram-style) ───────────────
+
+  r.post('/secret-chats', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const userId = userIdFrom(req);
+      const { targetUserId } = req.body || {};
+      if (!targetUserId || targetUserId === userId) throw new ValidationError('Valid targetUserId is required');
+      const target = await pool.query('SELECT id FROM users WHERE id = $1', [targetUserId]);
+      if (!target.rows[0]) throw new ValidationError('User not found');
+
+      const existing = await pool.query(
+        `SELECT c.*
+         FROM chats c
+         JOIN chat_members a ON a.chat_id = c.id AND a.user_id = $1
+         JOIN chat_members b ON b.chat_id = c.id AND b.user_id = $2
+         WHERE c.type = 'secret'
+         LIMIT 1`,
+        [userId, targetUserId],
+      );
+      if (existing.rows[0]) {
+        return res.json({ success: true, data: existing.rows[0] });
+      }
+
+      const chat = await pool.query(
+        `INSERT INTO chats (id, type, created_by, members_count)
+         VALUES ($1, 'secret', $2, 2)
+         RETURNING *`,
+        [uuid(), userId],
+      );
+      await pool.query(
+        `INSERT INTO chat_members (chat_id, user_id, role)
+         VALUES ($1, $2, 'member'), ($1, $3, 'member')
+         ON CONFLICT DO NOTHING`,
+        [chat.rows[0].id, userId, targetUserId],
+      );
+
+      await publishMemberJoined(kafka, req, chat.rows[0].id, userId);
+      await publishMemberJoined(kafka, req, chat.rows[0].id, targetUserId);
+      res.status(201).json({ success: true, data: chat.rows[0] });
+    } catch (err) { next(err); }
+  });
+
+  // Destroy a secret chat: wipes the encrypted history for BOTH participants
+  r.delete('/secret-chats/:id', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const userId = userIdFrom(req);
+      const chatId = req.params.id;
+      const chat = await pool.query("SELECT id FROM chats WHERE id = $1 AND type = 'secret'", [chatId]);
+      if (!chat.rows[0]) throw new ValidationError('Secret chat not found');
+      await requireMember(chatId, userId);
+
+      await pool.query('DELETE FROM messages WHERE chat_id = $1', [chatId]);
+      await pool.query('DELETE FROM chat_members WHERE chat_id = $1', [chatId]);
+      await pool.query('DELETE FROM chats WHERE id = $1', [chatId]);
+
+      await kafka.publish({
+        id: uuid(),
+        type: EventType.CHAT_DELETED,
+        topic: EventTopic.CHAT_EVENTS,
+        timestamp: new Date().toISOString(),
+        source: 'messaging-core-service',
+        correlationId: req.correlationId || uuid(),
+        userId: userId as UserId,
+        payload: { chatId, secret: true, destroyedBy: userId },
+      });
+
+      res.json({ success: true, data: { chatId, destroyed: true } });
     } catch (err) { next(err); }
   });
 
