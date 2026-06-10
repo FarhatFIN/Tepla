@@ -29,16 +29,38 @@ function DateSeparator({ date }: { date: string }) {
   );
 }
 
+/** Distance from the bottom (px) under which we still consider the user "at the bottom". */
+const NEAR_BOTTOM_PX = 120;
+
+function prefersReducedMotion(): boolean {
+  return typeof window !== "undefined" && !!window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+}
+
 export default function MessageList({ messages, currentUserId, searchMatchIds = [], activeSearchMessageId }: MessageListProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const nearBottomRef = useRef(true);
   const messageRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const searchMatchSet = useMemo(() => new Set(searchMatchIds), [searchMatchIds]);
 
-  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages]);
+  const handleScroll = () => {
+    const el = containerRef.current;
+    if (!el) return;
+    nearBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < NEAR_BOTTOM_PX;
+  };
+
+  useEffect(() => {
+    const lastMessage = messages[messages.length - 1];
+    const isOwnMessage = lastMessage?.senderId === currentUserId;
+    // Don't yank the view while the user is reading history — only follow
+    // the bottom when they are already there, or when they sent the message.
+    if (!nearBottomRef.current && !isOwnMessage) return;
+    bottomRef.current?.scrollIntoView({ behavior: prefersReducedMotion() ? "auto" : "smooth" });
+  }, [messages, currentUserId]);
 
   useEffect(() => {
     if (!activeSearchMessageId) return;
-    messageRefs.current[activeSearchMessageId]?.scrollIntoView({ behavior: "smooth", block: "center" });
+    messageRefs.current[activeSearchMessageId]?.scrollIntoView({ behavior: prefersReducedMotion() ? "auto" : "smooth", block: "center" });
   }, [activeSearchMessageId]);
 
   if (messages.length === 0) {
@@ -70,6 +92,9 @@ export default function MessageList({ messages, currentUserId, searchMatchIds = 
       <div
         key={msg.id}
         ref={(node) => { messageRefs.current[msg.id] = node; }}
+        // content-visibility skips layout and paint for off-screen rows;
+        // contain-intrinsic-size keeps the scrollbar stable while skipped.
+        style={{ contentVisibility: "auto", containIntrinsicSize: "auto 64px" }}
         className={`${isSearchMatch ? "rounded-2xl transition-shadow" : ""} ${isActiveSearchMatch ? "ring-2 ring-[var(--accent)] ring-offset-2 ring-offset-[#130D24]" : isSearchMatch ? "ring-1 ring-[var(--accent)]/40" : ""}`}
       >
         <MessageBubble message={msg} isOwn={isOwn} isFirstInGroup={isFirstInGroup} isLastInGroup={isLastInGroup} />
@@ -78,7 +103,7 @@ export default function MessageList({ messages, currentUserId, searchMatchIds = 
   });
 
   return (
-    <div className="flex-1 overflow-y-auto chat-wallpaper">
+    <div ref={containerRef} onScroll={handleScroll} className="flex-1 overflow-y-auto chat-wallpaper">
       <div className="relative z-[1] mx-auto flex max-w-3xl flex-col px-4 py-3">{elements}<div ref={bottomRef} /></div>
     </div>
   );

@@ -11,15 +11,20 @@ import { useTranslation } from "@/hooks/useTranslation";
 import NewChatModal from "@/components/chat/NewChatModal";
 
 export default function Sidebar() {
-  const { chats, activeChatId, setActiveChat, folders, activeFolderId, setActiveFolder, createFolder, stories, searchQuery, setSearchQuery, toggleSettings, toggleWallet, toggleWBIT } = useChatStore(useShallow(s => ({ chats: s.chats, activeChatId: s.activeChatId, setActiveChat: s.setActiveChat, folders: s.folders, activeFolderId: s.activeFolderId, setActiveFolder: s.setActiveFolder, createFolder: s.createFolder, stories: s.stories, searchQuery: s.searchQuery, setSearchQuery: s.setSearchQuery, toggleSettings: s.toggleSettings, toggleWallet: s.toggleWallet, toggleWBIT: s.toggleWBIT })));
+  const { chats, activeChatId, setActiveChat, folders, activeFolderId, setActiveFolder, createFolder, stories, searchQuery, setSearchQuery, toggleSettings, toggleWallet, toggleWBIT, toggleArchive, togglePin, toggleMute, markAsRead } = useChatStore(useShallow(s => ({ chats: s.chats, activeChatId: s.activeChatId, setActiveChat: s.setActiveChat, folders: s.folders, activeFolderId: s.activeFolderId, setActiveFolder: s.setActiveFolder, createFolder: s.createFolder, stories: s.stories, searchQuery: s.searchQuery, setSearchQuery: s.setSearchQuery, toggleSettings: s.toggleSettings, toggleWallet: s.toggleWallet, toggleWBIT: s.toggleWBIT, toggleArchive: s.toggleArchive, togglePin: s.togglePin, toggleMute: s.toggleMute, markAsRead: s.markAsRead })));
   const { theme, toggleTheme } = useTheme();
   const t = useTranslation();
   const [showNewChat, setShowNewChat] = useState(false);
   const [newChatTab, setNewChatTab] = useState<"contact" | "group" | "channel">("contact");
+  const [showArchived, setShowArchived] = useState(false);
+  const [ctxMenu, setCtxMenu] = useState<{ chatId: string; x: number; y: number } | null>(null);
+
+  const archivedCount = useMemo(() => chats.filter((c) => c.isArchived).length, [chats]);
 
   const filteredChats = useMemo(() => {
-    let list = chats;
-    if (activeFolderId) {
+    // Archive is a separate view (Telegram-style); search looks everywhere
+    let list = searchQuery ? chats : chats.filter((c) => (showArchived ? c.isArchived : !c.isArchived));
+    if (!showArchived && activeFolderId) {
       const folder = folders.find((f) => f.id === activeFolderId);
       if (folder) list = list.filter((c) => folder.chatIds.includes(c.id));
     }
@@ -32,10 +37,11 @@ export default function Sidebar() {
       if (!a.isPinned && b.isPinned) return 1;
       return 0;
     });
-  }, [chats, activeFolderId, folders, searchQuery]);
+  }, [chats, activeFolderId, folders, searchQuery, showArchived]);
 
   const totalMessages = chats.reduce((sum, c) => sum + (c.unreadCount || 0), 0);
   const blockingCount = chats.filter(c => (c.unreadCount || 0) > 3).length;
+  const ctxChat = ctxMenu ? chats.find((c) => c.id === ctxMenu.chatId) : null;
 
   return (
     <aside className="flex h-full flex-col bg-[var(--bg-sidebar)] transition-colors">
@@ -94,21 +100,40 @@ export default function Sidebar() {
         </div>
       </div>
 
-      {/* Folder tabs */}
-      <div className="flex gap-1 overflow-x-auto px-3 pb-2 scrollbar-none">
-        <button onClick={() => setActiveFolder(null)} className={`shrink-0 rounded-lg px-3 py-1 text-xs font-medium transition-colors ${!activeFolderId ? "bg-[var(--accent)] text-white" : "bg-[var(--bg-input)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"}`}>
-          {t("all")}
-        </button>
-        {folders.map((f) => (
-          <button key={f.id} onClick={() => setActiveFolder(f.id === activeFolderId ? null : f.id)} className={`shrink-0 rounded-lg px-3 py-1 text-xs font-medium transition-colors ${f.id === activeFolderId ? "bg-[var(--accent)] text-white" : "bg-[var(--bg-input)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"}`}>
-            {f.icon} {f.name}
+      {/* Folder tabs (hidden inside the archive view) */}
+      {!showArchived && (
+        <div className="flex gap-1 overflow-x-auto px-3 pb-2 scrollbar-none">
+          <button onClick={() => setActiveFolder(null)} className={`shrink-0 rounded-lg px-3 py-1 text-xs font-medium transition-colors ${!activeFolderId ? "bg-[var(--accent)] text-white" : "bg-[var(--bg-input)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"}`}>
+            {t("all")}
           </button>
-        ))}
-      </div>
+          {folders.map((f) => (
+            <button key={f.id} onClick={() => setActiveFolder(f.id === activeFolderId ? null : f.id)} className={`shrink-0 rounded-lg px-3 py-1 text-xs font-medium transition-colors ${f.id === activeFolderId ? "bg-[var(--accent)] text-white" : "bg-[var(--bg-input)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"}`}>
+              {f.icon} {f.name}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* Archive entry / back row */}
+      {!searchQuery && (showArchived ? (
+        <button onClick={() => setShowArchived(false)} className="flex items-center gap-3 border-b border-[var(--border)] px-4 py-2.5 text-left transition-colors hover:bg-[var(--bg-hover)]">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2"><polyline points="15 18 9 12 15 6"/></svg>
+          <span className="text-sm font-semibold text-[var(--text-primary)]">{t("archived_chats") || "Archive"}</span>
+          <span className="ml-auto text-[10px] text-[var(--text-tertiary)]">{archivedCount}</span>
+        </button>
+      ) : archivedCount > 0 && (
+        <button onClick={() => setShowArchived(true)} className="flex items-center gap-3 px-4 py-2 text-left transition-colors hover:bg-[var(--bg-hover)]">
+          <div className="flex h-7 w-7 items-center justify-center rounded-full bg-[var(--bg-input)] text-[var(--text-tertiary)]">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>
+          </div>
+          <span className="text-xs font-medium text-[var(--text-secondary)]">{t("archived_chats") || "Archive"}</span>
+          <span className="ml-auto rounded-full bg-[var(--bg-input)] px-1.5 py-0.5 text-[10px] text-[var(--text-tertiary)]">{archivedCount}</span>
+        </button>
+      ))}
 
       {/* Chat list */}
       <nav className="flex-1 overflow-y-auto">
-        {filteredChats.length === 0 && !searchQuery && (
+        {filteredChats.length === 0 && !searchQuery && !showArchived && (
           <div className="flex flex-col items-center gap-4 px-6 py-10">
             <p className="text-sm text-[var(--text-tertiary)]">{t("no_chats")}</p>
             <div className="flex flex-col gap-2 w-full">
@@ -142,6 +167,9 @@ export default function Sidebar() {
             </div>
           </div>
         )}
+        {filteredChats.length === 0 && showArchived && !searchQuery && (
+          <p className="px-6 py-10 text-center text-sm text-[var(--text-tertiary)]">{t("archive_empty") || "Archive is empty"}</p>
+        )}
         {filteredChats.map((chat) => {
           // For direct chats, show the other user's info
           const displayName = chat.type === "direct" && chat.user?.name ? chat.user.name : chat.name;
@@ -149,7 +177,12 @@ export default function Sidebar() {
           const displayUsername = chat.type === "direct" && chat.user?.username ? chat.user.username : undefined;
 
           return (
-            <button key={chat.id} onClick={() => setActiveChat(chat.id)} className={`flex w-full items-center gap-3 px-3 py-2.5 text-left transition-colors hover:bg-[var(--bg-hover)] ${activeChatId === chat.id ? "bg-[var(--bg-active)]" : ""}`}>
+            <button
+              key={chat.id}
+              onClick={() => setActiveChat(chat.id)}
+              onContextMenu={(e) => { e.preventDefault(); setCtxMenu({ chatId: chat.id, x: e.clientX, y: e.clientY }); }}
+              className={`flex w-full items-center gap-3 px-3 py-2.5 text-left transition-colors hover:bg-[var(--bg-hover)] ${activeChatId === chat.id ? "bg-[var(--bg-active)]" : ""}`}
+            >
               <Avatar
                 name={displayName}
                 src={displayAvatar}
@@ -173,6 +206,11 @@ export default function Sidebar() {
                         <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17z"/>
                         <circle cx="12" cy="12" r="11" fill="var(--accent)" opacity="0.2"/>
                         <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17z" fill="var(--accent)"/>
+                      </svg>
+                    )}
+                    {chat.isMuted && (
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--text-tertiary)" strokeWidth="2" className="shrink-0">
+                        <path d="M13.73 21a2 2 0 0 1-3.46 0"/><path d="M18.63 13A17.89 17.89 0 0 1 18 8"/><path d="M6.26 6.26A5.86 5.86 0 0 0 6 8c0 7-3 9-3 9h14"/><path d="M18 8a6 6 0 0 0-9.33-5"/><line x1="1" y1="1" x2="23" y2="23"/>
                       </svg>
                     )}
                   </div>
@@ -206,6 +244,36 @@ export default function Sidebar() {
           );
         })}
       </nav>
+
+      {/* Chat context menu */}
+      {ctxMenu && ctxChat && (
+        <div className="fixed inset-0 z-50" onClick={() => setCtxMenu(null)} onContextMenu={(e) => { e.preventDefault(); setCtxMenu(null); }}>
+          <div
+            className="absolute w-48 rounded-xl border border-[var(--border)] bg-[var(--bg-card)] py-1 shadow-2xl animate-scale-in"
+            style={{ left: Math.min(ctxMenu.x, typeof window !== "undefined" ? window.innerWidth - 200 : ctxMenu.x), top: Math.min(ctxMenu.y, typeof window !== "undefined" ? window.innerHeight - 200 : ctxMenu.y) }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button onClick={() => { togglePin(ctxChat.id); setCtxMenu(null); }} className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-xs text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-hover)]">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 2L12 22M12 2L8 6M12 2L16 6"/></svg>
+              {ctxChat.isPinned ? (t("unpin_chat") || "Unpin") : (t("pin_chat") || "Pin")}
+            </button>
+            <button onClick={() => { toggleMute(ctxChat.id); setCtxMenu(null); }} className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-xs text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-hover)]">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+              {ctxChat.isMuted ? (t("unmute_chat") || "Unmute") : (t("mute_chat") || "Mute")}
+            </button>
+            <button onClick={() => { markAsRead(ctxChat.id); setCtxMenu(null); }} className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-xs text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-hover)]">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="20 6 9 17 4 12"/></svg>
+              {t("mark_as_read") || "Mark as read"}
+            </button>
+            <div className="mx-2 my-1 border-t border-[var(--border)]" />
+            <button onClick={() => { toggleArchive(ctxChat.id); setCtxMenu(null); }} className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-xs text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-hover)]">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>
+              {ctxChat.isArchived ? (t("unarchive_chat") || "Unarchive") : (t("archive_chat") || "Archive")}
+            </button>
+          </div>
+        </div>
+      )}
+
       <NewChatModal open={showNewChat} onClose={() => setShowNewChat(false)} initialTab={newChatTab} />
     </aside>
   );

@@ -11,6 +11,7 @@
     "test": "node --no-warnings --experimental-strip-types scripts/sanitizeHtml.test.mjs"
   },
   "dependencies": {
+    "@tepla/crypto": "file:../shared/crypto",
     "livekit-client": "^2.9.1",
     "date-fns": "^4.1.0",
     "framer-motion": "^12.0.0",

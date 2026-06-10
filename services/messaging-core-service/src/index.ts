@@ -123,7 +123,7 @@ function router(kafka: KafkaProducer): Router {
       const userId = userIdFrom(req);
       await ensureSavedChat(userId);
       const rows = await pool.query(
-        `SELECT c.*,
+        `SELECT c.*, cm.is_archived, cm.is_pinned, cm.is_muted,
           (SELECT row_to_json(m) FROM (
             SELECT id, sender_id, content, type, created_at
             FROM messages
@@ -235,6 +235,57 @@ function router(kafka: KafkaProducer): Router {
         await publishMemberJoined(kafka, req, chat.rows[0].id, userId);
         return res.status(201).json({ success: true, data: chat.rows[0] });
       }
+    } catch (err) { next(err); }
+  });
+
+  // Toggle (or explicitly set) the per-user archive flag for a chat
+  r.patch('/chats/:id/archive', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const userId = userIdFrom(req);
+      const chatId = req.params.id;
+      await requireMember(chatId, userId);
+      const archived = req.body?.archived;
+      const row = await pool.query(
+        `UPDATE chat_members SET is_archived = COALESCE($3, NOT is_archived)
+         WHERE chat_id = $1 AND user_id = $2
+         RETURNING is_archived`,
+        [chatId, userId, typeof archived === 'boolean' ? archived : null],
+      );
+      res.json({ success: true, data: { chatId, isArchived: row.rows[0].is_archived } });
+    } catch (err) { next(err); }
+  });
+
+  // Toggle (or explicitly set) the per-user pin flag for a chat
+  r.patch('/chats/:id/pin', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const userId = userIdFrom(req);
+      const chatId = req.params.id;
+      await requireMember(chatId, userId);
+      const pinned = req.body?.pinned;
+      const row = await pool.query(
+        `UPDATE chat_members SET is_pinned = COALESCE($3, NOT is_pinned)
+         WHERE chat_id = $1 AND user_id = $2
+         RETURNING is_pinned`,
+        [chatId, userId, typeof pinned === 'boolean' ? pinned : null],
+      );
+      res.json({ success: true, data: { chatId, isPinned: row.rows[0].is_pinned } });
+    } catch (err) { next(err); }
+  });
+
+  // Toggle (or explicitly set) the per-user mute flag for a chat
+  r.patch('/chats/:id/mute', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const userId = userIdFrom(req);
+      const chatId = req.params.id;
+      await requireMember(chatId, userId);
+      const muted = req.body?.muted;
+      const row = await pool.query(
+        `UPDATE chat_members SET is_muted = COALESCE($3, NOT is_muted)
+         WHERE chat_id = $1 AND user_id = $2
+         RETURNING is_muted`,
+        [chatId, userId, typeof muted === 'boolean' ? muted : null],
+      );
+      res.json({ success: true, data: { chatId, isMuted: row.rows[0].is_muted } });
     } catch (err) { next(err); }
   });
 
@@ -554,12 +605,18 @@ function router(kafka: KafkaProducer): Router {
   r.post('/messages', async (req: Request, res: Response, next: NextFunction) => {
     try {
       const userId = userIdFrom(req);
-      const { chatId, content, type = 'text', replyToId, attachments = [] } = req.body;
+      const { chatId, content, type = 'text', replyToId, attachments = [], clientMessageId } = req.body;
       if (!chatId || typeof content !== 'string') {
         throw new ValidationError('chatId and content are required');
       }
       if (content.length > 4096) {
         throw new ValidationError('Message content must be at most 4096 characters');
+      }
+      if (
+        clientMessageId !== undefined && clientMessageId !== null &&
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(clientMessageId))
+      ) {
+        throw new ValidationError('clientMessageId must be a UUID');
       }
       const attachmentList = (Array.isArray(attachments) ? attachments : []).slice(0, 10);
       for (const attachment of attachmentList) {
@@ -578,12 +635,24 @@ function router(kafka: KafkaProducer): Router {
       const expiresAt = ttlSeconds ? new Date(Date.now() + ttlSeconds * 1000).toISOString() : null;
 
       const messageType = attachmentList.length > 0 && type === 'text' ? fileKind(attachmentList[0]) : type;
+      // Dedup/replay protection: the same (chat, sender, clientMessageId) is inserted only once.
       const row = await pool.query(
-        `INSERT INTO messages (id, chat_id, sender_id, content, type, reply_to_id, ttl_seconds, expires_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        `INSERT INTO messages (id, chat_id, sender_id, content, type, reply_to_id, ttl_seconds, expires_at, client_message_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+         ON CONFLICT (chat_id, sender_id, client_message_id) WHERE client_message_id IS NOT NULL DO NOTHING
          RETURNING *`,
-        [uuid(), chatId, userId, content, messageType, replyToId || null, ttlSeconds, expiresAt],
+        [uuid(), chatId, userId, content, messageType, replyToId || null, ttlSeconds, expiresAt, clientMessageId || null],
       );
+      if (!row.rows[0]) {
+        // Duplicate delivery (retry or replay) — return the original message,
+        // do not attach files again and do not publish a second event.
+        const existing = await pool.query(
+          'SELECT * FROM messages WHERE chat_id = $1 AND sender_id = $2 AND client_message_id = $3',
+          [chatId, userId, clientMessageId],
+        );
+        const duplicate = (await attachFiles([existing.rows[0]]))[0];
+        return res.json({ success: true, data: duplicate, meta: { deduplicated: true } });
+      }
       let message = row.rows[0];
 
       for (const attachment of attachmentList) {

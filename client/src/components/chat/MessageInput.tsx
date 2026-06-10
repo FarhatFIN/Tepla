@@ -5,6 +5,7 @@ import { useShallow } from "zustand/react/shallow";
 import IconButton from "@/components/ui/IconButton";
 import api from "@/lib/api";
 import { useTranslation } from "@/hooks/useTranslation";
+import { useSettingsStore } from "@/stores/settings-store";
 
 interface MessageInputProps { chatId: string; }
 
@@ -91,8 +92,12 @@ export default function MessageInput({ chatId }: MessageInputProps) {
     if (textareaRef.current) textareaRef.current.style.height = "auto";
   };
 
+  const sendByEnter = useSettingsStore((s) => s.sendByEnter);
+
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); }
+    // Send by Enter (Shift+Enter = newline). When disabled, Ctrl/Cmd+Enter sends.
+    if (e.key !== "Enter") return;
+    if (sendByEnter ? !e.shiftKey : e.ctrlKey || e.metaKey) { e.preventDefault(); handleSend(); }
   };
 
   // ── Photo/Video preview + send ──

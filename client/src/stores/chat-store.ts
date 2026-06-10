@@ -49,6 +49,9 @@ interface ChatState {
   createFolder: (name: string, icon?: string) => Promise<void>;
   deleteFolder: (folderId: string) => Promise<void>;
   assignChatsToFolder: (folderId: string, chatIds: string[]) => Promise<void>;
+  toggleArchive: (chatId: string) => Promise<void>;
+  togglePin: (chatId: string) => Promise<void>;
+  toggleMute: (chatId: string) => Promise<void>;
   loadOlderMessages: (chatId: string) => Promise<void>;
   pinMessage: (chatId: string, messageId: string) => void;
   deleteMessage: (chatId: string, messageId: string) => void;
@@ -265,6 +268,46 @@ export const useChatStore = create<ChatState>((set, get) => ({
     } catch (err: any) {
       console.warn("[chat-store] assignChatsToFolder failed:", err?.message || err);
       get().loadFolders();
+    }
+  },
+
+  // ─── Archive (per-user, Telegram-style) ────────
+  toggleArchive: async (chatId: string) => {
+    const prev = get().chats;
+    set((s) => ({
+      chats: s.chats.map((c) => (c.id === chatId ? { ...c, isArchived: !c.isArchived } : c)),
+    }));
+    try {
+      await api.patch(`/chats/${chatId}/archive`);
+    } catch (err: any) {
+      console.warn("[chat-store] toggleArchive failed:", err?.message || err);
+      set({ chats: prev }); // revert optimistic update
+    }
+  },
+
+  togglePin: async (chatId: string) => {
+    const prev = get().chats;
+    set((s) => ({
+      chats: s.chats.map((c) => (c.id === chatId ? { ...c, isPinned: !c.isPinned } : c)),
+    }));
+    try {
+      await api.patch(`/chats/${chatId}/pin`);
+    } catch (err: any) {
+      console.warn("[chat-store] togglePin failed:", err?.message || err);
+      set({ chats: prev });
+    }
+  },
+
+  toggleMute: async (chatId: string) => {
+    const prev = get().chats;
+    set((s) => ({
+      chats: s.chats.map((c) => (c.id === chatId ? { ...c, isMuted: !c.isMuted } : c)),
+    }));
+    try {
+      await api.patch(`/chats/${chatId}/mute`);
+    } catch (err: any) {
+      console.warn("[chat-store] toggleMute failed:", err?.message || err);
+      set({ chats: prev });
     }
   },
 

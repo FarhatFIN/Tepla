@@ -7,7 +7,7 @@ import { useTranslation } from "@/hooks/useTranslation";
 import api from "@/lib/api";
 
 export default function CallOverlay() {
-  const { showCalls, toggleCalls, chats, activeChatId } = useChatStore();
+  const { showCalls, toggleCalls, chats, activeChatId, messages: allMessages, sendMessage } = useChatStore();
   const user = useAuthStore((s) => s.user);
   const t = useTranslation();
   const [isMuted, setIsMuted] = useState(false);
@@ -17,15 +17,19 @@ export default function CallOverlay() {
   const [callState, setCallState] = useState<"connecting" | "ringing" | "active" | "ended">("connecting");
   const [callDuration, setCallDuration] = useState(0);
   const [participants, setParticipants] = useState<{ identity: string; name?: string; avatar?: string; hasVideo: boolean; hasAudio: boolean }[]>([]);
+  const [showChatPanel, setShowChatPanel] = useState(false);
+  const [chatDraft, setChatDraft] = useState("");
 
   const roomRef = useRef<any>(null);
   const localAudioRef = useRef<any>(null);
   const localVideoRef = useRef<any>(null);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const localVideoContainerRef = useRef<HTMLDivElement>(null);
+  const chatPanelBottomRef = useRef<HTMLDivElement>(null);
 
   const chat = chats.find((c) => c.id === activeChatId);
   const roomName = activeChatId ? `tepla-${activeChatId.slice(0, 8)}` : "";
+  const callMessages = activeChatId ? allMessages[activeChatId] || [] : [];
 
   const cleanup = useCallback(async () => {
     if (timerRef.current) clearInterval(timerRef.current);
@@ -36,6 +40,11 @@ export default function CallOverlay() {
       }
     } catch { /* ignore cleanup errors */ }
   }, []);
+
+  // Keep the in-call chat scrolled to the latest message
+  useEffect(() => {
+    if (showChatPanel) chatPanelBottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [callMessages.length, showChatPanel]);
 
   // Start call when overlay opens
   useEffect(() => {
@@ -64,7 +73,20 @@ export default function CallOverlay() {
         // Dynamic import of LiveKit SDK
         const { Room, RoomEvent, Track } = await import("livekit-client");
 
-        const room = new Room();
+        const room = new Room({
+          // Voice quality: browser-level noise suppression, echo cancellation and AGC
+          audioCaptureDefaults: {
+            noiseSuppression: true,
+            echoCancellation: true,
+            autoGainControl: true,
+          },
+          videoCaptureDefaults: {
+            resolution: { width: 1280, height: 720, frameRate: 30 },
+          },
+          // Bandwidth/CPU: decode only visible layers, pause hidden videos
+          adaptiveStream: true,
+          dynacast: true,
+        });
         roomRef.current = room;
 
         // Handle remote participant events
@@ -99,6 +121,20 @@ export default function CallOverlay() {
 
         room.on(RoomEvent.ParticipantDisconnected, (participant: any) => {
           setParticipants((prev) => prev.filter((p) => p.identity !== participant.identity));
+        });
+
+        // Attach our own camera/screen preview to the local tile
+        room.on(RoomEvent.LocalTrackPublished, (pub: any) => {
+          if (pub.track?.kind === Track.Kind.Video && localVideoContainerRef.current) {
+            const el = pub.track.attach();
+            el.style.width = "100%";
+            el.style.height = "100%";
+            el.style.objectFit = "cover";
+            localVideoContainerRef.current.replaceChildren(el);
+          }
+        });
+        room.on(RoomEvent.LocalTrackUnpublished, (pub: any) => {
+          pub.track?.detach().forEach((el: HTMLElement) => el.remove());
         });
 
         // Connect to room
@@ -159,6 +195,15 @@ export default function CallOverlay() {
     }
   };
 
+  // Send a chat message without leaving the call
+  const sendChatMessage = (e: React.FormEvent) => {
+    e.preventDefault();
+    const text = chatDraft.trim();
+    if (!text || !activeChatId) return;
+    sendMessage(activeChatId, text);
+    setChatDraft("");
+  };
+
   // End call
   const endCall = async () => {
     setCallState("ended");
@@ -168,6 +213,8 @@ export default function CallOverlay() {
     setIsMuted(false);
     setIsVideoOn(false);
     setIsScreenSharing(false);
+    setShowChatPanel(false);
+    setChatDraft("");
     toggleCalls();
   };
 
@@ -250,6 +297,37 @@ export default function CallOverlay() {
           </div>
         )}
 
+        {/* In-call chat */}
+        {showChatPanel && activeChatId && (
+          <div className="flex w-full flex-col gap-2 rounded-xl bg-[var(--bg-input)] p-3">
+            <div className="max-h-40 space-y-1.5 overflow-y-auto pr-1">
+              {callMessages.length === 0 && (
+                <p className="text-center text-[11px] text-[var(--text-tertiary)]">No messages yet</p>
+              )}
+              {callMessages.slice(-30).map((m) => (
+                <div key={m.id} className="text-xs leading-relaxed">
+                  <span className="font-semibold text-[var(--accent)]">
+                    {m.senderId === user?.id ? t("you") : m.senderName || m.senderId.slice(0, 6)}
+                  </span>{" "}
+                  <span className="text-[var(--text-primary)] break-words">{m.text}</span>
+                </div>
+              ))}
+              <div ref={chatPanelBottomRef} />
+            </div>
+            <form onSubmit={sendChatMessage} className="flex gap-2">
+              <input
+                value={chatDraft}
+                onChange={(e) => setChatDraft(e.target.value)}
+                placeholder="Message..."
+                className="flex-1 rounded-lg bg-[var(--bg-main)] px-3 py-2 text-xs text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)]"
+              />
+              <button type="submit" className="flex h-8 w-8 items-center justify-center rounded-lg bg-[var(--accent)] text-white disabled:opacity-50" disabled={!chatDraft.trim()}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+              </button>
+            </form>
+          </div>
+        )}
+
         {/* Controls */}
         <div className="flex items-center gap-3">
           <button onClick={toggleMute} className={`flex h-14 w-14 items-center justify-center rounded-full transition-colors ${isMuted ? "bg-red-500/20 text-red-400" : "bg-[var(--bg-input)] text-[var(--text-primary)]"}`} title={isMuted ? t("unmute") : t("mute")}>
@@ -266,6 +344,10 @@ export default function CallOverlay() {
 
           <button onClick={toggleScreenShare} className={`flex h-14 w-14 items-center justify-center rounded-full transition-colors ${isScreenSharing ? "bg-[#6C3DE8] text-white" : "bg-[var(--bg-input)] text-[var(--text-primary)]"}`} title={isScreenSharing ? t("stop_sharing") : t("share_screen")}>
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+          </button>
+
+          <button onClick={() => setShowChatPanel((v) => !v)} className={`flex h-14 w-14 items-center justify-center rounded-full transition-colors ${showChatPanel ? "bg-[var(--accent)] text-white" : "bg-[var(--bg-input)] text-[var(--text-primary)]"}`} title="Chat">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
           </button>
 
           <button onClick={endCall} className="flex h-14 w-14 items-center justify-center rounded-full bg-red-500 text-white hover:bg-red-600 transition-colors" title={t("end_call")}>

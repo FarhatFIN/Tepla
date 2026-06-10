@@ -1,15 +1,32 @@
 "use client";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useChatStore } from "@/stores/chat-store";
 import { useAuthStore } from "@/stores/auth-store";
+import { useSettingsStore } from "@/stores/settings-store";
 import Avatar from "@/components/ui/Avatar";
 import { languages } from "@/lib/countries";
 import api from "@/lib/api";
 import { useTranslation } from "@/hooks/useTranslation";
 
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 ** 2) return `${(n / 1024).toFixed(1)} KB`;
+  if (n < 1024 ** 3) return `${(n / 1024 ** 2).toFixed(1)} MB`;
+  return `${(n / 1024 ** 3).toFixed(2)} GB`;
+}
+
+function deviceInfo(): string {
+  if (typeof navigator === "undefined") return "Unknown";
+  const ua = navigator.userAgent;
+  const browser = ua.includes("Edg") ? "Edge" : ua.includes("OPR") ? "Opera" : ua.includes("Chrome") ? "Chrome" : ua.includes("Firefox") ? "Firefox" : ua.includes("Safari") ? "Safari" : "Browser";
+  const os = ua.includes("Windows") ? "Windows" : ua.includes("Mac") ? "macOS" : ua.includes("Android") ? "Android" : ua.includes("iPhone") || ua.includes("iPad") ? "iOS" : ua.includes("Linux") ? "Linux" : "Unknown OS";
+  return `${os} - ${browser}`;
+}
+
 export default function SettingsPanel() {
-  const { showSettings, toggleSettings } = useChatStore();
+  const { showSettings, toggleSettings, folders, loadFolders, createFolder, deleteFolder } = useChatStore();
   const { user, language, setLanguage, setUsername, setAvatar, setBio, setBirthDate, logout, savedAccounts, switchAccount } = useAuthStore();
+  const settings = useSettingsStore();
   const [activeSection, setActiveSection] = useState<string | null>(null);
   const [editingUsername, setEditingUsername] = useState(false);
   const [newUsername, setNewUsername] = useState("");
@@ -18,31 +35,56 @@ export default function SettingsPanel() {
   const [editingBirthDate, setEditingBirthDate] = useState(false);
   const [newBirthDate, setNewBirthDate] = useState("");
   const [usernameStatus, setUsernameStatus] = useState<"idle" | "checking" | "available" | "taken" | "saved">("idle");
+  const usernameCheckRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
-  // Settings state
-  const [notifSound, setNotifSound] = useState(true);
-  const [notifPreview, setNotifPreview] = useState(true);
-  const [notifPush, setNotifPush] = useState(true);
-  const [notifGroupSound, setNotifGroupSound] = useState(true);
-  const [privacyLastSeen, setPrivacyLastSeen] = useState<"everyone" | "contacts" | "nobody">("everyone");
-  const [privacyPhone, setPrivacyPhone] = useState<"everyone" | "contacts" | "nobody">("nobody");
-  const [privacyPhoto, setPrivacyPhoto] = useState<"everyone" | "contacts" | "nobody">("everyone");
-  const [privacyForwards, setPrivacyForwards] = useState<"everyone" | "contacts" | "nobody">("everyone");
-  const [autoDownloadPhotos, setAutoDownloadPhotos] = useState(true);
-  const [autoDownloadVideos, setAutoDownloadVideos] = useState(false);
-  const [autoDownloadFiles, setAutoDownloadFiles] = useState(false);
-  const [fontSize, setFontSize] = useState(14);
-  const [sendByEnter, setSendByEnter] = useState(true);
-  const [animatedEmoji, setAnimatedEmoji] = useState(true);
   const [avatarUploading, setAvatarUploading] = useState(false);
   const avatarInputRef = useRef<HTMLInputElement>(null);
   const t = useTranslation();
+
+  // Storage state (real numbers from the browser)
+  const [storageUsage, setStorageUsage] = useState<{ usage: number; quota: number } | null>(null);
+  const [cacheCleared, setCacheCleared] = useState(false);
+
+  // Folder creation
+  const [newFolderName, setNewFolderName] = useState("");
+  const [creatingFolder, setCreatingFolder] = useState(false);
 
   // Admin panel state
   const [adminMaintenanceMode, setAdminMaintenanceMode] = useState(false);
   const [adminRegistrationOpen, setAdminRegistrationOpen] = useState(true);
   const [adminMaxFileSize, setAdminMaxFileSize] = useState(100);
   const [adminBroadcastText, setAdminBroadcastText] = useState("");
+
+  // Apply font size globally (rem-based sizes follow the root)
+  useEffect(() => {
+    document.documentElement.style.fontSize = `${settings.fontSize}px`;
+  }, [settings.fontSize]);
+
+  // Real storage usage when the section opens
+  useEffect(() => {
+    if (activeSection !== "storage") return;
+    navigator.storage?.estimate?.()
+      .then((est) => setStorageUsage({ usage: est.usage || 0, quota: est.quota || 0 }))
+      .catch(() => {});
+  }, [activeSection]);
+
+  // Real folders when the section opens
+  useEffect(() => {
+    if (activeSection === "folders") loadFolders();
+  }, [activeSection, loadFolders]);
+
+  async function clearCache() {
+    try {
+      if (typeof caches !== "undefined") {
+        const keys = await caches.keys();
+        await Promise.all(keys.map((k) => caches.delete(k)));
+      }
+      const est = await navigator.storage?.estimate?.();
+      if (est) setStorageUsage({ usage: est.usage || 0, quota: est.quota || 0 });
+      setCacheCleared(true);
+      setTimeout(() => setCacheCleared(false), 2000);
+    } catch { /* ignore */ }
+  }
 
   function handleAvatarChange(file: File) {
     setAvatarUploading(true);
@@ -67,13 +109,20 @@ export default function SettingsPanel() {
   function handleUsernameChange(val: string) {
     const clean = val.toLowerCase().replace(/[^a-z0-9_]/g, "");
     setNewUsername(clean);
-    if (clean.length < 4) { setUsernameStatus("idle"); return; }
-    if (clean === user?.username) { setUsernameStatus("idle"); return; }
+    if (usernameCheckRef.current) clearTimeout(usernameCheckRef.current);
+    if (clean.length < 4 || clean === user?.username) { setUsernameStatus("idle"); return; }
     setUsernameStatus("checking");
-    setTimeout(() => {
-      const taken = ["admin", "tepla", "support", "help"];
-      setUsernameStatus(taken.includes(clean) ? "taken" : "available");
-    }, 500);
+    // Debounced real availability check against the search API
+    usernameCheckRef.current = setTimeout(async () => {
+      try {
+        const res = await api.get<{ success: boolean; data: any[] }>(`/search?type=users&q=${encodeURIComponent(clean)}`);
+        const taken = (res.data || []).some((u) => u.username?.toLowerCase() === clean && u.id !== user?.id);
+        setUsernameStatus(taken ? "taken" : "available");
+      } catch {
+        // API unavailable — allow saving, the server validates on submit
+        setUsernameStatus("available");
+      }
+    }, 400);
   }
 
   function handleUsernameSave() {
@@ -81,6 +130,15 @@ export default function SettingsPanel() {
     setUsername(newUsername);
     setUsernameStatus("saved");
     setTimeout(() => { setEditingUsername(false); setUsernameStatus("idle"); }, 1000);
+  }
+
+  async function handleCreateFolder() {
+    const name = newFolderName.trim();
+    if (!name) return;
+    setCreatingFolder(true);
+    await createFolder(name);
+    setNewFolderName("");
+    setCreatingFolder(false);
   }
 
   if (!showSettings) return null;
@@ -298,13 +356,13 @@ export default function SettingsPanel() {
                     <div className="mb-2 ml-10 mr-3 rounded-xl bg-[var(--bg-input)] p-3 animate-slide-up">
                       <SettingRow label={t("font_size")}>
                         <div className="flex items-center gap-2">
-                          <button onClick={() => setFontSize(Math.max(12, fontSize - 1))} className="rounded bg-[var(--bg-main)] px-2 py-0.5 text-xs hover:bg-[var(--bg-hover)]">-</button>
-                          <span className="text-xs w-6 text-center">{fontSize}</span>
-                          <button onClick={() => setFontSize(Math.min(20, fontSize + 1))} className="rounded bg-[var(--bg-main)] px-2 py-0.5 text-xs hover:bg-[var(--bg-hover)]">+</button>
+                          <button onClick={() => settings.update({ fontSize: Math.max(12, settings.fontSize - 1) })} className="rounded bg-[var(--bg-main)] px-2 py-0.5 text-xs hover:bg-[var(--bg-hover)]">-</button>
+                          <span className="text-xs w-6 text-center">{settings.fontSize}</span>
+                          <button onClick={() => settings.update({ fontSize: Math.min(20, settings.fontSize + 1) })} className="rounded bg-[var(--bg-main)] px-2 py-0.5 text-xs hover:bg-[var(--bg-hover)]">+</button>
                         </div>
                       </SettingRow>
-                      <SettingRow label={t("send_by_enter")}><Toggle on={sendByEnter} onChange={setSendByEnter} /></SettingRow>
-                      <SettingRow label={t("animated_emoji")}><Toggle on={animatedEmoji} onChange={setAnimatedEmoji} /></SettingRow>
+                      <SettingRow label={t("send_by_enter")}><Toggle on={settings.sendByEnter} onChange={(v) => settings.update({ sendByEnter: v })} /></SettingRow>
+                      <SettingRow label={t("animated_emoji")}><Toggle on={settings.animatedEmoji} onChange={(v) => settings.update({ animatedEmoji: v })} /></SettingRow>
                     </div>
                   )}
 
@@ -312,12 +370,12 @@ export default function SettingsPanel() {
                   {activeSection === "notifications" && s.id === "notifications" && (
                     <div className="mb-2 ml-10 mr-3 rounded-xl bg-[var(--bg-input)] p-3 animate-slide-up">
                       <p className="mb-2 text-[10px] font-semibold uppercase text-[var(--text-tertiary)]">{t("private_chats")}</p>
-                      <SettingRow label={t("sound")}><Toggle on={notifSound} onChange={setNotifSound} /></SettingRow>
-                      <SettingRow label={t("message_preview")}><Toggle on={notifPreview} onChange={setNotifPreview} /></SettingRow>
-                      <SettingRow label={t("push_notifications")}><Toggle on={notifPush} onChange={setNotifPush} /></SettingRow>
+                      <SettingRow label={t("sound")}><Toggle on={settings.notifSound} onChange={(v) => settings.update({ notifSound: v })} /></SettingRow>
+                      <SettingRow label={t("message_preview")}><Toggle on={settings.notifPreview} onChange={(v) => settings.update({ notifPreview: v })} /></SettingRow>
+                      <SettingRow label={t("push_notifications")}><Toggle on={settings.notifPush} onChange={(v) => settings.update({ notifPush: v })} /></SettingRow>
                       <div className="my-2 border-t border-[var(--border)]" />
                       <p className="mb-2 text-[10px] font-semibold uppercase text-[var(--text-tertiary)]">{t("groups_channels")}</p>
-                      <SettingRow label={t("sound")}><Toggle on={notifGroupSound} onChange={setNotifGroupSound} /></SettingRow>
+                      <SettingRow label={t("sound")}><Toggle on={settings.notifGroupSound} onChange={(v) => settings.update({ notifGroupSound: v })} /></SettingRow>
                     </div>
                   )}
 
@@ -325,10 +383,10 @@ export default function SettingsPanel() {
                   {activeSection === "privacy" && s.id === "privacy" && (
                     <div className="mb-2 ml-10 mr-3 rounded-xl bg-[var(--bg-input)] p-3 animate-slide-up">
                       <p className="mb-2 text-[10px] font-semibold uppercase text-[var(--text-tertiary)]">{t("who_can_see")}</p>
-                      <SettingRow label={t("last_seen_label")}><RadioGroup value={privacyLastSeen} options={privacyOptions} onChange={setPrivacyLastSeen} /></SettingRow>
-                      <SettingRow label={t("phone_number")}><RadioGroup value={privacyPhone} options={privacyOptions} onChange={setPrivacyPhone} /></SettingRow>
-                      <SettingRow label={t("profile_photo")}><RadioGroup value={privacyPhoto} options={privacyOptions} onChange={setPrivacyPhoto} /></SettingRow>
-                      <SettingRow label={t("forwarded_messages")}><RadioGroup value={privacyForwards} options={privacyOptions} onChange={setPrivacyForwards} /></SettingRow>
+                      <SettingRow label={t("last_seen_label")}><RadioGroup value={settings.privacyLastSeen} options={privacyOptions} onChange={(v) => settings.update({ privacyLastSeen: v })} /></SettingRow>
+                      <SettingRow label={t("phone_number")}><RadioGroup value={settings.privacyPhone} options={privacyOptions} onChange={(v) => settings.update({ privacyPhone: v })} /></SettingRow>
+                      <SettingRow label={t("profile_photo")}><RadioGroup value={settings.privacyPhoto} options={privacyOptions} onChange={(v) => settings.update({ privacyPhoto: v })} /></SettingRow>
+                      <SettingRow label={t("forwarded_messages")}><RadioGroup value={settings.privacyForwards} options={privacyOptions} onChange={(v) => settings.update({ privacyForwards: v })} /></SettingRow>
                       <div className="my-2 border-t border-[var(--border)]" />
                       <p className="mb-2 text-[10px] font-semibold uppercase text-[var(--text-tertiary)]">{t("security")}</p>
                       <button className="w-full rounded-lg bg-[var(--bg-main)] px-3 py-2 text-left text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] transition-colors mb-1.5">
@@ -386,31 +444,30 @@ export default function SettingsPanel() {
                   {activeSection === "storage" && s.id === "storage" && (
                     <div className="mb-2 ml-10 mr-3 rounded-xl bg-[var(--bg-input)] p-3 animate-slide-up">
                       <p className="mb-2 text-[10px] font-semibold uppercase text-[var(--text-tertiary)]">{t("auto_download")}</p>
-                      <SettingRow label={t("photos")}><Toggle on={autoDownloadPhotos} onChange={setAutoDownloadPhotos} /></SettingRow>
-                      <SettingRow label={t("videos")}><Toggle on={autoDownloadVideos} onChange={setAutoDownloadVideos} /></SettingRow>
-                      <SettingRow label={t("files")}><Toggle on={autoDownloadFiles} onChange={setAutoDownloadFiles} /></SettingRow>
+                      <SettingRow label={t("photos")}><Toggle on={settings.autoDownloadPhotos} onChange={(v) => settings.update({ autoDownloadPhotos: v })} /></SettingRow>
+                      <SettingRow label={t("videos")}><Toggle on={settings.autoDownloadVideos} onChange={(v) => settings.update({ autoDownloadVideos: v })} /></SettingRow>
+                      <SettingRow label={t("files")}><Toggle on={settings.autoDownloadFiles} onChange={(v) => settings.update({ autoDownloadFiles: v })} /></SettingRow>
                       <div className="my-2 border-t border-[var(--border)]" />
                       <p className="mb-2 text-[10px] font-semibold uppercase text-[var(--text-tertiary)]">{t("storage_usage")}</p>
-                      <div className="space-y-1.5">
-                        <div className="flex justify-between text-xs">
-                          <span className="text-[var(--text-secondary)]">{t("photos")}</span>
-                          <span className="text-[var(--text-tertiary)]">12.4 MB</span>
+                      {storageUsage ? (
+                        <div className="space-y-1.5">
+                          <div className="flex justify-between text-xs">
+                            <span className="text-[var(--text-secondary)]">{t("storage_usage")}</span>
+                            <span className="text-[var(--text-tertiary)]">{formatBytes(storageUsage.usage)}</span>
+                          </div>
+                          <div className="h-1.5 w-full overflow-hidden rounded-full bg-[var(--bg-main)]">
+                            <div className="h-full rounded-full bg-[var(--accent)]" style={{ width: `${Math.min(100, (storageUsage.usage / Math.max(storageUsage.quota, 1)) * 100).toFixed(2)}%` }} />
+                          </div>
+                          <div className="flex justify-between text-xs font-medium pt-1 border-t border-[var(--border)]">
+                            <span className="text-[var(--text-primary)]">{t("total")}</span>
+                            <span className="text-[var(--text-primary)]">{formatBytes(storageUsage.usage)} / {formatBytes(storageUsage.quota)}</span>
+                          </div>
                         </div>
-                        <div className="flex justify-between text-xs">
-                          <span className="text-[var(--text-secondary)]">{t("videos")}</span>
-                          <span className="text-[var(--text-tertiary)]">0 B</span>
-                        </div>
-                        <div className="flex justify-between text-xs">
-                          <span className="text-[var(--text-secondary)]">{t("files")}</span>
-                          <span className="text-[var(--text-tertiary)]">2.1 MB</span>
-                        </div>
-                        <div className="flex justify-between text-xs font-medium pt-1 border-t border-[var(--border)]">
-                          <span className="text-[var(--text-primary)]">{t("total")}</span>
-                          <span className="text-[var(--text-primary)]">14.5 MB</span>
-                        </div>
-                      </div>
-                      <button className="mt-3 w-full rounded-lg bg-red-500/10 px-3 py-2 text-xs text-red-400 hover:bg-red-500/20 transition-colors">
-                        {t("clear_cache")}
+                      ) : (
+                        <p className="text-xs text-[var(--text-tertiary)]">…</p>
+                      )}
+                      <button onClick={clearCache} className="mt-3 w-full rounded-lg bg-red-500/10 px-3 py-2 text-xs text-red-400 hover:bg-red-500/20 transition-colors">
+                        {cacheCleared ? "✓" : t("clear_cache")}
                       </button>
                     </div>
                   )}
@@ -425,7 +482,7 @@ export default function SettingsPanel() {
                         </div>
                         <div>
                           <p className="text-xs font-medium">{t("this_device")}</p>
-                          <p className="text-[10px] text-[var(--text-tertiary)]">Windows - Chrome</p>
+                          <p className="text-[10px] text-[var(--text-tertiary)]">{deviceInfo()}</p>
                           <p className="text-[10px] text-[#00D46A]">{t("online_now")}</p>
                         </div>
                       </div>
@@ -453,27 +510,6 @@ export default function SettingsPanel() {
                       </SettingRow>
 
                       <div className="my-2 border-t border-[var(--border)]" />
-                      <p className="mb-2 text-[10px] font-semibold uppercase text-[var(--text-tertiary)]">{t("statistics")}</p>
-                      <div className="grid grid-cols-2 gap-2 mb-3">
-                        <div className="rounded-lg bg-[var(--bg-main)] p-2.5 text-center">
-                          <p className="text-lg font-bold text-[var(--accent)]">2</p>
-                          <p className="text-[10px] text-[var(--text-tertiary)]">{t("total_users")}</p>
-                        </div>
-                        <div className="rounded-lg bg-[var(--bg-main)] p-2.5 text-center">
-                          <p className="text-lg font-bold text-[#00D46A]">1</p>
-                          <p className="text-[10px] text-[var(--text-tertiary)]">{t("online_now_stat")}</p>
-                        </div>
-                        <div className="rounded-lg bg-[var(--bg-main)] p-2.5 text-center">
-                          <p className="text-lg font-bold text-[#8B5CF6]">2</p>
-                          <p className="text-[10px] text-[var(--text-tertiary)]">{t("total_chats")}</p>
-                        </div>
-                        <div className="rounded-lg bg-[var(--bg-main)] p-2.5 text-center">
-                          <p className="text-lg font-bold text-amber-400">6</p>
-                          <p className="text-[10px] text-[var(--text-tertiary)]">{t("messages_today")}</p>
-                        </div>
-                      </div>
-
-                      <div className="my-2 border-t border-[var(--border)]" />
                       <p className="mb-2 text-[10px] font-semibold uppercase text-[var(--text-tertiary)]">{t("broadcast")}</p>
                       <textarea value={adminBroadcastText} onChange={(e) => setAdminBroadcastText(e.target.value)} placeholder={t("message_to_all")} rows={2}
                         className="w-full rounded-lg bg-[var(--bg-main)] px-3 py-2 text-xs text-[var(--text-primary)] placeholder-[var(--text-tertiary)] outline-none resize-none mb-2" />
@@ -481,54 +517,42 @@ export default function SettingsPanel() {
                         className="w-full rounded-lg bg-[var(--accent)] px-3 py-2 text-xs font-semibold text-white hover:opacity-90 transition-opacity">
                         {t("send_broadcast")}
                       </button>
-
-                      <div className="my-2 border-t border-[var(--border)]" />
-                      <p className="mb-2 text-[10px] font-semibold uppercase text-[var(--text-tertiary)]">{t("quick_actions")}</p>
-                      <div className="space-y-1.5">
-                        <button className="w-full rounded-lg bg-[var(--bg-main)] px-3 py-2 text-left text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] transition-colors">
-                          <span className="font-medium">{t("manage_users")}</span>
-                          <span className="block text-[10px] text-[var(--text-tertiary)]">{t("manage_users_desc")}</span>
-                        </button>
-                        <button className="w-full rounded-lg bg-[var(--bg-main)] px-3 py-2 text-left text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] transition-colors">
-                          <span className="font-medium">{t("reported_content")}</span>
-                          <span className="block text-[10px] text-[var(--text-tertiary)]">{t("pending_reports", { count: 0 })}</span>
-                        </button>
-                        <button className="w-full rounded-lg bg-[var(--bg-main)] px-3 py-2 text-left text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] transition-colors">
-                          <span className="font-medium">{t("server_logs")}</span>
-                          <span className="block text-[10px] text-[var(--text-tertiary)]">{t("server_logs_desc")}</span>
-                        </button>
-                        <button className="w-full rounded-lg bg-[var(--bg-main)] px-3 py-2 text-left text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] transition-colors">
-                          <span className="font-medium">{t("feature_flags")}</span>
-                          <span className="block text-[10px] text-[var(--text-tertiary)]">{t("feature_flags_desc")}</span>
-                        </button>
-                        <button className="w-full rounded-lg bg-red-500/10 px-3 py-2 text-left text-xs text-red-400 hover:bg-red-500/20 transition-colors">
-                          <span className="font-medium">{t("clear_all_cache")}</span>
-                          <span className="block text-[10px] text-red-400/60">{t("clear_all_cache_desc")}</span>
-                        </button>
-                      </div>
                     </div>
                   )}
 
-                  {/* Chat Folders */}
+                  {/* Chat Folders — real folders from the store */}
                   {activeSection === "folders" && s.id === "folders" && (
                     <div className="mb-2 ml-10 mr-3 rounded-xl bg-[var(--bg-input)] p-3 animate-slide-up">
                       <p className="mb-2 text-[10px] font-semibold uppercase text-[var(--text-tertiary)]">{t("your_folders")}</p>
-                      {[
-                        { name: "Work", icon: "\ud83d\udcbc", count: 0 },
-                        { name: "Channels", icon: "\ud83d\udce2", count: 0 },
-                        { name: "Bots", icon: "\ud83e\udd16", count: 0 },
-                      ].map((f) => (
-                        <div key={f.name} className="flex items-center justify-between rounded-lg bg-[var(--bg-main)] px-3 py-2.5 mb-1.5">
+                      {folders.length === 0 && (
+                        <p className="mb-1.5 text-xs italic text-[var(--text-tertiary)]">{t("no_folders") || "No folders yet"}</p>
+                      )}
+                      {folders.map((f) => (
+                        <div key={f.id} className="flex items-center justify-between rounded-lg bg-[var(--bg-main)] px-3 py-2.5 mb-1.5">
                           <div className="flex items-center gap-2">
-                            <span>{f.icon}</span>
+                            {f.icon && <span>{f.icon}</span>}
                             <span className="text-xs font-medium">{f.name}</span>
                           </div>
-                          <span className="text-[10px] text-[var(--text-tertiary)]">{t("chats_count", { count: f.count })}</span>
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10px] text-[var(--text-tertiary)]">{t("chats_count", { count: f.chatIds.length })}</span>
+                            <button onClick={() => deleteFolder(f.id)} className="text-[var(--text-tertiary)] hover:text-red-400 transition-colors" title={t("delete") || "Delete"}>
+                              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                            </button>
+                          </div>
                         </div>
                       ))}
-                      <button className="mt-2 w-full rounded-lg border border-dashed border-[var(--border)] px-3 py-2.5 text-xs text-[var(--accent)] hover:bg-[var(--bg-hover)] transition-colors">
-                        {t("create_new_folder")}
-                      </button>
+                      <div className="mt-2 flex gap-1.5">
+                        <input
+                          value={newFolderName}
+                          onChange={(e) => setNewFolderName(e.target.value.slice(0, 32))}
+                          onKeyDown={(e) => { if (e.key === "Enter") handleCreateFolder(); }}
+                          placeholder={t("create_new_folder")}
+                          className="flex-1 rounded-lg border border-dashed border-[var(--border)] bg-transparent px-3 py-2 text-xs text-[var(--text-primary)] outline-none placeholder:text-[var(--accent)] focus:border-[var(--accent)]"
+                        />
+                        <button onClick={handleCreateFolder} disabled={creatingFolder || !newFolderName.trim()} className="rounded-lg bg-[var(--accent)] px-3 py-2 text-xs text-white disabled:opacity-50 hover:opacity-90 transition-opacity">
+                          {creatingFolder ? "…" : "+"}
+                        </button>
+                      </div>
                     </div>
                   )}
                 </div>
