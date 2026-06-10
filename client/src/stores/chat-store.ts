@@ -59,6 +59,7 @@ interface ChatState {
   toggleMute: (chatId: string) => Promise<void>;
   loadMembers: (chatId: string) => Promise<void>;
   leaveChat: (chatId: string) => Promise<void>;
+  createSecretChat: (targetUserId: string) => Promise<string | null>;
   loadOlderMessages: (chatId: string) => Promise<void>;
   pinMessage: (chatId: string, messageId: string) => void;
   deleteMessage: (chatId: string, messageId: string) => void;
@@ -88,7 +89,7 @@ function mapBackendChat(raw: any): Chat {
     isArchived: raw.is_archived || false,
     membersCount: raw.members_count,
     lastMessage: raw.last_message ? {
-      text: raw.last_message.content || raw.last_message.text || "",
+      text: raw.type === "secret" ? "\u{1F512}" : (raw.last_message.content || raw.last_message.text || ""),
       senderId: raw.last_message.sender_id || raw.last_message.senderId || "",
       timestamp: formatTime(raw.last_message.created_at || raw.last_message.timestamp),
       type: raw.last_message.type || "text",
@@ -117,6 +118,7 @@ function mapBackendMessage(raw: any): Message {
     status: raw.status || "sent",
     isEdited: raw.is_edited || false,
     isPinned: raw.is_pinned || false,
+    keyEnvelope: raw.key_envelope || undefined,
     replyTo: raw.reply_to ? {
       id: raw.reply_to.id,
       senderId: raw.reply_to.sender_id,
@@ -170,6 +172,95 @@ function joinChatRooms(chats: Chat[]): void {
   for (const chat of chats) {
     socket.emit("presence:join", chat.id);
   }
+}
+
+// ─── Secret chat (E2E) helpers ──────────────────────────
+
+const secretCacheKey = (messageId: string) => `tepla-sc:${messageId}`;
+
+function getCachedSecretText(messageId: string): string | null {
+  try { return localStorage.getItem(secretCacheKey(messageId)); } catch { return null; }
+}
+
+function cacheSecretText(messageId: string, text: string): void {
+  try { localStorage.setItem(secretCacheKey(messageId), text); } catch { /* quota exceeded */ }
+}
+
+function parseHandshake(text: string): { kind: string; handshake: any } | null {
+  try {
+    const value = JSON.parse(text);
+    return value?.kind === "e2e_handshake" && value.handshake ? value : null;
+  } catch { return null; }
+}
+
+/** Resolve the other participant of a direct/secret chat. */
+async function resolveSecretPeerId(chatId: string): Promise<string> {
+  const state = useChatStore.getState();
+  const myId = useAuthStore.getState().user?.id;
+  const chat = state.chats.find((c) => c.id === chatId);
+  if (chat?.user?.id) return chat.user.id;
+  const cached = state.members[chatId]?.find((m) => m.userId !== myId);
+  if (cached) return cached.userId;
+  await state.loadMembers(chatId);
+  const member = useChatStore.getState().members[chatId]?.find((m) => m.userId !== myId);
+  if (!member) throw new Error("Secret chat peer not found");
+  return member.userId;
+}
+
+/**
+ * Process a single secret chat message:
+ * - X3DH handshake announcements establish the responder session and are hidden
+ * - encrypted payloads are decrypted once and cached locally (Double Ratchet
+ *   message keys are one-time use, so history reads come from the local cache)
+ */
+async function processSecretMessage(peerId: string, msg: Message, myId: string | undefined): Promise<Message | null> {
+  const handshake = parseHandshake(msg.text);
+  if (handshake) {
+    if (msg.senderId !== myId) {
+      try {
+        const e2ee = await import("@/lib/security/e2eeSession");
+        if (!(await e2ee.hasSession(peerId))) {
+          await e2ee.acceptSession(peerId, handshake.handshake);
+        }
+      } catch (err) {
+        console.warn("[chat-store] acceptSession failed:", err);
+      }
+    }
+    return null; // handshake messages are never displayed
+  }
+
+  if (!msg.keyEnvelope) return msg; // plain service message
+
+  const cached = getCachedSecretText(msg.id);
+  if (cached !== null) return { ...msg, text: cached };
+
+  try {
+    const e2ee = await import("@/lib/security/e2eeSession");
+    const text = await e2ee.decryptFromPeer(peerId, { header: msg.keyEnvelope, ciphertext: msg.text });
+    cacheSecretText(msg.id, text);
+    return { ...msg, text };
+  } catch {
+    // Key material is unavailable (new device or already-used message key)
+    return { ...msg, text: "\u{1F512}" };
+  }
+}
+
+/** Sequentially process secret chat history (ratchet state is order-sensitive). */
+async function processSecretHistory(chatId: string, messages: Message[]): Promise<Message[]> {
+  const myId = useAuthStore.getState().user?.id;
+  let peerId: string;
+  try {
+    peerId = await resolveSecretPeerId(chatId);
+  } catch (err) {
+    console.warn("[chat-store] secret peer resolution failed:", err);
+    return messages;
+  }
+  const result: Message[] = [];
+  for (const msg of messages) {
+    const processed = await processSecretMessage(peerId, msg, myId);
+    if (processed) result.push(processed);
+  }
+  return result;
 }
 
 export const useChatStore = create<ChatState>((set, get) => ({
@@ -235,6 +326,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const chats = res.data.map(mapBackendChat);
       set({ chats, chatsLoading: false });
       joinChatRooms(chats);
+      // Open a chat queued by the invite page (deep link /invite/<code>)
+      try {
+        const pending = sessionStorage.getItem("tepla-open-chat");
+        if (pending && chats.some((c) => c.id === pending)) {
+          sessionStorage.removeItem("tepla-open-chat");
+          get().setActiveChat(pending);
+        }
+      } catch { /* ignore */ }
       get().loadFolders();
       get().loadStories();
     } catch (err: any) {
@@ -416,6 +515,36 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }));
   },
 
+  // ─── Secret chats (E2E, Telegram-style) ────────
+  createSecretChat: async (targetUserId: string) => {
+    try {
+      const res = await api.post<{ success: boolean; data: any }>("/secret-chats", { targetUserId });
+      const chatId: string = res.data.id;
+      // Establish the X3DH session and announce the handshake so the peer
+      // can derive the same session on their device.
+      try {
+        const e2ee = await import("@/lib/security/e2eeSession");
+        if (!(await e2ee.hasSession(targetUserId))) {
+          const handshake = await e2ee.startSession(targetUserId);
+          await api.post("/messages", {
+            chatId,
+            content: JSON.stringify({ kind: "e2e_handshake", handshake }),
+            type: "system",
+            contentIv: "x3dh",
+          });
+        }
+      } catch (err) {
+        console.warn("[chat-store] secret session init failed:", err);
+      }
+      await get().loadChats();
+      get().setActiveChat(chatId);
+      return chatId;
+    } catch (err: any) {
+      console.warn("[chat-store] createSecretChat failed:", err?.message || err);
+      return null;
+    }
+  },
+
   // ─── Load messages for a chat ───────────────────
   loadMessages: async (chatId: string, force = false) => {
     // Don't re-fetch if we already have messages (unless forced, e.g. after a reconnect)
@@ -428,7 +557,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const res = await api.get<{ success: boolean; data: any[]; meta: any }>(
         `/messages?chatId=${chatId}&limit=50`
       );
-      const messages = res.data.map(mapBackendMessage);
+      let messages = res.data.map(mapBackendMessage);
+      if (get().chats.find((c) => c.id === chatId)?.type === "secret") {
+        messages = await processSecretHistory(chatId, messages);
+      }
       messageCursors.set(chatId, res.meta?.nextCursor || null);
       set((s) => ({
         messages: { ...s.messages, [chatId]: messages },
@@ -450,7 +582,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const res = await api.get<{ success: boolean; data: any[]; meta: any }>(
         `/messages?chatId=${chatId}&limit=50&before=${encodeURIComponent(cursor)}`
       );
-      const older = res.data.map(mapBackendMessage);
+      let older = res.data.map(mapBackendMessage);
+      if (get().chats.find((c) => c.id === chatId)?.type === "secret") {
+        older = await processSecretHistory(chatId, older);
+      }
       messageCursors.set(chatId, res.meta?.nextCursor || null);
       set((s) => ({
         messages: { ...s.messages, [chatId]: [...older, ...(s.messages[chatId] || [])] },
@@ -482,6 +617,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
     socket.on("message:new", (data: { chatId: string; message: any }) => {
       const msg = mapBackendMessage({ ...data.message, chat_id: data.chatId });
       const myId = useAuthStore.getState().user?.id;
+      const chatObj = get().chats.find((c) => c.id === data.chatId);
+      const isSecret = chatObj?.type === "secret";
 
       // Deduplicate own messages that were optimistically added
       if (pendingMessages.has(msg.id)) {
@@ -501,49 +638,66 @@ export const useChatStore = create<ChatState>((set, get) => ({
       // Skip echo of an own message that is still optimistic ("sending"):
       // the REST response will reconcile it with the real server id.
       if (msg.senderId === myId) {
+        const alreadyShown = isSecret && getCachedSecretText(msg.id) !== null;
         const hasPendingDuplicate = (get().messages[data.chatId] || []).some(
-          (m) => m.status === "sending" && m.text === msg.text
+          (m) => m.status === "sending" && (isSecret || m.text === msg.text)
         );
-        if (hasPendingDuplicate) return;
+        if (hasPendingDuplicate || alreadyShown) return;
       }
 
-      // Add incoming message
-      set((s) => ({
-        messages: {
-          ...s.messages,
-          [data.chatId]: [...(s.messages[data.chatId] || []), msg],
-        },
-        chats: s.chats.map((c) =>
-          c.id === data.chatId
-            ? {
-                ...c,
-                lastMessage: { text: msg.text, senderId: msg.senderId, timestamp: msg.timestamp, type: msg.type },
-                unreadCount: s.activeChatId === data.chatId ? 0 : (c.unreadCount || 0) + 1,
-              }
-            : c
-        ),
-      }));
+      const addIncoming = (finalMsg: Message) => {
+        set((s) => ({
+          messages: {
+            ...s.messages,
+            [data.chatId]: [...(s.messages[data.chatId] || []), finalMsg],
+          },
+          chats: s.chats.map((c) =>
+            c.id === data.chatId
+              ? {
+                  ...c,
+                  lastMessage: { text: isSecret ? "\u{1F512}" : finalMsg.text, senderId: finalMsg.senderId, timestamp: finalMsg.timestamp, type: finalMsg.type },
+                  unreadCount: s.activeChatId === data.chatId ? 0 : (c.unreadCount || 0) + 1,
+                }
+              : c
+          ),
+        }));
 
-      // Auto-translate if enabled for this chat
-      const chatObj = get().chats.find((c) => c.id === data.chatId);
-      if (chatObj?.autoTranslate && msg.type === "text" && msg.text.trim()) {
-        const lang = useAuthStore.getState().language || "ru";
-        translateText(msg.text, lang).then((translated) => {
-          if (translated && translated !== msg.text) {
-            set((s) => ({
-              messages: {
-                ...s.messages,
-                [data.chatId]: (s.messages[data.chatId] || []).map((m) =>
-                  m.id === msg.id ? { ...m, translatedText: translated, translatedLang: lang } : m
-                ),
-              },
-            }));
+        // Auto-translate if enabled for this chat (never for secret chats)
+        if (!isSecret && chatObj?.autoTranslate && finalMsg.type === "text" && finalMsg.text.trim()) {
+          const lang = useAuthStore.getState().language || "ru";
+          translateText(finalMsg.text, lang).then((translated) => {
+            if (translated && translated !== finalMsg.text) {
+              set((s) => ({
+                messages: {
+                  ...s.messages,
+                  [data.chatId]: (s.messages[data.chatId] || []).map((m) =>
+                    m.id === finalMsg.id ? { ...m, translatedText: translated, translatedLang: lang } : m
+                  ),
+                },
+              }));
+            }
+          });
+        }
+
+        // Join room if we aren't in it yet
+        socket.emit("presence:join", data.chatId);
+      };
+
+      if (isSecret) {
+        // Decrypt (or process the X3DH handshake) before displaying
+        (async () => {
+          try {
+            const peerId = await resolveSecretPeerId(data.chatId);
+            const processed = await processSecretMessage(peerId, msg, myId);
+            if (processed) addIncoming(processed);
+          } catch (err) {
+            console.warn("[chat-store] secret message processing failed:", err);
           }
-        });
+        })();
+        return;
       }
 
-      // Join room if we aren't in it yet
-      socket.emit("presence:join", data.chatId);
+      addIncoming(msg);
     });
 
     socket.on("message:updated", (data: { chatId: string; message?: any; messageId?: string; content?: string }) => {
@@ -752,6 +906,48 @@ export const useChatStore = create<ChatState>((set, get) => ({
       replyingTo: null,
       editingMessage: null,
     }));
+
+    // Secret chats: encrypt with the Double Ratchet session before sending.
+    // The server stores only ciphertext (content) + header (keyEnvelope).
+    const chatObj = get().chats.find((c) => c.id === chatId);
+    if (chatObj?.type === "secret") {
+      (async () => {
+        try {
+          const peerId = await resolveSecretPeerId(chatId);
+          const e2ee = await import("@/lib/security/e2eeSession");
+          const encrypted = await e2ee.encryptForPeer(peerId, text);
+          const res = await api.post<{ success: boolean; data: any }>("/messages", {
+            chatId,
+            content: encrypted.ciphertext,
+            type,
+            replyToId: replyingTo?.id || undefined,
+            contentIv: encrypted.header.dh,
+            keyEnvelope: encrypted.header,
+          });
+          cacheSecretText(res.data.id, text);
+          pendingMessages.add(res.data.id);
+          set((s) => ({
+            messages: {
+              ...s.messages,
+              [chatId]: (s.messages[chatId] || []).map((m) =>
+                m.id === tempId ? { ...m, id: res.data.id, status: "sent" as const } : m
+              ),
+            },
+          }));
+        } catch (err) {
+          console.warn("[chat-store] secret sendMessage failed:", err);
+          set((s) => ({
+            messages: {
+              ...s.messages,
+              [chatId]: (s.messages[chatId] || []).map((m) =>
+                m.id === tempId ? { ...m, status: "failed" as const } : m
+              ),
+            },
+          }));
+        }
+      })();
+      return;
+    }
 
     // Send to API
     api

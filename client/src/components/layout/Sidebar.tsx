@@ -196,9 +196,10 @@ export default function Sidebar() {
         )}
         {filteredChats.map((chat) => {
           // For direct chats, show the other user's info
-          const displayName = chat.type === "direct" && chat.user?.name ? chat.user.name : chat.name;
-          const displayAvatar = chat.type === "direct" && chat.user?.avatar ? chat.user.avatar : chat.avatar;
-          const displayUsername = chat.type === "direct" && chat.user?.username ? chat.user.username : undefined;
+          const isDirectLike = chat.type === "direct" || chat.type === "secret";
+          const displayName = isDirectLike && chat.user?.name ? chat.user.name : chat.name;
+          const displayAvatar = isDirectLike && chat.user?.avatar ? chat.user.avatar : chat.avatar;
+          const displayUsername = isDirectLike && chat.user?.username ? chat.user.username : undefined;
 
           return (
             <button
@@ -212,11 +213,12 @@ export default function Sidebar() {
                 src={displayAvatar}
                 status={chat.user?.status}
                 size="md"
-                showStatus={chat.type === "direct"}
+                showStatus={isDirectLike}
               />
               <div className="min-w-0 flex-1">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-1.5">
+                    {chat.type === "secret" && <span className="shrink-0 text-[11px]" title={t("secret_chat")}>🔒</span>}
                     <span className="truncate text-sm font-semibold text-[var(--text-primary)]">{displayName}</span>
                     {/* Verified badge for user */}
                     {chat.type === "direct" && chat.user?.isVerified && (

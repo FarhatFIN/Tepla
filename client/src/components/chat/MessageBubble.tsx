@@ -1,10 +1,11 @@
 "use client";
-import { memo, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import { Message, MessageStatus, MessageAttachment } from "@/types";
 import { useChatStore } from "@/stores/chat-store";
 import { useShallow } from "zustand/react/shallow";
 import { useTranslation } from "@/hooks/useTranslation";
 import { getSocket } from "@/lib/socket";
+import api from "@/lib/api";
 import RichText from "./RichText";
 
 interface MessageBubbleProps {
@@ -177,37 +178,157 @@ function LocationContent({ message, isOwn }: { message: Message; isOwn: boolean 
   );
 }
 
-// Poll message
+// Poll message — server-backed (/polls API) with legacy JSON fallback
+type ServerPoll = {
+  id: string;
+  question: string;
+  options: { id: number; text: string }[];
+  isAnonymous: boolean;
+  allowsMultiple: boolean;
+  isQuiz: boolean;
+  correctOption: number | null;
+  isClosed: boolean;
+  counts: Record<number, number>;
+  totalVoters: number;
+  myOptionIds: number[];
+};
+
+function mapServerPoll(raw: any): ServerPoll {
+  const counts: Record<number, number> = {};
+  for (const c of raw.counts || []) counts[c.option_id ?? c.optionId] = c.votes;
+  return {
+    id: raw.id,
+    question: raw.question,
+    options: Array.isArray(raw.options) ? raw.options : [],
+    isAnonymous: raw.is_anonymous ?? true,
+    allowsMultiple: raw.allows_multiple ?? false,
+    isQuiz: raw.is_quiz ?? false,
+    correctOption: raw.correct_option ?? null,
+    isClosed: raw.is_closed ?? false,
+    counts,
+    totalVoters: raw.totalVoters ?? 0,
+    myOptionIds: raw.myOptionIds || [],
+  };
+}
+
 function PollContent({ message, isOwn }: { message: Message; isOwn: boolean }) {
   const t = useTranslation();
-  const [voted, setVoted] = useState<number | null>(null);
-  const poll = parseMessagePayload<PollPayload>(message.text);
+  const legacy = parseMessagePayload<PollPayload>(message.text);
+  const [poll, setPoll] = useState<ServerPoll | null>(null);
+  const [selected, setSelected] = useState<number[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [shareState, setShareState] = useState<"idle" | "copied" | "failed">("idle");
 
-  if (!poll) {
-    return null;
-  }
+  useEffect(() => {
+    if (message.id.startsWith("tmp-")) return;
+    let cancelled = false;
+    api.get<{ success: boolean; data: any }>(`/polls/${message.id}`)
+      .then((res) => { if (!cancelled) setPoll(mapServerPoll(res.data)); })
+      .catch(() => { /* legacy JSON poll or polls API unavailable */ });
+    return () => { cancelled = true; };
+  }, [message.id]);
 
-  const totalVotes = (poll.votes || []).reduce((sum, value) => sum + value, 0);
+  const refresh = async () => {
+    try {
+      const res = await api.get<{ success: boolean; data: any }>(`/polls/${message.id}`);
+      setPoll(mapServerPoll(res.data));
+    } catch { /* ignore */ }
+  };
+
+  const vote = async (optionIds: number[]) => {
+    if (!poll || busy || optionIds.length === 0) return;
+    setBusy(true);
+    try {
+      await api.post(`/polls/${poll.id}/vote`, { optionIds });
+      setSelected([]);
+      await refresh();
+    } catch { /* poll closed or quiz already answered */ }
+    setBusy(false);
+  };
+
+  const retract = async () => {
+    if (!poll || busy) return;
+    setBusy(true);
+    try {
+      await api.delete(`/polls/${poll.id}/vote`);
+      await refresh();
+    } catch { /* ignore */ }
+    setBusy(false);
+  };
+
+  const shareInvite = async () => {
+    try {
+      const res = await api.post<{ success: boolean; data: any }>(`/chats/${message.chatId}/invites`, {});
+      await navigator.clipboard.writeText(`${window.location.origin}/invite/${res.data.code}`);
+      setShareState("copied");
+    } catch {
+      setShareState("failed");
+    }
+    setTimeout(() => setShareState("idle"), 2000);
+  };
+
+  const question = poll?.question || legacy?.question || "";
+  const options = poll ? poll.options : (legacy?.options || []).map((text, id) => ({ id, text }));
+  if (!question || options.length === 0) return null;
+
+  const hasVoted = Boolean(poll && poll.myOptionIds.length > 0);
+  const showResults = Boolean(poll && (hasVoted || poll.isClosed));
+  const totalVotes = poll
+    ? Object.values(poll.counts).reduce((sum, v) => sum + v, 0)
+    : (legacy?.votes || []).reduce((sum, v) => sum + v, 0);
+
+  const toggleOption = (id: number) => {
+    if (!poll || hasVoted || poll.isClosed || busy) return;
+    if (!poll.allowsMultiple) { vote([id]); return; }
+    setSelected((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  };
 
   return (
     <div className="px-3 py-2 min-w-[220px]">
-      <p className="text-sm font-semibold mb-2">{poll.question}</p>
-      {poll.type === "quiz" && voted !== null && <p className={`text-[10px] mb-1 ${voted === poll.correctOptionId ? "text-[#00D46A]" : "text-red-400"}`}>{voted === poll.correctOptionId ? t("correct") : t("wrong")}</p>}
+      <p className="text-sm font-semibold mb-2">{question}</p>
+      {poll?.isQuiz && hasVoted && poll.correctOption !== null && (
+        <p className={`text-[10px] mb-1 ${poll.myOptionIds.includes(poll.correctOption) ? "text-[#00D46A]" : "text-red-400"}`}>
+          {poll.myOptionIds.includes(poll.correctOption) ? t("correct") : t("wrong")}
+        </p>
+      )}
       <div className="flex flex-col gap-1.5">
-        {(poll.options || []).map((opt, i) => {
-          const votes = poll.votes?.[i] || 0;
-          const pct = totalVotes ? Math.round(votes / totalVotes * 100) : 0;
-          const isVoted = voted === i;
+        {options.map((opt) => {
+          const votes = poll ? (poll.counts[opt.id] || 0) : (legacy?.votes?.[opt.id] || 0);
+          const pct = totalVotes ? Math.round((votes / totalVotes) * 100) : 0;
+          const isMine = poll ? poll.myOptionIds.includes(opt.id) : false;
+          const isSelected = selected.includes(opt.id);
           return (
-            <button key={i} onClick={() => { if (voted === null) setVoted(i); }} disabled={voted !== null} className={`relative overflow-hidden rounded-lg px-3 py-1.5 text-left text-sm transition-colors ${isVoted ? (isOwn ? "ring-1 ring-white/50" : "ring-1 ring-[var(--accent)]") : ""} ${isOwn ? "bg-white/10 hover:bg-white/20" : "bg-[var(--bg-input)] hover:bg-[var(--bg-hover)]"}`}>
-              {voted !== null && <div className={`absolute inset-y-0 left-0 transition-all ${isOwn ? "bg-white/10" : "bg-[var(--accent)]/10"}`} style={{ width: `${pct}%` }} />}
-              <span className="relative">{opt}</span>
-              {voted !== null && <span className={`relative float-right text-xs ${isOwn ? "text-white/60" : "text-[var(--text-tertiary)]"}`}>{pct}%</span>}
+            <button
+              key={opt.id}
+              onClick={() => toggleOption(opt.id)}
+              disabled={!poll || hasVoted || poll.isClosed || busy}
+              className={`relative overflow-hidden rounded-lg px-3 py-1.5 text-left text-sm transition-colors ${isMine || isSelected ? (isOwn ? "ring-1 ring-white/50" : "ring-1 ring-[var(--accent)]") : ""} ${isOwn ? "bg-white/10 hover:bg-white/20" : "bg-[var(--bg-input)] hover:bg-[var(--bg-hover)]"} disabled:cursor-default`}
+            >
+              {showResults && <div className={`absolute inset-y-0 left-0 transition-all ${isOwn ? "bg-white/10" : "bg-[var(--accent)]/10"}`} style={{ width: `${pct}%` }} />}
+              <span className="relative">{opt.text}</span>
+              {showResults && <span className={`relative float-right text-xs ${isOwn ? "text-white/60" : "text-[var(--text-tertiary)]"}`}>{pct}%</span>}
             </button>
           );
         })}
       </div>
-      {!poll.isAnonymous && <p className={`mt-1.5 text-[10px] ${isOwn ? "text-white/40" : "text-[var(--text-tertiary)]"}`}>{t("votes", { count: totalVotes })}</p>}
+
+      {poll?.allowsMultiple && !hasVoted && !poll.isClosed && (
+        <button onClick={() => vote(selected)} disabled={busy || selected.length === 0} className={`mt-1.5 w-full rounded-lg py-1.5 text-xs font-medium transition-colors disabled:opacity-50 ${isOwn ? "bg-white/20 text-white" : "bg-[var(--accent)] text-white"}`}>
+          {t("vote")}
+        </button>
+      )}
+
+      <div className={`mt-1.5 flex items-center justify-between gap-2 text-[10px] ${isOwn ? "text-white/40" : "text-[var(--text-tertiary)]"}`}>
+        <span>{poll?.isClosed ? t("poll_closed") : t("votes", { count: poll ? poll.totalVoters : totalVotes })}</span>
+        <div className="flex items-center gap-2">
+          {hasVoted && poll && !poll.isQuiz && !poll.isClosed && (
+            <button onClick={retract} disabled={busy} className="underline hover:opacity-80">{t("retract_vote")}</button>
+          )}
+          <button onClick={shareInvite} className="underline hover:opacity-80">
+            {shareState === "copied" ? t("link_copied") : shareState === "failed" ? t("invite_link_failed") : t("share_invite_link")}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

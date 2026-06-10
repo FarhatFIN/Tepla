@@ -11,7 +11,8 @@ export default function Header({ chat, onBack, onSearch }: HeaderProps) {
   const { toggleProfile, toggleCalls, toggleTranslation } = useChatStore();
   const t = useTranslation();
   const user = chat.user;
-  const statusText = chat.type === "direct"
+  const isDirectLike = chat.type === "direct" || chat.type === "secret";
+  const statusText = isDirectLike
     ? user?.status === "online" ? t("online") : user?.lastSeen ? t("last_seen", { time: user.lastSeen || "" }) : t("offline")
     : t("members_count", { count: chat.membersCount || 0 });
 
@@ -22,10 +23,15 @@ export default function Header({ chat, onBack, onSearch }: HeaderProps) {
       </IconButton>
 
       <div className="flex min-w-0 flex-1 cursor-pointer items-center gap-3" onClick={toggleProfile}>
-        <Avatar name={chat.name} src={chat.avatar} status={user?.status} size="sm" showStatus={chat.type === "direct"} />
+        <Avatar name={chat.name} src={chat.avatar} status={user?.status} size="sm" showStatus={isDirectLike} />
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
             <h2 className="truncate text-sm font-bold text-[var(--text-primary)]">{chat.name}</h2>
+            {chat.type === "secret" && (
+              <span title={t("secret_chat_hint")} className="inline-flex shrink-0 items-center gap-1 rounded-full bg-[#00D46A]/15 px-2 py-0.5 text-[10px] font-semibold text-[#00D46A]">
+                🔒 {t("secret_chat")}
+              </span>
+            )}
             {(chat.type === "channel" || chat.type === "group" || chat.type === "bot") && (
               <span className="inline-flex items-center gap-1 rounded-full bg-[var(--accent)]/15 px-2 py-0.5 text-[10px] font-semibold text-[var(--accent)]">
                 <svg width="10" height="10" viewBox="0 0 24 24" fill="var(--accent)" stroke="none"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17z"/></svg>

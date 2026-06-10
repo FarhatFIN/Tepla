@@ -254,6 +254,24 @@ registerRoutes([
     rewrite: '/api/chats/',
   },
   {
+    path: '/api/v2/secret-chats',
+    middleware: protectedMiddleware,
+    target: config.services.messaging,
+    rewrite: '/api/secret-chats/',
+  },
+  {
+    path: '/api/v2/polls',
+    middleware: protectedMiddleware,
+    target: config.services.messaging,
+    rewrite: '/api/polls/',
+  },
+  {
+    path: '/api/v2/invites',
+    middleware: protectedMiddleware,
+    target: config.services.messaging,
+    rewrite: '/api/invites/',
+  },
+  {
     path: '/api/v2/dm',
     middleware: protectedMiddleware,
     target: config.services.messaging,

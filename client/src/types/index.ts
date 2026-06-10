@@ -1,5 +1,5 @@
 export type MessageStatus = "sending" | "sent" | "delivered" | "read" | "failed";
-export type ChatType = "direct" | "group" | "channel" | "bot" | "saved" | "forum";
+export type ChatType = "direct" | "group" | "channel" | "bot" | "saved" | "forum" | "secret";
 export type ChatRole = "owner" | "admin" | "member" | "restricted" | "banned";
 export type PresenceStatus = "online" | "offline" | "away" | "dnd";
 export type CallType = "voice" | "video";
@@ -118,6 +118,8 @@ export interface Message {
   scheduledAt?: string;
   translatedText?: string;
   translatedLang?: string;
+  /** Double Ratchet header for E2E messages in secret chats */
+  keyEnvelope?: { dh: string; pn: number; n: number } | null;
 }
 
 export interface Story {

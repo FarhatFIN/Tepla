@@ -254,12 +254,24 @@ export default function MessageInput({ chatId }: MessageInputProps) {
     );
   };
 
-  // ── Poll ──
-  const sendPoll = () => {
+  // ── Poll (server-backed with legacy fallback) ──
+  const sendPoll = async () => {
     const validOpts = pollOptions.filter((o) => o.trim());
     if (!pollQuestion.trim() || validOpts.length < 2) return;
-    const data = { question: pollQuestion, options: validOpts, type: pollType, isAnonymous: pollAnonymous, votes: validOpts.map(() => 0), correctOptionId: 0 };
-    sendMessage(chatId, JSON.stringify(data), "poll");
+    try {
+      await api.post("/polls", {
+        chatId,
+        question: pollQuestion.trim(),
+        options: validOpts,
+        isAnonymous: pollAnonymous,
+        isQuiz: pollType === "quiz",
+        correctOption: pollType === "quiz" ? 0 : null,
+      });
+    } catch {
+      // Fallback: legacy JSON poll message when the polls API is unavailable
+      const data = { question: pollQuestion, options: validOpts, type: pollType, isAnonymous: pollAnonymous, votes: validOpts.map(() => 0), correctOptionId: 0 };
+      sendMessage(chatId, JSON.stringify(data), "poll");
+    }
     setPollQuestion("");
     setPollOptions(["", ""]);
     setShowPoll(false);

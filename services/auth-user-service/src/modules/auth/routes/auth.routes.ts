@@ -1687,6 +1687,62 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
     } catch (err) { next(err); }
   });
 
+  // --- Active sessions / devices -------------------------------------
+
+  // GET /api/auth/sessions - list this user's devices/sessions
+  router.get('/sessions', auth, async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const userId = req.user!.sub;
+      const fingerprint = RiskEngine.generateFingerprint(req.headers as Record<string, string>);
+      const result: any = await db.query(
+        `SELECT device_id, name, fingerprint, last_ip, last_active, created_at, is_trusted
+         FROM devices WHERE user_id = $1
+         ORDER BY last_active DESC NULLS LAST, created_at DESC`,
+        [userId]
+      );
+      const rows: any[] = result?.rows ?? result ?? [];
+      res.json({
+        success: true,
+        data: rows.map((d) => ({
+          deviceId: d.device_id,
+          name: d.name,
+          lastIp: d.last_ip,
+          lastActive: d.last_active,
+          createdAt: d.created_at,
+          isTrusted: d.is_trusted,
+          isCurrent: d.fingerprint === fingerprint,
+        })),
+      });
+    } catch (err) { next(err); }
+  });
+
+  // DELETE /api/auth/sessions - terminate all sessions except the current device
+  router.delete('/sessions', auth, async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const userId = req.user!.sub;
+      const fingerprint = RiskEngine.generateFingerprint(req.headers as Record<string, string>);
+      await db.query(
+        `DELETE FROM devices WHERE user_id = $1 AND fingerprint IS DISTINCT FROM $2`,
+        [userId, fingerprint]
+      );
+      await AuditLogger.log('sessions_terminated_all', { userId, ip: req.ip });
+      res.json({ success: true, data: { terminated: 'others' } });
+    } catch (err) { next(err); }
+  });
+
+  // DELETE /api/auth/sessions/:deviceId - terminate a single device session
+  router.delete('/sessions/:deviceId', auth, async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const userId = req.user!.sub;
+      await db.query(
+        `DELETE FROM devices WHERE user_id = $1 AND device_id = $2`,
+        [userId, req.params.deviceId]
+      );
+      await AuditLogger.log('session_terminated', { userId, deviceId: req.params.deviceId, ip: req.ip });
+      res.json({ success: true, data: { deviceId: req.params.deviceId, terminated: true } });
+    } catch (err) { next(err); }
+  });
+
   // GET /api/auth/check-username/:username
   router.get('/check-username/:username', async (req: Request, res: Response, next: NextFunction) => {
     try {

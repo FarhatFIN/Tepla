@@ -2,14 +2,25 @@
 import { useState } from "react";
 import { Chat } from "@/types";
 import Avatar from "@/components/ui/Avatar";
+import SafetyNumberCard from "@/components/chat/SafetyNumberCard";
 import { useChatStore } from "@/stores/chat-store";
+import { useTranslation } from "@/hooks/useTranslation";
 
 interface ProfilePanelProps { chat: Chat; }
 
 export default function ProfilePanel({ chat }: ProfilePanelProps) {
-  const { toggleProfile } = useChatStore();
+  const { toggleProfile, createSecretChat } = useChatStore();
   const user = chat.user;
   const [copiedField, setCopiedField] = useState<string | null>(null);
+  const [creatingSecret, setCreatingSecret] = useState(false);
+  const t = useTranslation();
+
+  async function handleStartSecretChat() {
+    if (!user?.id || creatingSecret) return;
+    setCreatingSecret(true);
+    await createSecretChat(user.id);
+    setCreatingSecret(false);
+  }
 
   function copyToClipboard(text: string, field: string) {
     navigator.clipboard.writeText(text);
@@ -80,8 +91,29 @@ export default function ProfilePanel({ chat }: ProfilePanelProps) {
           ))}
         </div>
 
+        {/* Secret chat */}
+        {chat.type === "direct" && user?.id && (
+          <div className="border-t border-[var(--border)] px-4 py-3">
+            <button onClick={handleStartSecretChat} disabled={creatingSecret} className="flex w-full items-center gap-3 rounded-lg px-2 py-2.5 text-left transition-colors hover:bg-[var(--bg-hover)] disabled:opacity-50">
+              <span className="text-base">🔒</span>
+              <div className="flex-1">
+                <p className="text-sm text-[var(--accent)]">{t("start_secret_chat")}</p>
+                <p className="text-[10px] text-[var(--text-tertiary)]">{t("secret_chat_hint")}</p>
+              </div>
+              {creatingSecret && <div className="h-4 w-4 animate-spin rounded-full border-2 border-[var(--accent)] border-t-transparent" />}
+            </button>
+          </div>
+        )}
+
+        {/* Key verification for secret chats */}
+        {chat.type === "secret" && user?.id && (
+          <div className="border-t border-[var(--border)] px-4 py-3">
+            <SafetyNumberCard peerUserId={user.id} peerName={chat.name} />
+          </div>
+        )}
+
         {/* Danger zone */}
-        {chat.type === "direct" && (
+        {(chat.type === "direct" || chat.type === "secret") && (
           <div className="border-t border-[var(--border)] px-4 py-3">
             <button className="flex w-full items-center gap-3 rounded-lg px-2 py-2.5 text-left text-red-400 transition-colors hover:bg-red-500/10">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>

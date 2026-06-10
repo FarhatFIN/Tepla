@@ -73,6 +73,37 @@ export default function SettingsPanel() {
     if (activeSection === "folders") loadFolders();
   }, [activeSection, loadFolders]);
 
+  // Active sessions / devices
+  type DeviceSession = { deviceId: string; name?: string; lastIp?: string; lastActive?: string; createdAt?: string; isTrusted?: boolean; isCurrent?: boolean };
+  const [sessions, setSessions] = useState<DeviceSession[]>([]);
+  const [sessionsLoading, setSessionsLoading] = useState(false);
+
+  const loadSessions = async () => {
+    setSessionsLoading(true);
+    try {
+      const res = await api.get<{ success: boolean; data: DeviceSession[] }>("/auth/sessions");
+      setSessions(res.data || []);
+    } catch {
+      setSessions([]);
+    }
+    setSessionsLoading(false);
+  };
+
+  useEffect(() => {
+    if (activeSection === "devices") loadSessions();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeSection]);
+
+  async function terminateSession(deviceId: string) {
+    try { await api.delete(`/auth/sessions/${deviceId}`); } catch { /* ignore */ }
+    loadSessions();
+  }
+
+  async function terminateOtherSessions() {
+    try { await api.delete("/auth/sessions"); } catch { /* ignore */ }
+    loadSessions();
+  }
+
   async function clearCache() {
     try {
       if (typeof caches !== "undefined") {
@@ -393,7 +424,7 @@ export default function SettingsPanel() {
                         {t("two_factor_auth")}
                         <span className="block text-[10px] text-[var(--text-tertiary)]">{t("extra_security")}</span>
                       </button>
-                      <button className="w-full rounded-lg bg-[var(--bg-main)] px-3 py-2 text-left text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] transition-colors mb-1.5">
+                      <button onClick={() => setActiveSection("devices")} className="w-full rounded-lg bg-[var(--bg-main)] px-3 py-2 text-left text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] transition-colors mb-1.5">
                         {t("active_sessions")}
                         <span className="block text-[10px] text-[var(--text-tertiary)]">{t("manage_devices")}</span>
                       </button>
@@ -472,7 +503,7 @@ export default function SettingsPanel() {
                     </div>
                   )}
 
-                  {/* Devices */}
+                  {/* Devices / active sessions */}
                   {activeSection === "devices" && s.id === "devices" && (
                     <div className="mb-2 ml-10 mr-3 rounded-xl bg-[var(--bg-input)] p-3 animate-slide-up">
                       <p className="mb-2 text-[10px] font-semibold uppercase text-[var(--text-tertiary)]">{t("current_device")}</p>
@@ -480,13 +511,39 @@ export default function SettingsPanel() {
                         <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-[rgba(0,212,106,0.15)] text-[#00D46A]">
                           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
                         </div>
-                        <div>
-                          <p className="text-xs font-medium">{t("this_device")}</p>
-                          <p className="text-[10px] text-[var(--text-tertiary)]">{deviceInfo()}</p>
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-xs font-medium">{sessions.find((x) => x.isCurrent)?.name || t("this_device")}</p>
+                          <p className="text-[10px] text-[var(--text-tertiary)]">{deviceInfo()}{sessions.find((x) => x.isCurrent)?.lastIp ? ` \u00b7 ${sessions.find((x) => x.isCurrent)?.lastIp}` : ""}</p>
                           <p className="text-[10px] text-[#00D46A]">{t("online_now")}</p>
                         </div>
                       </div>
-                      <button className="w-full rounded-lg bg-red-500/10 px-3 py-2 text-xs text-red-400 hover:bg-red-500/20 transition-colors">
+
+                      <p className="mb-2 text-[10px] font-semibold uppercase text-[var(--text-tertiary)]">{t("other_devices")}</p>
+                      {sessionsLoading && (
+                        <div className="mb-2 flex justify-center py-2">
+                          <div className="h-4 w-4 animate-spin rounded-full border-2 border-[var(--accent)] border-t-transparent" />
+                        </div>
+                      )}
+                      {!sessionsLoading && sessions.filter((x) => !x.isCurrent).length === 0 && (
+                        <p className="mb-2 text-xs italic text-[var(--text-tertiary)]">{t("no_other_sessions")}</p>
+                      )}
+                      {sessions.filter((x) => !x.isCurrent).map((sess) => (
+                        <div key={sess.deviceId} className="flex items-center gap-3 rounded-lg bg-[var(--bg-main)] p-2.5 mb-1.5">
+                          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[var(--bg-input)] text-[var(--text-tertiary)]">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="5" y="2" width="14" height="20" rx="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <p className="truncate text-xs font-medium">{sess.name || "Device"}</p>
+                            <p className="text-[10px] text-[var(--text-tertiary)]">
+                              {sess.lastIp || "\u2014"}{sess.lastActive ? ` \u00b7 ${new Date(sess.lastActive).toLocaleString()}` : ""}
+                            </p>
+                          </div>
+                          <button onClick={() => terminateSession(sess.deviceId)} className="shrink-0 rounded-lg bg-red-500/10 px-2.5 py-1.5 text-[10px] text-red-400 hover:bg-red-500/20 transition-colors">
+                            {t("terminate")}
+                          </button>
+                        </div>
+                      ))}
+                      <button onClick={terminateOtherSessions} className="mt-1 w-full rounded-lg bg-red-500/10 px-3 py-2 text-xs text-red-400 hover:bg-red-500/20 transition-colors">
                         {t("terminate_sessions")}
                       </button>
                     </div>
