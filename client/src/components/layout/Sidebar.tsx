@@ -11,7 +11,7 @@ import { useTranslation } from "@/hooks/useTranslation";
 import NewChatModal from "@/components/chat/NewChatModal";
 
 export default function Sidebar() {
-  const { chats, activeChatId, setActiveChat, folders, activeFolderId, setActiveFolder, createFolder, stories, searchQuery, setSearchQuery, toggleSettings, toggleWallet, toggleWBIT, toggleArchive, togglePin, toggleMute, markAsRead } = useChatStore(useShallow(s => ({ chats: s.chats, activeChatId: s.activeChatId, setActiveChat: s.setActiveChat, folders: s.folders, activeFolderId: s.activeFolderId, setActiveFolder: s.setActiveFolder, createFolder: s.createFolder, stories: s.stories, searchQuery: s.searchQuery, setSearchQuery: s.setSearchQuery, toggleSettings: s.toggleSettings, toggleWallet: s.toggleWallet, toggleWBIT: s.toggleWBIT, toggleArchive: s.toggleArchive, togglePin: s.togglePin, toggleMute: s.toggleMute, markAsRead: s.markAsRead })));
+  const { chats, chatsLoading, chatsError, loadChats, activeChatId, setActiveChat, folders, activeFolderId, setActiveFolder, createFolder, stories, searchQuery, setSearchQuery, toggleSettings, toggleWallet, toggleWBIT, toggleArchive, togglePin, toggleMute, markAsRead } = useChatStore(useShallow(s => ({ chats: s.chats, chatsLoading: s.chatsLoading, chatsError: s.chatsError, loadChats: s.loadChats, activeChatId: s.activeChatId, setActiveChat: s.setActiveChat, folders: s.folders, activeFolderId: s.activeFolderId, setActiveFolder: s.setActiveFolder, createFolder: s.createFolder, stories: s.stories, searchQuery: s.searchQuery, setSearchQuery: s.setSearchQuery, toggleSettings: s.toggleSettings, toggleWallet: s.toggleWallet, toggleWBIT: s.toggleWBIT, toggleArchive: s.toggleArchive, togglePin: s.togglePin, toggleMute: s.toggleMute, markAsRead: s.markAsRead })));
   const { theme, toggleTheme } = useTheme();
   const t = useTranslation();
   const [showNewChat, setShowNewChat] = useState(false);
@@ -133,7 +133,31 @@ export default function Sidebar() {
 
       {/* Chat list */}
       <nav className="flex-1 overflow-y-auto">
-        {filteredChats.length === 0 && !searchQuery && !showArchived && (
+        {/* Loading skeleton (first load only) */}
+        {chatsLoading && (
+          <div className="flex flex-col gap-1 px-3 py-2" aria-busy="true" aria-label="Loading chats">
+            {Array.from({ length: 7 }).map((_, i) => (
+              <div key={i} className="flex items-center gap-3 px-1 py-2 animate-pulse">
+                <div className="h-11 w-11 shrink-0 rounded-full bg-[var(--bg-input)]" />
+                <div className="flex-1 space-y-2">
+                  <div className="h-3 w-2/5 rounded bg-[var(--bg-input)]" />
+                  <div className="h-2.5 w-4/5 rounded bg-[var(--bg-input)]" />
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+        {/* Error state with retry */}
+        {!chatsLoading && chatsError && filteredChats.length === 0 && (
+          <div className="flex flex-col items-center gap-3 px-6 py-10 text-center">
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="var(--text-tertiary)" strokeWidth="1.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+            <p className="text-sm text-[var(--text-tertiary)]">Could not load chats</p>
+            <button onClick={() => loadChats()} className="rounded-xl bg-[var(--accent)] px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-[var(--accent-hover)]">
+              Retry
+            </button>
+          </div>
+        )}
+        {!chatsLoading && !chatsError && filteredChats.length === 0 && !searchQuery && !showArchived && (
           <div className="flex flex-col items-center gap-4 px-6 py-10">
             <p className="text-sm text-[var(--text-tertiary)]">{t("no_chats")}</p>
             <div className="flex flex-col gap-2 w-full">

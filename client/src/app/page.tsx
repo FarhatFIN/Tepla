@@ -11,6 +11,7 @@ import SettingsPanel from "@/components/layout/SettingsPanel";
 import WalletPanel from "@/components/layout/WalletPanel";
 import WBITPanel from "@/components/layout/WBITPanel";
 import CallOverlay from "@/components/calls/CallOverlay";
+import IncomingCallModal from "@/components/calls/IncomingCallModal";
 import StickerPicker from "@/components/stickers/StickerPicker";
 import LockScreen, { useAutoLock } from "@/components/auth/LockScreen";
 
@@ -78,6 +79,7 @@ export default function Home() {
       <WalletPanel />
       <WBITPanel />
       <CallOverlay />
+      <IncomingCallModal />
     </main>
   );
 }

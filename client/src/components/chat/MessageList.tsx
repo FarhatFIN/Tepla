@@ -2,8 +2,10 @@
 import { useEffect, useMemo, useRef } from "react";
 import { Message } from "@/types";
 import MessageBubble from "./MessageBubble";
+import { useChatStore } from "@/stores/chat-store";
 
 interface MessageListProps {
+  chatId: string;
   messages: Message[];
   currentUserId: string;
   searchMatchIds?: string[];
@@ -32,21 +34,41 @@ function DateSeparator({ date }: { date: string }) {
 /** Distance from the bottom (px) under which we still consider the user "at the bottom". */
 const NEAR_BOTTOM_PX = 120;
 
+/** Distance from the top (px) under which we start loading older history. */
+const NEAR_TOP_PX = 200;
+
 function prefersReducedMotion(): boolean {
   return typeof window !== "undefined" && !!window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
 }
 
-export default function MessageList({ messages, currentUserId, searchMatchIds = [], activeSearchMessageId }: MessageListProps) {
+export default function MessageList({ chatId, messages, currentUserId, searchMatchIds = [], activeSearchMessageId }: MessageListProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const nearBottomRef = useRef(true);
+  const loadingOlderRef = useRef(false);
   const messageRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const searchMatchSet = useMemo(() => new Set(searchMatchIds), [searchMatchIds]);
+  const loadOlderMessages = useChatStore((s) => s.loadOlderMessages);
+  const loadingHistory = useChatStore((s) => s.messagesLoading[chatId]);
 
   const handleScroll = () => {
     const el = containerRef.current;
     if (!el) return;
     nearBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < NEAR_BOTTOM_PX;
+
+    // Infinite scroll up: fetch older history and keep the viewport stable
+    if (el.scrollTop < NEAR_TOP_PX && !loadingOlderRef.current && messages.length > 0) {
+      loadingOlderRef.current = true;
+      const prevHeight = el.scrollHeight;
+      const prevTop = el.scrollTop;
+      loadOlderMessages(chatId).finally(() => {
+        requestAnimationFrame(() => {
+          const node = containerRef.current;
+          if (node) node.scrollTop = prevTop + (node.scrollHeight - prevHeight);
+          loadingOlderRef.current = false;
+        });
+      });
+    }
   };
 
   useEffect(() => {
@@ -62,6 +84,21 @@ export default function MessageList({ messages, currentUserId, searchMatchIds = 
     if (!activeSearchMessageId) return;
     messageRefs.current[activeSearchMessageId]?.scrollIntoView({ behavior: prefersReducedMotion() ? "auto" : "smooth", block: "center" });
   }, [activeSearchMessageId]);
+
+  // History is being fetched for the first time: show bubble skeletons
+  if (messages.length === 0 && loadingHistory) {
+    return (
+      <div className="flex-1 overflow-hidden chat-wallpaper px-4 py-4" aria-busy="true" aria-label="Loading messages">
+        <div className="relative z-[1] mx-auto flex max-w-3xl flex-col gap-3">
+          {Array.from({ length: 8 }).map((_, i) => (
+            <div key={i} className={`flex ${i % 2 ? "justify-end" : "justify-start"} animate-pulse`}>
+              <div className="h-10 rounded-2xl bg-[var(--bg-card)]" style={{ width: `${40 + ((i * 13) % 35)}%` }} />
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
 
   if (messages.length === 0) {
     return (

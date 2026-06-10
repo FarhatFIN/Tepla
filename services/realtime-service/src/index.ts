@@ -275,7 +275,28 @@ async function start() {
     await emitToUserChats(userId, 'user:profile_changed', { userId, fields });
   });
 
-  const consumers = [msgConsumer, presenceConsumer, chatConsumer, userConsumer];
+  // 5. CALL_EVENTS — ring chat members and sync call lifecycle
+  const callConsumer = new KafkaConsumer('rt-svc-call', 'rt-svc-calls');
+  await callConsumer.subscribe([EventTopic.CALL_EVENTS]);
+
+  callConsumer.on(EventType.CALL_STARTED, async (event: DomainEvent) => {
+    const { call, chatId } = event.payload as any;
+    io.to(`chat:${chatId}`).emit('call:incoming', { chatId, call, from: event.userId });
+  });
+  callConsumer.on(EventType.CALL_PARTICIPANT_JOINED, async (event: DomainEvent) => {
+    const { callId, chatId } = event.payload as any;
+    io.to(`chat:${chatId}`).emit('call:participant_joined', { callId, chatId, userId: event.userId });
+  });
+  callConsumer.on(EventType.CALL_PARTICIPANT_LEFT, async (event: DomainEvent) => {
+    const { callId, chatId } = event.payload as any;
+    io.to(`chat:${chatId}`).emit('call:participant_left', { callId, chatId, userId: event.userId });
+  });
+  callConsumer.on(EventType.CALL_ENDED, async (event: DomainEvent) => {
+    const { callId, chatId, declined } = event.payload as any;
+    io.to(`chat:${chatId}`).emit('call:ended', { callId, chatId, declined: Boolean(declined) });
+  });
+
+  const consumers = [msgConsumer, presenceConsumer, chatConsumer, userConsumer, callConsumer];
   await Promise.all(consumers.map(c => c.start()));
 
   // ─── Start Server ─────────────────────────────

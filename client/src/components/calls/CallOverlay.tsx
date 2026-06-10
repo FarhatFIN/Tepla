@@ -7,7 +7,7 @@ import { useTranslation } from "@/hooks/useTranslation";
 import api from "@/lib/api";
 
 export default function CallOverlay() {
-  const { showCalls, toggleCalls, chats, activeChatId, messages: allMessages, sendMessage } = useChatStore();
+  const { showCalls, toggleCalls, chats, activeChatId, messages: allMessages, sendMessage, callType: requestedCallType } = useChatStore();
   const user = useAuthStore((s) => s.user);
   const t = useTranslation();
   const [isMuted, setIsMuted] = useState(false);
@@ -21,6 +21,7 @@ export default function CallOverlay() {
   const [chatDraft, setChatDraft] = useState("");
 
   const roomRef = useRef<any>(null);
+  const callIdRef = useRef<string | null>(null);
   const localAudioRef = useRef<any>(null);
   const localVideoRef = useRef<any>(null);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
@@ -28,7 +29,6 @@ export default function CallOverlay() {
   const chatPanelBottomRef = useRef<HTMLDivElement>(null);
 
   const chat = chats.find((c) => c.id === activeChatId);
-  const roomName = activeChatId ? `tepla-${activeChatId.slice(0, 8)}` : "";
   const callMessages = activeChatId ? allMessages[activeChatId] || [] : [];
 
   const cleanup = useCallback(async () => {
@@ -54,14 +54,28 @@ export default function CallOverlay() {
 
     async function startCall() {
       try {
-        // Get LiveKit token from backend
-        const res = await api.post<{ success: boolean; data: { token: string; url: string } }>("/calls/token", {
-          roomName,
-          participantName: user?.name || user?.username || "User",
-          chatId: activeChatId,
-          callType,
-        });
-        const { token, url } = res.data;
+        setCallType(requestedCallType);
+
+        // Join the active call in this chat, or start a new one
+        const active = await api.get<{ success: boolean; data: { id: string } | null }>(`/calls/chat/${activeChatId}/active`);
+        let payload: { call?: any; token?: string; livekitUrl?: string; action?: string };
+        if (active.data?.id) {
+          payload = (await api.post<{ success: boolean; data: any }>(`/calls/${active.data.id}/join`)).data;
+        } else {
+          payload = (await api.post<{ success: boolean; data: any }>("/calls/start", {
+            chatId: activeChatId,
+            type: requestedCallType,
+            isGroup: chat?.type === "group" || chat?.type === "channel",
+          })).data;
+          // Race: someone started a call between our check and /start
+          if (payload.action === "join_existing" && payload.call?.id) {
+            payload = (await api.post<{ success: boolean; data: any }>(`/calls/${payload.call.id}/join`)).data;
+          }
+        }
+
+        const token = payload.token;
+        const url = process.env.NEXT_PUBLIC_LIVEKIT_URL || payload.livekitUrl;
+        callIdRef.current = payload.call?.id || null;
         if (!token || !url) {
           console.warn("[call] No LiveKit token/url received");
           setCallState("ended");
@@ -143,8 +157,16 @@ export default function CallOverlay() {
 
         if (cancelled) { room.disconnect(); return; }
 
-        // Enable microphone
+        // Enable microphone (and camera for video calls)
         await room.localParticipant.setMicrophoneEnabled(true);
+        if (requestedCallType === "video") {
+          try {
+            await room.localParticipant.setCameraEnabled(true);
+            setIsVideoOn(true);
+          } catch (err) {
+            console.warn("[call] Camera permission denied:", err);
+          }
+        }
         setCallState("active");
 
         // Start timer
@@ -207,6 +229,10 @@ export default function CallOverlay() {
   // End call
   const endCall = async () => {
     setCallState("ended");
+    if (callIdRef.current) {
+      api.post(`/calls/${callIdRef.current}/leave`).catch(() => { /* non-critical */ });
+      callIdRef.current = null;
+    }
     await cleanup();
     setCallDuration(0);
     setParticipants([]);

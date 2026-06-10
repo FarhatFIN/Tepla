@@ -1,10 +1,11 @@
 "use client";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Chat, Message } from "@/types";
 import Header from "./Header";
 import MessageList from "@/components/chat/MessageList";
 import MessageInput from "@/components/chat/MessageInput";
 import ProfilePanel from "@/components/profile/ProfilePanel";
+import GroupInfoPanel from "@/components/profile/GroupInfoPanel";
 import { useChatStore } from "@/stores/chat-store";
 import { useTranslation } from "@/hooks/useTranslation";
 
@@ -16,8 +17,18 @@ interface ChatAreaProps {
 }
 
 export default function ChatArea({ chat, messages, currentUserId, onBack }: ChatAreaProps) {
-  const { showProfile, sendMessage } = useChatStore();
+  const { showProfile, sendMessage, loadMembers } = useChatStore();
+  const members = useChatStore((s) => s.members[chat.id]);
   const t = useTranslation();
+
+  const isGroupLike = chat.type === "group" || chat.type === "channel";
+  useEffect(() => {
+    if (isGroupLike) loadMembers(chat.id);
+  }, [chat.id, isGroupLike, loadMembers]);
+
+  const myRole = members?.find((m) => m.userId === currentUserId)?.role;
+  // Channels are broadcast-only: subscribers cannot post
+  const readOnly = chat.type === "channel" && !!members && myRole !== "owner" && myRole !== "admin";
   const [searchOpen, setSearchOpen] = useState(false);
   const [messageSearch, setMessageSearch] = useState("");
   const [searchCursor, setSearchCursor] = useState({ index: 0, key: "" });
@@ -113,33 +124,42 @@ export default function ChatArea({ chat, messages, currentUserId, onBack }: Chat
         )}
 
         <MessageList
+          chatId={chat.id}
           messages={messages}
           currentUserId={currentUserId}
           searchMatchIds={searchMatches.map((message) => message.id)}
           activeSearchMessageId={activeSearchMessageId}
         />
 
-        {/* Quick action buttons */}
-        <div className="flex items-center gap-2 px-4 py-1.5 border-t border-[var(--border)] bg-[var(--bg-sidebar)]">
-          {quickActions.map((action) => (
-            <button
-              key={action.label}
-              onClick={() => sendMessage(chat.id, `${action.icon} ${action.label}`, "text")}
-              className="flex items-center gap-1.5 rounded-full border border-[var(--border)] bg-[var(--bg-input)] px-3 py-1.5 text-xs font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
-            >
-              <span>{action.icon}</span>
-              <span>{action.label}</span>
-            </button>
-          ))}
-        </div>
+        {readOnly ? (
+          <div className="border-t border-[var(--border)] bg-[var(--bg-sidebar)] px-4 py-3.5 text-center text-sm text-[var(--text-tertiary)]">
+            Only admins can post in this channel
+          </div>
+        ) : (
+          <>
+            {/* Quick action buttons */}
+            <div className="flex items-center gap-2 px-4 py-1.5 border-t border-[var(--border)] bg-[var(--bg-sidebar)]">
+              {quickActions.map((action) => (
+                <button
+                  key={action.label}
+                  onClick={() => sendMessage(chat.id, `${action.icon} ${action.label}`, "text")}
+                  className="flex items-center gap-1.5 rounded-full border border-[var(--border)] bg-[var(--bg-input)] px-3 py-1.5 text-xs font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+                >
+                  <span>{action.icon}</span>
+                  <span>{action.label}</span>
+                </button>
+              ))}
+            </div>
 
-        <MessageInput chatId={chat.id} />
+            <MessageInput chatId={chat.id} />
+          </>
+        )}
       </div>
 
-      {/* Profile panel */}
+      {/* Profile / group info panel */}
       {showProfile && (
         <div className="hidden w-[320px] shrink-0 border-l border-[var(--border)] lg:block animate-slide-in-right">
-          <ProfilePanel chat={chat} />
+          {isGroupLike ? <GroupInfoPanel chat={chat} /> : <ProfilePanel chat={chat} />}
         </div>
       )}
     </section>

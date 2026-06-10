@@ -322,9 +322,27 @@ export function callsRouter(redis: RedisClient, kafka: KafkaProducer): Router {
       const remaining = await repo.getActiveParticipantCount(callId);
       if (!call.isGroup || remaining <= 1) {
         await repo.updateCallStatus(callId, CallStatus.DECLINED);
+        await kafka.publish({
+          id: crypto.randomUUID(),
+          type: EventType.CALL_ENDED,
+          topic: EventTopic.CALL_EVENTS,
+          timestamp: new Date().toISOString(),
+          source: 'calls-service',
+          correlationId: crypto.randomUUID(),
+          userId: req.user!.sub,
+          payload: { callId, chatId: call.chatId, declined: true },
+        });
       }
 
       res.json({ success: true });
+    } catch (err) { next(err); }
+  });
+
+  // ── Call history (must be registered before /:callId) ──
+  router.get('/history', authMiddleware(), async (req, res, next) => {
+    try {
+      const calls = await repo.getUserCallHistory(req.user!.sub, parseInt(req.query.limit as string) || 50);
+      res.json({ success: true, data: calls });
     } catch (err) { next(err); }
   });
 
@@ -334,14 +352,6 @@ export function callsRouter(redis: RedisClient, kafka: KafkaProducer): Router {
       const call = await repo.getCall(req.params.callId as CallId);
       if (!call) throw new AppError('Call not found', 404);
       res.json({ success: true, data: call });
-    } catch (err) { next(err); }
-  });
-
-  // ── Call history ──
-  router.get('/history', authMiddleware(), async (req, res, next) => {
-    try {
-      const calls = await repo.getUserCallHistory(req.user!.sub, parseInt(req.query.limit as string) || 50);
-      res.json({ success: true, data: calls });
     } catch (err) { next(err); }
   });
 

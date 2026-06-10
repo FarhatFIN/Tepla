@@ -35,6 +35,10 @@ export default function NewChatModal({ open, onClose, initialTab = "contact" }: 
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const [discoverQuery, setDiscoverQuery] = useState("");
+  const [discoverResults, setDiscoverResults] = useState<{ id: string; name: string; username?: string; description?: string; members_count?: number }[]>([]);
+  const [discovering, setDiscovering] = useState(false);
+  const [joiningId, setJoiningId] = useState<string | null>(null);
   useEffect(() => { if (open) setTab(initialTab); }, [open, initialTab]);
   const loadChats = useChatStore((s) => s.loadChats);
   const setActiveChat = useChatStore((s) => s.setActiveChat);
@@ -141,6 +145,32 @@ export default function NewChatModal({ open, onClose, initialTab = "contact" }: 
     setCreating(false);
   }
 
+  async function searchChannels() {
+    setDiscovering(true);
+    setError("");
+    try {
+      const res = await api.get<{ success: boolean; data: any[] }>(`/channels/discover?q=${encodeURIComponent(discoverQuery)}`);
+      setDiscoverResults(res.data || []);
+    } catch {
+      setError(t("search_failed"));
+    }
+    setDiscovering(false);
+  }
+
+  async function joinChannel(id: string) {
+    setJoiningId(id);
+    setError("");
+    try {
+      await api.post(`/channels/${id}/join`);
+      await loadChats();
+      setActiveChat(id);
+      onClose();
+    } catch {
+      setError(t("failed_create_channel"));
+    }
+    setJoiningId(null);
+  }
+
   function reset() {
     setSearch("");
     setSearchResults([]);
@@ -151,6 +181,9 @@ export default function NewChatModal({ open, onClose, initialTab = "contact" }: 
     setChannelDesc("");
     setError("");
     setSuccess("");
+    setDiscoverQuery("");
+    setDiscoverResults([]);
+    setJoiningId(null);
   }
 
   function handleClose() {
@@ -305,6 +338,52 @@ export default function NewChatModal({ open, onClose, initialTab = "contact" }: 
           >
             {creating ? <div className="mx-auto h-5 w-5 animate-spin rounded-full border-2 border-white border-t-transparent" /> : t("create_channel")}
           </button>
+
+          {/* Discover public channels */}
+          <div className="mt-1 border-t border-[var(--border)] pt-3">
+            <p className="mb-2 text-xs text-[var(--text-tertiary)]">Find public channels</p>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                placeholder="Channel name or @username"
+                value={discoverQuery}
+                onChange={(e) => setDiscoverQuery(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && searchChannels()}
+                className="min-w-0 flex-1 rounded-xl bg-[var(--bg-input)] px-3 py-2.5 text-sm outline-none placeholder:text-[var(--text-tertiary)] focus:ring-2 focus:ring-[var(--accent)]"
+              />
+              <button
+                onClick={searchChannels}
+                disabled={discovering}
+                className="rounded-xl bg-[var(--bg-input)] px-4 py-2.5 text-sm font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] disabled:opacity-50"
+              >
+                {discovering ? <div className="h-4 w-4 animate-spin rounded-full border-2 border-[var(--accent)] border-t-transparent" /> : t("search")}
+              </button>
+            </div>
+            {discoverResults.length > 0 && (
+              <div className="mt-2 max-h-48 overflow-y-auto">
+                {discoverResults.map((ch) => (
+                  <div key={ch.id} className="flex items-center gap-3 rounded-xl px-3 py-2 hover:bg-[var(--bg-hover)]">
+                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[var(--accent)] text-sm font-bold text-white">
+                      {(ch.name || "?")[0].toUpperCase()}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium">{ch.name}</p>
+                      <p className="truncate text-xs text-[var(--text-tertiary)]">
+                        {ch.username ? `@${ch.username} · ` : ""}{ch.members_count || 0} subscribers
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => joinChannel(ch.id)}
+                      disabled={joiningId === ch.id}
+                      className="shrink-0 rounded-lg bg-[var(--accent-soft)] px-3 py-1.5 text-xs font-medium text-[var(--accent)] disabled:opacity-50"
+                    >
+                      {joiningId === ch.id ? "..." : "Join"}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       )}
     </Modal>

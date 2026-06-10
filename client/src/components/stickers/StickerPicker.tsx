@@ -1,6 +1,7 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useChatStore } from "@/stores/chat-store";
+import api from "@/lib/api";
 
 const emojiCategories = [
   { name: "Smileys", emojis: ["\u{1F600}", "\u{1F603}", "\u{1F604}", "\u{1F601}", "\u{1F606}", "\u{1F605}", "\u{1F602}", "\u{1F923}", "\u{1F60A}", "\u{1F607}", "\u{1F642}", "\u{1F643}", "\u{1F609}", "\u{1F60C}", "\u{1F60D}", "\u{1F970}", "\u{1F618}", "\u{1F617}", "\u{1F619}", "\u{1F61A}", "\u{1F60B}", "\u{1F61B}", "\u{1F61C}", "\u{1F61D}", "\u{1F911}", "\u{1F917}", "\u{1F914}", "\u{1F910}", "\u{1F928}", "\u{1F610}", "\u{1F611}", "\u{1F636}", "\u{1F60F}", "\u{1F612}", "\u{1F644}", "\u{1F62C}", "\u{1F925}"] },
@@ -10,27 +11,66 @@ const emojiCategories = [
   { name: "Food", emojis: ["\u{1F34E}", "\u{1F34F}", "\u{1F350}", "\u{1F34A}", "\u{1F34B}", "\u{1F34C}", "\u{1F349}", "\u{1F347}", "\u{1F353}", "\u{1F348}", "\u{1F352}", "\u{1F351}", "\u{1F346}", "\u{1F955}", "\u{1F33D}", "\u{1F336}\u{FE0F}", "\u{1F951}", "\u{1F966}", "\u{1F355}", "\u{1F354}", "\u{1F32E}", "\u{1F37F}", "\u{2615}", "\u{1F37A}", "\u{1F377}"] },
 ];
 
-const mockStickers = [
-  { id: "st1", emoji: "\u{1F44D}", label: "Thumbs Up" },
-  { id: "st2", emoji: "\u{1F525}", label: "Fire" },
-  { id: "st3", emoji: "\u{2764}\u{FE0F}", label: "Heart" },
-  { id: "st4", emoji: "\u{1F602}", label: "Laugh" },
-  { id: "st5", emoji: "\u{1F60D}", label: "Love" },
-  { id: "st6", emoji: "\u{1F914}", label: "Think" },
-  { id: "st7", emoji: "\u{1F680}", label: "Rocket" },
-  { id: "st8", emoji: "\u{1F389}", label: "Party" },
-];
+interface ApiSticker {
+  id: string;
+  packId: string;
+  emoji: string;
+  fileUrl: string;
+  thumbnailUrl?: string;
+}
+
+interface ApiStickerPack {
+  id: string;
+  title: string;
+  stickers: ApiSticker[];
+}
 
 export default function StickerPicker() {
   const { showStickers, toggleStickers, activeChatId, sendMessage } = useChatStore();
   const [tab, setTab] = useState<"emoji" | "stickers" | "gif">("emoji");
   const [searchEmoji, setSearchEmoji] = useState("");
   const [activeCategory, setActiveCategory] = useState(0);
+  const [packs, setPacks] = useState<ApiStickerPack[]>([]);
+  const [loadingStickers, setLoadingStickers] = useState(false);
+  const [stickersLoaded, setStickersLoaded] = useState(false);
+
+  useEffect(() => {
+    if (!showStickers || tab !== "stickers" || stickersLoaded) return;
+    let cancelled = false;
+    setLoadingStickers(true);
+    (async () => {
+      try {
+        const my = await api.get<{ success: boolean; data: ApiStickerPack[] }>("/stickers/my");
+        let result = my.data || [];
+        if (!result.length) {
+          const trending = await api.get<{ success: boolean; data: ApiStickerPack[] }>("/stickers/trending");
+          result = trending.data || [];
+        }
+        if (!cancelled) {
+          setPacks(result);
+          setStickersLoaded(true);
+        }
+      } catch (err) {
+        console.warn("[StickerPicker] failed to load stickers:", err);
+      } finally {
+        if (!cancelled) setLoadingStickers(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [showStickers, tab, stickersLoaded]);
 
   if (!showStickers || !activeChatId) return null;
 
   const handleEmojiClick = (emoji: string) => {
     sendMessage(activeChatId, emoji);
+    toggleStickers();
+  };
+
+  const sendSticker = (sticker: ApiSticker) => {
+    sendMessage(activeChatId, sticker.emoji || "", "sticker", [
+      { id: sticker.id, type: "sticker", url: sticker.fileUrl, thumbnailUrl: sticker.thumbnailUrl },
+    ]);
+    api.post(`/stickers/${sticker.id}/use`).catch(() => { /* non-critical */ });
     toggleStickers();
   };
 
@@ -77,11 +117,26 @@ export default function StickerPicker() {
       )}
 
       {tab === "stickers" && (
-        <div className="grid max-h-[280px] grid-cols-4 gap-2 overflow-y-auto p-3">
-          {mockStickers.map((s) => (
-            <button key={s.id} onClick={() => { sendMessage(activeChatId, s.emoji, "sticker"); toggleStickers(); }} className="flex h-16 items-center justify-center rounded-xl bg-[var(--bg-input)] text-3xl transition-transform hover:scale-105 hover:bg-[var(--bg-hover)]">
-              {s.emoji}
-            </button>
+        <div className="max-h-[280px] overflow-y-auto p-3">
+          {loadingStickers && (
+            <div className="flex items-center justify-center py-8">
+              <div className="h-6 w-6 animate-spin rounded-full border-2 border-[var(--accent)] border-t-transparent" />
+            </div>
+          )}
+          {!loadingStickers && packs.length === 0 && (
+            <p className="py-8 text-center text-sm text-[var(--text-tertiary)]">No sticker packs yet</p>
+          )}
+          {!loadingStickers && packs.map((pack) => (
+            <div key={pack.id} className="mb-3">
+              <p className="mb-1 px-1 text-[10px] font-medium uppercase text-[var(--text-tertiary)]">{pack.title}</p>
+              <div className="grid grid-cols-4 gap-2">
+                {pack.stickers.map((s) => (
+                  <button key={s.id} onClick={() => sendSticker(s)} className="flex h-16 items-center justify-center overflow-hidden rounded-xl bg-[var(--bg-input)] transition-transform hover:scale-105 hover:bg-[var(--bg-hover)]">
+                    {s.fileUrl ? <img src={s.thumbnailUrl || s.fileUrl} alt={s.emoji} className="h-14 w-14 object-contain" /> : <span className="text-3xl">{s.emoji}</span>}
+                  </button>
+                ))}
+              </div>
+            </div>
           ))}
         </div>
       )}

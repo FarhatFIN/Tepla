@@ -152,7 +152,7 @@ function router(kafka: KafkaProducer): Router {
   r.post('/chats', async (req: Request, res: Response, next: NextFunction) => {
     try {
       const userId = userIdFrom(req);
-      const { type, targetUserId, name, description, avatarUrl } = req.body || {};
+      const { type, targetUserId, name, description, avatarUrl, username, isPublic } = req.body || {};
       const chatType = type || (targetUserId ? 'direct' : undefined);
 
       if (!chatType || !['direct', 'group', 'channel'].includes(chatType)) {
@@ -221,11 +221,20 @@ function router(kafka: KafkaProducer): Router {
       if (chatType === 'channel') {
         if (!name || String(name).trim().length < 2) throw new ValidationError('Channel name is required');
 
+        const handle = username ? String(username).toLowerCase() : null;
+        if (handle && !/^[a-z0-9_]{3,32}$/.test(handle)) {
+          throw new ValidationError('username must be 3-32 characters: a-z, 0-9, _');
+        }
+        if (handle) {
+          const taken = await pool.query('SELECT 1 FROM chats WHERE username = $1', [handle]);
+          if (taken.rows[0]) throw new ValidationError('Username is already taken');
+        }
+
         const chat = await pool.query(
-          `INSERT INTO chats (id, type, name, description, created_by, members_count)
-           VALUES ($1, 'channel', $2, $3, $4, 1)
+          `INSERT INTO chats (id, type, name, description, username, is_public, created_by, members_count)
+           VALUES ($1, 'channel', $2, $3, $4, $5, $6, 1)
            RETURNING *`,
-          [uuid(), String(name).trim(), description || null, userId],
+          [uuid(), String(name).trim(), description || null, handle, isPublic !== false, userId],
         );
         await pool.query(
           `INSERT INTO chat_members (chat_id, user_id, role) VALUES ($1, $2, 'owner')
@@ -405,17 +414,99 @@ function router(kafka: KafkaProducer): Router {
     } catch (err) { next(err); }
   });
 
+  // ── Change a member's role (owner promotes/demotes admins) ──
+  r.patch('/groups/:id/members/:userId/role', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const currentUserId = userIdFrom(req);
+      const chatId = req.params.id;
+      const targetUserId = req.params.userId;
+      const role = req.body?.role;
+      if (!['admin', 'member'].includes(role)) throw new ValidationError('role must be "admin" or "member"');
+
+      const me = await pool.query('SELECT role FROM chat_members WHERE chat_id = $1 AND user_id = $2', [chatId, currentUserId]);
+      if (me.rows[0]?.role !== 'owner') throw new ForbiddenError('Only the owner can change roles');
+      if (targetUserId === currentUserId) throw new ValidationError('Cannot change your own role');
+
+      const row = await pool.query(
+        `UPDATE chat_members SET role = $3
+         WHERE chat_id = $1 AND user_id = $2 AND role <> 'owner'
+         RETURNING user_id, role`,
+        [chatId, targetUserId, role],
+      );
+      if (!row.rows[0]) throw new ValidationError('Member not found');
+      res.json({ success: true, data: { chatId, userId: targetUserId, role } });
+    } catch (err) { next(err); }
+  });
+
+  // ── Leave a group/channel (owner must transfer ownership first) ──
+  r.post('/chats/:id/leave', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const userId = userIdFrom(req);
+      const chatId = req.params.id;
+      await requireMember(chatId, userId);
+      const me = await pool.query('SELECT role FROM chat_members WHERE chat_id = $1 AND user_id = $2', [chatId, userId]);
+      if (me.rows[0]?.role === 'owner') {
+        throw new ValidationError('Owner cannot leave the chat. Transfer ownership first.');
+      }
+      await pool.query('DELETE FROM chat_members WHERE chat_id = $1 AND user_id = $2', [chatId, userId]);
+      await refreshMembersCount(chatId);
+      await publishMemberLeft(kafka, req, chatId, userId);
+      res.json({ success: true, data: { chatId } });
+    } catch (err) { next(err); }
+  });
+
+  // ── Edit chat info: name/description/avatar (admins of groups/channels) ──
+  r.patch('/chats/:id', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const userId = userIdFrom(req);
+      const chatId = req.params.id;
+      const chat = await pool.query('SELECT type FROM chats WHERE id = $1', [chatId]);
+      if (!chat.rows[0]) throw new ValidationError('Chat not found');
+      if (!['group', 'channel'].includes(chat.rows[0].type)) {
+        throw new ValidationError('Only groups and channels can be edited');
+      }
+      await requireAdmin(chatId, userId);
+      const { name, description, avatarUrl } = req.body || {};
+      if (name !== undefined && String(name).trim().length < 2) {
+        throw new ValidationError('Name must be at least 2 characters');
+      }
+      const row = await pool.query(
+        `UPDATE chats SET
+           name = COALESCE($2, name),
+           description = COALESCE($3, description),
+           avatar_url = COALESCE($4, avatar_url)
+         WHERE id = $1 RETURNING *`,
+        [
+          chatId,
+          name !== undefined ? String(name).trim() : null,
+          description !== undefined ? String(description) : null,
+          avatarUrl !== undefined ? String(avatarUrl) : null,
+        ],
+      );
+      res.json({ success: true, data: row.rows[0] });
+    } catch (err) { next(err); }
+  });
+
   r.post('/channels', async (req: Request, res: Response, next: NextFunction) => {
     try {
       const userId = userIdFrom(req);
-      const { name, description } = req.body || {};
+      const { name, description, username, isPublic } = req.body || {};
       if (!name || String(name).trim().length < 2) throw new ValidationError('Channel name is required');
 
+      const handle = username ? String(username).toLowerCase() : null;
+      if (handle && !/^[a-z0-9_]{3,32}$/.test(handle)) {
+        throw new ValidationError('username must be 3-32 characters: a-z, 0-9, _');
+      }
+      if (handle) {
+        const taken = await pool.query('SELECT 1 FROM chats WHERE username = $1', [handle]);
+        if (taken.rows[0]) throw new ValidationError('Username is already taken');
+      }
+
       const chat = await pool.query(
-        `INSERT INTO chats (id, type, name, description, created_by, members_count)
-         VALUES ($1, 'channel', $2, $3, $4, 1)
+        `INSERT INTO chats (id, type, name, description, username, is_public, created_by, members_count)
+         VALUES ($1, 'channel', $2, $3, $4, $5, $6, 1)
          RETURNING *`,
-        [uuid(), String(name).trim(), description || null, userId],
+        [uuid(), String(name).trim(), description || null, handle, isPublic !== false, userId],
       );
       await pool.query(
         `INSERT INTO chat_members (chat_id, user_id, role) VALUES ($1, $2, 'owner')
@@ -446,6 +537,44 @@ function router(kafka: KafkaProducer): Router {
       }
       await refreshMembersCount(chatId);
       res.status(201).json({ success: true, data: { chatId, added: ids, role } });
+    } catch (err) { next(err); }
+  });
+
+  // ── Discover public channels (registered before /channels/:id) ──
+  r.get('/channels/discover', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      userIdFrom(req);
+      const q = String(req.query.q || '').trim();
+      const like = `%${q}%`;
+      const rows = await pool.query(
+        `SELECT id, type, name, username, description, avatar_url, members_count, created_at
+         FROM chats
+         WHERE type = 'channel' AND is_public = true
+           AND ($1 = '%%' OR name ILIKE $1 OR username ILIKE $1 OR description ILIKE $1)
+         ORDER BY members_count DESC, created_at DESC
+         LIMIT 30`,
+        [like],
+      );
+      res.json({ success: true, data: rows.rows });
+    } catch (err) { next(err); }
+  });
+
+  // ── Subscribe to a public channel ──
+  r.post('/channels/:id/join', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const userId = userIdFrom(req);
+      const chatId = req.params.id;
+      const chat = await pool.query("SELECT id, is_public FROM chats WHERE id = $1 AND type = 'channel'", [chatId]);
+      if (!chat.rows[0]) throw new ValidationError('Channel not found');
+      if (!chat.rows[0].is_public) throw new ForbiddenError('Channel is private');
+      await pool.query(
+        `INSERT INTO chat_members (chat_id, user_id, role) VALUES ($1, $2, 'member')
+         ON CONFLICT DO NOTHING`,
+        [chatId, userId],
+      );
+      await refreshMembersCount(chatId);
+      await publishMemberJoined(kafka, req, chatId, userId);
+      res.status(201).json({ success: true, data: { chatId } });
     } catch (err) { next(err); }
   });
 
@@ -629,9 +758,14 @@ function router(kafka: KafkaProducer): Router {
       }
       await requireMember(chatId, userId);
 
+      const chatRow = await pool.query('SELECT type, message_ttl_seconds FROM chats WHERE id = $1', [chatId]);
+      // Channels are broadcast-only: subscribers read, only owner/admins post
+      if (chatRow.rows[0]?.type === 'channel') {
+        await requireAdmin(chatId, userId);
+      }
+
       // Disappearing messages: honor the chat's message TTL when configured
-      const chatTtlRow = await pool.query('SELECT message_ttl_seconds FROM chats WHERE id = $1', [chatId]);
-      const ttlSeconds = Number(chatTtlRow.rows[0]?.message_ttl_seconds) || null;
+      const ttlSeconds = Number(chatRow.rows[0]?.message_ttl_seconds) || null;
       const expiresAt = ttlSeconds ? new Date(Date.now() + ttlSeconds * 1000).toISOString() : null;
 
       const messageType = attachmentList.length > 0 && type === 'text' ? fileKind(attachmentList[0]) : type;

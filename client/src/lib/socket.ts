@@ -12,14 +12,10 @@ export function connectSocket(token: string): Socket {
     reconnectionDelay: 1000,
     reconnectionAttempts: 10,
   });
+  // Room re-join and state re-sync on reconnect are handled by
+  // useChatStore.bindSocket() to avoid a circular import here.
   socket.on("connect", () => {
     console.log("[ws] connected");
-    // Re-join all chat rooms on reconnect
-    try {
-      const { useChatStore } = require("@/stores/chat-store");
-      const chats = useChatStore.getState().chats;
-      chats.forEach((c: any) => socket!.emit("presence:join", c.id));
-    } catch { /* store not ready yet */ }
   });
   socket.on("disconnect", (reason) => console.log("[ws] disconnected:", reason));
 

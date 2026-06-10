@@ -1,7 +1,6 @@
 "use client";
 import { create } from "zustand";
-import { Chat, Message, ChatFolder, UserStories } from "@/types";
-// Mock data removed — load from API
+import { Chat, Message, ChatFolder, UserStories, Story, ChatMember } from "@/types";
 import api from "@/lib/api";
 import { getSocket } from "@/lib/socket";
 import { useAuthStore } from "@/stores/auth-store";
@@ -9,7 +8,11 @@ import { translateText } from "@/lib/translate";
 
 interface ChatState {
   chats: Chat[];
+  chatsLoading: boolean;
+  chatsError: string | null;
   messages: Record<string, Message[]>;
+  messagesLoading: Record<string, boolean>;
+  members: Record<string, ChatMember[]>;
   activeChatId: string | null;
   activeThreadId: string | null;
   folders: ChatFolder[];
@@ -22,6 +25,7 @@ interface ChatState {
   showStickers: boolean;
   showCalls: boolean;
   callType: "voice" | "video";
+  incomingCall: { callId: string; chatId: string; type: "voice" | "video"; fromUserId: string } | null;
   showSettings: boolean;
   showWallet: boolean;
   showWBIT: boolean;
@@ -36,6 +40,7 @@ interface ChatState {
   toggleProfile: () => void;
   toggleStickers: () => void;
   toggleCalls: (type?: "voice" | "video") => void;
+  setIncomingCall: (call: { callId: string; chatId: string; type: "voice" | "video"; fromUserId: string } | null) => void;
   toggleSettings: () => void;
   toggleWallet: () => void;
   toggleWBIT: () => void;
@@ -52,13 +57,16 @@ interface ChatState {
   toggleArchive: (chatId: string) => Promise<void>;
   togglePin: (chatId: string) => Promise<void>;
   toggleMute: (chatId: string) => Promise<void>;
+  loadMembers: (chatId: string) => Promise<void>;
+  leaveChat: (chatId: string) => Promise<void>;
   loadOlderMessages: (chatId: string) => Promise<void>;
   pinMessage: (chatId: string, messageId: string) => void;
   deleteMessage: (chatId: string, messageId: string) => void;
   toggleTranslation: (chatId: string) => void;
   viewStory: (storyId: string) => void;
   loadChats: () => Promise<void>;
-  loadMessages: (chatId: string) => Promise<void>;
+  loadStories: () => Promise<void>;
+  loadMessages: (chatId: string, force?: boolean) => Promise<void>;
   bindSocket: () => void;
   reset: () => void;
   getDraft: (chatId: string) => string;
@@ -166,7 +174,11 @@ function joinChatRooms(chats: Chat[]): void {
 
 export const useChatStore = create<ChatState>((set, get) => ({
   chats: [],
+  chatsLoading: false,
+  chatsError: null,
   messages: {},
+  messagesLoading: {},
+  members: {},
   activeChatId: null,
   activeThreadId: null,
   folders: [],
@@ -179,6 +191,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   showStickers: false,
   showCalls: false,
   callType: "voice" as const,
+  incomingCall: null,
   showSettings: false,
   showWallet: false,
   showWBIT: false,
@@ -187,7 +200,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   reset: () => set({
     chats: [],
+    chatsLoading: false,
+    chatsError: null,
     messages: {},
+    messagesLoading: {},
+    members: {},
     activeChatId: null,
     activeThreadId: null,
     folders: [],
@@ -200,6 +217,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     showStickers: false,
     showCalls: false,
     callType: "voice",
+    incomingCall: null,
     showSettings: false,
     showWallet: false,
     showWBIT: false,
@@ -209,15 +227,72 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   // ─── Load chats from API ────────────────────────
   loadChats: async () => {
+    // Show the skeleton only on first load, not on background refreshes
+    if (get().chats.length === 0) set({ chatsLoading: true });
+    set({ chatsError: null });
     try {
       const res = await api.get<{ success: boolean; data: any[] }>("/chats");
       const chats = res.data.map(mapBackendChat);
-      set({ chats });
+      set({ chats, chatsLoading: false });
       joinChatRooms(chats);
       get().loadFolders();
+      get().loadStories();
     } catch (err: any) {
       // Warn instead of error to avoid triggering Next.js dev error overlay
       console.warn("[chat-store] loadChats failed:", err?.message || err);
+      set({ chatsLoading: false, chatsError: err?.message || "Failed to load chats" });
+    }
+  },
+
+  // ─── Stories (24h, media-service) ───────────────
+  loadStories: async () => {
+    try {
+      const authUser = useAuthStore.getState().user;
+      const [feedRes, myRes] = await Promise.all([
+        api.get<{ success: boolean; data: any[] }>("/stories/feed"),
+        api.get<{ success: boolean; data: any[] }>("/stories/my"),
+      ]);
+      const chats = get().chats;
+      const userInfo = (userId: string) => {
+        const chat = chats.find((c) => c.user?.id === userId);
+        return { name: chat?.user?.name || "User", avatar: chat?.user?.avatar };
+      };
+      const mapStory = (raw: any, userName: string, userAvatar?: string, isViewed = false): Story => ({
+        id: raw.id,
+        userId: raw.userId || raw.user_id,
+        userName,
+        userAvatar,
+        type: raw.type || "text",
+        mediaUrl: raw.mediaUrl || raw.media_url || undefined,
+        text: raw.caption || undefined,
+        backgroundColor: raw.backgroundColor || raw.background_color || undefined,
+        createdAt: raw.createdAt || raw.created_at || "",
+        expiresAt: raw.expiresAt || raw.expires_at || "",
+        viewsCount: raw.viewsCount ?? raw.views_count ?? 0,
+        isViewed,
+      });
+
+      const stories: UserStories[] = [];
+      if (authUser) {
+        stories.push({
+          userId: authUser.id,
+          userName: authUser.name,
+          userAvatar: authUser.avatar,
+          stories: (myRes.data || []).map((s) => mapStory(s, authUser.name, authUser.avatar, true)),
+          hasUnviewed: false,
+        });
+      }
+      for (const group of feedRes.data || []) {
+        const uid = group.userId || group.user_id;
+        const { name, avatar } = userInfo(uid);
+        const groupStories = (group.stories || []).map((s: any) => mapStory(s, name, avatar, !group.hasUnseen));
+        if (groupStories.length) {
+          stories.push({ userId: uid, userName: name, userAvatar: avatar, stories: groupStories, hasUnviewed: Boolean(group.hasUnseen) });
+        }
+      }
+      set({ stories });
+    } catch (err: any) {
+      console.warn("[chat-store] loadStories failed:", err?.message || err);
     }
   },
 
@@ -311,21 +386,59 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
   },
 
+  // ─── Group/channel members ────────────────────
+  loadMembers: async (chatId: string) => {
+    try {
+      const res = await api.get<{ success: boolean; data: any[] }>(`/groups/${chatId}/members`);
+      const members: ChatMember[] = res.data.map((m: any) => ({
+        userId: m.user_id,
+        role: m.role,
+        joinedAt: m.joined_at,
+        user: {
+          id: m.user_id,
+          name: m.display_name || m.username || "User",
+          username: m.username,
+          avatar: m.avatar_url,
+          status: m.is_online ? "online" : "offline",
+        },
+      }));
+      set((s) => ({ members: { ...s.members, [chatId]: members } }));
+    } catch (err: any) {
+      console.warn("[chat-store] loadMembers failed:", err?.message || err);
+    }
+  },
+
+  leaveChat: async (chatId: string) => {
+    await api.post(`/chats/${chatId}/leave`);
+    set((s) => ({
+      chats: s.chats.filter((c) => c.id !== chatId),
+      activeChatId: s.activeChatId === chatId ? null : s.activeChatId,
+    }));
+  },
+
   // ─── Load messages for a chat ───────────────────
-  loadMessages: async (chatId: string) => {
-    // Don't re-fetch if we already have messages
-    if (get().messages[chatId]?.length) return;
+  loadMessages: async (chatId: string, force = false) => {
+    // Don't re-fetch if we already have messages (unless forced, e.g. after a reconnect)
+    if (!force && get().messages[chatId]?.length) return;
+    // Show the history skeleton only when there is nothing cached yet
+    if (!get().messages[chatId]?.length) {
+      set((s) => ({ messagesLoading: { ...s.messagesLoading, [chatId]: true } }));
+    }
     try {
       const res = await api.get<{ success: boolean; data: any[]; meta: any }>(
         `/messages?chatId=${chatId}&limit=50`
       );
       const messages = res.data.map(mapBackendMessage);
       messageCursors.set(chatId, res.meta?.nextCursor || null);
-      set((s) => ({ messages: { ...s.messages, [chatId]: messages } }));
+      set((s) => ({
+        messages: { ...s.messages, [chatId]: messages },
+        messagesLoading: { ...s.messagesLoading, [chatId]: false },
+      }));
       // markAsRead in setActiveChat ran before history arrived - resend with real ids
       if (get().activeChatId === chatId) get().markAsRead(chatId);
     } catch (err: any) {
       console.warn("[chat-store] loadMessages failed:", err?.message || err);
+      set((s) => ({ messagesLoading: { ...s.messagesLoading, [chatId]: false } }));
     }
   },
 
@@ -356,6 +469,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set({ _socketBound: true });
     joinChatRooms(get().chats);
 
+    // Re-sync after a reconnect: rejoin rooms, refresh the chat list and
+    // force-refetch the active chat so messages sent while offline appear.
+    socket.on("connect", () => {
+      joinChatRooms(get().chats);
+      get().loadChats();
+      const activeId = get().activeChatId;
+      if (activeId) get().loadMessages(activeId, true);
+    });
+
     // New message from another user (or echo of own)
     socket.on("message:new", (data: { chatId: string; message: any }) => {
       const msg = mapBackendMessage({ ...data.message, chat_id: data.chatId });
@@ -376,9 +498,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
         return;
       }
 
-      // Skip own messages that somehow weren't tracked (double safety)
-      if (msg.senderId === myId && (s => s.messages[data.chatId]?.some(m => m.text === msg.text && m.status === "sending"))(get())) {
-        return;
+      // Skip echo of an own message that is still optimistic ("sending"):
+      // the REST response will reconcile it with the real server id.
+      if (msg.senderId === myId) {
+        const hasPendingDuplicate = (get().messages[data.chatId] || []).some(
+          (m) => m.status === "sending" && m.text === msg.text
+        );
+        if (hasPendingDuplicate) return;
       }
 
       // Add incoming message
@@ -543,6 +669,24 @@ export const useChatStore = create<ChatState>((set, get) => ({
     socket.on("chats:updated", () => {
       get().loadChats();
     });
+
+    // ── Calls ──
+    socket.on("call:incoming", (data: { chatId: string; call: any; from: string }) => {
+      const myId = useAuthStore.getState().user?.id;
+      if (data.from === myId || get().showCalls || !data.call?.id) return;
+      set({
+        incomingCall: {
+          callId: data.call.id,
+          chatId: data.chatId,
+          type: data.call.type === "video" ? "video" : "voice",
+          fromUserId: data.from,
+        },
+      });
+    });
+
+    socket.on("call:ended", (data: { callId: string }) => {
+      if (get().incomingCall?.callId === data.callId) set({ incomingCall: null });
+    });
   },
 
   setActiveChat: (chatId) => {
@@ -563,6 +707,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   toggleProfile: () => set((s) => ({ showProfile: !s.showProfile })),
   toggleStickers: () => set((s) => ({ showStickers: !s.showStickers })),
   toggleCalls: (type) => set((s) => ({ showCalls: !s.showCalls, callType: type || s.callType })),
+  setIncomingCall: (call) => set({ incomingCall: call }),
   toggleSettings: () => set((s) => ({ showSettings: !s.showSettings })),
   toggleWallet: () => set((s) => ({ showWallet: !s.showWallet })),
   toggleWBIT: () => set((s) => ({ showWBIT: !s.showWBIT })),
@@ -774,6 +919,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
         hasUnviewed: us.stories.some((st) => st.id !== storyId && !st.isViewed),
       })),
     }));
+    api.post(`/stories/${storyId}/view`).catch((err) =>
+      console.warn("[chat-store] viewStory failed:", err)
+    );
   },
 
   // ─── Draft Messages (localStorage only) ─────
