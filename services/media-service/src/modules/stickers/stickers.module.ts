@@ -5,6 +5,7 @@ import {
   RedisClient,
   authMiddleware,
   AppError,
+  escapeLikePattern,
 } from '@tepla/common';
 import {
   StickerPackId,
@@ -78,11 +79,12 @@ export class StickerRepository extends BaseRepository {
       `SELECT sp.*, COUNT(si.user_id) as install_count_real
        FROM sticker_packs sp
        LEFT JOIN sticker_installs si ON si.pack_id = sp.id
-       WHERE sp.title ILIKE $1 OR sp.name ILIKE $1
+       WHERE sp.title ILIKE $1 ESCAPE '\\' OR sp.name ILIKE $1 ESCAPE '\\'
        GROUP BY sp.id
        ORDER BY install_count_real DESC
        LIMIT $2`,
-      [`%${query}%`, limit]
+      // H-08: `%${query}%` unescaped meant `?q=%` listed every pack.
+      [`%${escapeLikePattern(query)}%`, limit]
     );
     return this.attachStickers(rows, 5);
   }

@@ -38,7 +38,9 @@
     "start:moderation-worker": "pnpm exec tsx --tsconfig tsconfig.services.json services/workers/moderation-worker/src/index.ts",
     "start:analytics-worker": "pnpm exec tsx --tsconfig tsconfig.services.json services/workers/analytics-worker/src/index.ts",
     "test:services": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:unit": "vitest run --config vitest.unit.config.ts",
+    "test:unit:watch": "vitest --config vitest.unit.config.ts"
   },
   "engines": {
     "node": ">=24.0.0",

@@ -1,14 +1,21 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { v4 as uuid } from 'uuid';
-import { RedisClient, KafkaProducer, authMiddleware, NotFoundError, ValidationError, ForbiddenError, createLogger } from '@tepla/common';
+import { RedisClient, KafkaProducer, authMiddleware, NotFoundError, ValidationError, ForbiddenError, createLogger, isUuid } from '@tepla/common';
 import { EventType, EventTopic, UserId } from '@tepla/types';
+// M-11: this was a bare `require()` inside an ES module. It happens to work
+// under tsx's CJS interop, but it breaks the moment the service is built as
+// real ESM, and it hides the dependency from the module graph.
+import { UserRepository } from '../repositories/user.repository';
 
 const logger = createLogger('user-routes');
+
+const RESERVED_USERNAMES = new Set([
+  'admin', 'tepla', 'support', 'help', 'system', 'bot', 'official', 'moderator',
+]);
 
 export function userRouter(redis: RedisClient, kafka: KafkaProducer): Router {
   const router = Router();
   const auth = authMiddleware();
-  const { UserRepository } = require('../repositories/user.repository');
   const userRepo = new UserRepository();
 
   // GET /api/users/check-username?username=... — check username availability
@@ -19,8 +26,7 @@ export function userRouter(redis: RedisClient, kafka: KafkaProducer): Router {
       if (username.length > 32) throw new ValidationError('Username must be at most 32 characters');
       if (!/^[a-z0-9_]+$/.test(username)) throw new ValidationError('Username can only contain a-z, 0-9 and _');
 
-      const reserved = ['admin', 'tepla', 'support', 'help', 'system', 'bot', 'official', 'moderator'];
-      if (reserved.includes(username)) {
+      if (RESERVED_USERNAMES.has(username)) {
         return res.json({ success: true, data: { available: false, reason: 'reserved' } });
       }
 
@@ -72,6 +78,9 @@ export function userRouter(redis: RedisClient, kafka: KafkaProducer): Router {
   // GET /api/users/:id
   router.get('/:id', auth, async (req: Request, res: Response, next: NextFunction) => {
     try {
+      // M-04: without this, `/api/users/foo` reached a uuid column and 500'd.
+      if (!isUuid(req.params.id)) throw new ValidationError('id must be a valid UUID');
+
       const cached = await redis.getJson<any>(`user:${req.params.id}`);
       if (cached) return res.json({ success: true, data: cached });
 
@@ -92,17 +101,25 @@ export function userRouter(redis: RedisClient, kafka: KafkaProducer): Router {
         throw new ForbiddenError('Cannot update other user profiles');
       }
 
+      // Under Express 5 `req.body` is undefined when no parser matched the
+      // content type, so it cannot be indexed directly (the H-12 failure mode).
+      const body = (req.body ?? {}) as Record<string, unknown>;
+
       // Handle username change separately (needs validation + uniqueness check)
-      if (req.body.username !== undefined) {
-        const newUsername = req.body.username.trim().toLowerCase();
+      if (body.username !== undefined) {
+        // M-12: `.trim()` was called straight on the body value, so a JSON
+        // number or object produced a TypeError and a 500 instead of a 400.
+        if (typeof body.username !== 'string') {
+          throw new ValidationError('Username must be a string');
+        }
+        const newUsername = body.username.trim().toLowerCase();
         if (newUsername.length < 3 || newUsername.length > 32) {
           throw new ValidationError('Username must be 3-32 characters');
         }
         if (!/^[a-z0-9_]+$/.test(newUsername)) {
           throw new ValidationError('Username can only contain a-z, 0-9 and _');
         }
-        const reserved = ['admin', 'tepla', 'support', 'help', 'system', 'bot', 'official', 'moderator'];
-        if (reserved.includes(newUsername)) {
+        if (RESERVED_USERNAMES.has(newUsername)) {
           throw new ValidationError('This username is reserved');
         }
         const existing = await userRepo.findByUsername(newUsername);
@@ -115,8 +132,8 @@ export function userRouter(redis: RedisClient, kafka: KafkaProducer): Router {
         'usernameColor', 'animatedAvatarEnabled', 'voiceStatusUrl', 'language', 'birthDate'];
       const updates: Record<string, any> = {};
       for (const key of allowed) {
-        if (req.body[key] !== undefined) {
-          updates[toSnakeCase(key)] = key === 'username' ? req.body[key].trim().toLowerCase() : req.body[key];
+        if (body[key] !== undefined) {
+          updates[toSnakeCase(key)] = key === 'username' ? (body[key] as string).trim().toLowerCase() : body[key];
         }
       }
 
@@ -155,7 +172,18 @@ export function userRouter(redis: RedisClient, kafka: KafkaProducer): Router {
   router.patch('/:id/settings', auth, async (req: Request, res: Response, next: NextFunction) => {
     try {
       if (req.user!.sub !== req.params.id) throw new ForbiddenError();
-      const settings = await userRepo.updateSettings(req.params.id, req.body);
+
+      // The whole request body was previously serialised into the settings
+      // JSONB column, so a client could store unbounded arbitrary data there.
+      const body = req.body;
+      if (!body || typeof body !== 'object' || Array.isArray(body)) {
+        throw new ValidationError('Settings must be an object');
+      }
+      if (JSON.stringify(body).length > 16_384) {
+        throw new ValidationError('Settings payload is too large');
+      }
+
+      const settings = await userRepo.updateSettings(req.params.id, body);
       res.json({ success: true, data: settings });
     } catch (err) { next(err); }
   });

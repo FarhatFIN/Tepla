@@ -4,12 +4,15 @@
 // ============================================
 
 import { Router } from 'express';
+import { randomUUID } from 'crypto';
 import {
   BaseRepository,
   KafkaProducer,
   RedisClient,
+  assertUuid,
   createLogger,
   authMiddleware,
+  db,
   AppError,
 } from '@tepla/common';
 import {
@@ -17,7 +20,6 @@ import {
   CallType,
   CallStatus,
   Call,
-  CallParticipant,
   UserId,
   ChatId,
   EventTopic,
@@ -32,6 +34,8 @@ const LIVEKIT_API_URL = process.env.LIVEKIT_API_URL || 'http://livekit:7880';
 const LIVEKIT_API_KEY = process.env.LIVEKIT_API_KEY;
 const LIVEKIT_API_SECRET = process.env.LIVEKIT_API_SECRET;
 const MAX_GROUP_CALL_PARTICIPANTS = 100;
+const VALID_CALL_TYPES = new Set(['audio', 'video']);
+const VALID_TOGGLE_ACTIONS = new Set(['mute', 'video', 'screen']);
 
 if (!LIVEKIT_API_KEY || !LIVEKIT_API_SECRET) {
   throw new Error('FATAL: LIVEKIT_API_KEY and LIVEKIT_API_SECRET environment variables are required');
@@ -152,32 +156,66 @@ export class CallRepository extends BaseRepository {
 }
 
 // ─── LiveKit Token Generator ───────────────
+/**
+ * Mint a LiveKit access token.
+ *
+ * C-03: this used to wrap the whole body in a `try/catch` whose fallback
+ * returned `base64(JSON.stringify(payload))` — an **unsigned** blob presented
+ * as a token. A transient failure importing `livekit-server-sdk` therefore
+ * downgraded call authentication to nothing at all, silently, in production.
+ * There is no safe fallback for "we cannot sign"; let it fail.
+ */
 export async function generateLiveKitToken(roomName: string, participantId: string, canPublish = true): Promise<string> {
-  try {
-    const { AccessToken } = await import('livekit-server-sdk');
-    const at = new AccessToken(LIVEKIT_API_KEY, LIVEKIT_API_SECRET, {
-      identity: participantId,
-      ttl: '1h',
-    });
-    at.addGrant({
-      room: roomName,
-      roomJoin: true,
-      canPublish,
-      canSubscribe: true,
-      canPublishData: true,
-    });
-    return await at.toJwt();
-  } catch {
-    // Fallback for dev mode without LiveKit SDK
-    const payload = {
-      iss: LIVEKIT_API_KEY,
-      sub: participantId,
-      jti: `${participantId}-${Date.now()}`,
-      exp: Math.floor(Date.now() / 1000) + 3600,
-      video: { room: roomName, roomJoin: true, canPublish, canSubscribe: true, canPublishData: true },
-    };
-    return Buffer.from(JSON.stringify(payload)).toString('base64');
-  }
+  const { AccessToken } = await import('livekit-server-sdk');
+  const at = new AccessToken(LIVEKIT_API_KEY, LIVEKIT_API_SECRET, {
+    identity: participantId,
+    ttl: '1h',
+  });
+  at.addGrant({
+    room: roomName,
+    roomJoin: true,
+    canPublish,
+    canSubscribe: true,
+    canPublishData: true,
+  });
+  return at.toJwt();
+}
+
+// ─── Authorization helpers ─────────────────
+//
+// C-02: none of these checks existed. Every route below took a call id or a
+// chat id straight from the request and acted on it, so any authenticated
+// account could:
+//   • start a call in a chat it is not a member of;
+//   • join *any* call by id and receive a LiveKit **publish** token — i.e.
+//     listen in on, and speak into, a conversation between strangers;
+//   • end or decline anyone's call (`/leave` on a 1:1 ringing call ends it even
+//     for a non-participant, because `remaining <= 1` was true);
+//   • read call metadata and see who is currently talking to whom.
+
+/** Throw unless `userId` is a member of `chatId`. */
+async function requireChatMember(chatId: ChatId, userId: UserId): Promise<void> {
+  assertUuid(chatId, 'chatId');
+  const row = await db.queryRow(
+    'SELECT 1 FROM chat_members WHERE chat_id = $1 AND user_id = $2 LIMIT 1',
+    [chatId, userId],
+  );
+  if (!row) throw new AppError('Not a member of this chat', 403);
+}
+
+/**
+ * Load a call and confirm the caller is entitled to it.
+ *
+ * Entitlement is membership of the call's chat — that is what makes someone a
+ * legitimate ringee. Requiring an existing `call_participants` row instead
+ * would break the very first join.
+ */
+async function loadAuthorizedCall(repo: CallRepository, callId: CallId, userId: UserId): Promise<Call> {
+  assertUuid(callId, 'callId');
+  const call = await repo.getCall(callId);
+  if (!call) throw new AppError('Call not found', 404);
+  await requireChatMember(call.chatId, userId);
+  return call;
 }
 
 // ─── Router Factory ────────────────────────
@@ -189,7 +227,13 @@ export function callsRouter(redis: RedisClient, kafka: KafkaProducer): Router {
   router.post('/start', authMiddleware(), async (req, res, next) => {
     try {
       const userId = req.user!.sub;
-      const { chatId, type, isGroup } = req.body as { chatId: ChatId; type: CallType; isGroup?: boolean };
+      const { chatId, type, isGroup } = (req.body ?? {}) as { chatId: ChatId; type: CallType; isGroup?: boolean };
+
+      if (!chatId) throw new AppError('chatId is required', 400);
+      if (!VALID_CALL_TYPES.has(String(type))) {
+        throw new AppError('type must be "audio" or "video"', 400);
+      }
+      await requireChatMember(chatId, userId);
 
       // Check for existing active call
       const existing = await repo.getActiveCallInChat(chatId);
@@ -198,7 +242,7 @@ export function callsRouter(redis: RedisClient, kafka: KafkaProducer): Router {
         return res.json({ success: true, data: { call: existing, action: 'join_existing' } });
       }
 
-      const callId = crypto.randomUUID() as CallId;
+      const callId = randomUUID() as CallId;
       const roomName = `tepla-${chatId}-${callId}`;
 
       const call = await repo.createCall({
@@ -221,12 +265,12 @@ export function callsRouter(redis: RedisClient, kafka: KafkaProducer): Router {
       const token = await generateLiveKitToken(roomName, userId);
 
       await kafka.publish( {
-        id: crypto.randomUUID(),
+        id: randomUUID(),
         type: EventType.CALL_STARTED,
         topic: EventTopic.CALL_EVENTS,
         timestamp: new Date().toISOString(),
         source: 'calls-service',
-        correlationId: req.headers['x-correlation-id'] as string || crypto.randomUUID(),
+        correlationId: req.headers['x-correlation-id'] as string || randomUUID(),
         userId,
         payload: { call, chatId },
       });
@@ -240,8 +284,8 @@ export function callsRouter(redis: RedisClient, kafka: KafkaProducer): Router {
     try {
       const userId = req.user!.sub;
       const callId = req.params.callId as CallId;
-      const call = await repo.getCall(callId);
-      if (!call || (call.status !== CallStatus.RINGING && call.status !== CallStatus.ACTIVE)) {
+      const call = await loadAuthorizedCall(repo, callId, userId);
+      if (call.status !== CallStatus.RINGING && call.status !== CallStatus.ACTIVE) {
         throw new AppError('Call not found or already ended', 404);
       }
 
@@ -258,12 +302,12 @@ export function callsRouter(redis: RedisClient, kafka: KafkaProducer): Router {
       const token = await generateLiveKitToken(call.livekitRoom!, userId);
 
       await kafka.publish( {
-        id: crypto.randomUUID(),
+        id: randomUUID(),
         type: EventType.CALL_PARTICIPANT_JOINED,
         topic: EventTopic.CALL_EVENTS,
         timestamp: new Date().toISOString(),
         source: 'calls-service',
-        correlationId: crypto.randomUUID(),
+        correlationId: randomUUID(),
         userId,
         payload: { callId, chatId: call.chatId },
       });
@@ -277,8 +321,15 @@ export function callsRouter(redis: RedisClient, kafka: KafkaProducer): Router {
     try {
       const userId = req.user!.sub;
       const callId = req.params.callId as CallId;
-      const call = await repo.getCall(callId);
-      if (!call) throw new AppError('Call not found', 404);
+      const call = await loadAuthorizedCall(repo, callId, userId);
+
+      // Only an actual participant may collapse the call. Without this, any
+      // chat member could POST /leave on a ringing 1:1 call and end it, because
+      // `remaining <= 1` was already true before they "left".
+      const wasParticipant = call.participants.some((p) => p.userId === userId && !p.leftAt);
+      if (!wasParticipant) {
+        return res.json({ success: true, data: { left: false } });
+      }
 
       await repo.removeParticipant(callId, userId);
 
@@ -286,23 +337,23 @@ export function callsRouter(redis: RedisClient, kafka: KafkaProducer): Router {
       if (remaining === 0 || (!call.isGroup && remaining <= 1)) {
         await repo.updateCallStatus(callId, CallStatus.ENDED);
         await kafka.publish( {
-          id: crypto.randomUUID(),
+          id: randomUUID(),
           type: EventType.CALL_ENDED,
           topic: EventTopic.CALL_EVENTS,
           timestamp: new Date().toISOString(),
           source: 'calls-service',
-          correlationId: crypto.randomUUID(),
+          correlationId: randomUUID(),
           userId,
           payload: { callId, chatId: call.chatId, duration: call.duration },
         });
       } else {
         await kafka.publish( {
-          id: crypto.randomUUID(),
+          id: randomUUID(),
           type: EventType.CALL_PARTICIPANT_LEFT,
           topic: EventTopic.CALL_EVENTS,
           timestamp: new Date().toISOString(),
           source: 'calls-service',
-          correlationId: crypto.randomUUID(),
+          correlationId: randomUUID(),
           userId,
           payload: { callId, chatId: call.chatId },
         });
@@ -316,19 +367,19 @@ export function callsRouter(redis: RedisClient, kafka: KafkaProducer): Router {
   router.post('/:callId/decline', authMiddleware(), async (req, res, next) => {
     try {
       const callId = req.params.callId as CallId;
-      const call = await repo.getCall(callId);
-      if (!call || call.status !== CallStatus.RINGING) throw new AppError('Call not found', 404);
+      const call = await loadAuthorizedCall(repo, callId, req.user!.sub);
+      if (call.status !== CallStatus.RINGING) throw new AppError('Call not found', 404);
 
       const remaining = await repo.getActiveParticipantCount(callId);
       if (!call.isGroup || remaining <= 1) {
         await repo.updateCallStatus(callId, CallStatus.DECLINED);
         await kafka.publish({
-          id: crypto.randomUUID(),
+          id: randomUUID(),
           type: EventType.CALL_ENDED,
           topic: EventTopic.CALL_EVENTS,
           timestamp: new Date().toISOString(),
           source: 'calls-service',
-          correlationId: crypto.randomUUID(),
+          correlationId: randomUUID(),
           userId: req.user!.sub,
           payload: { callId, chatId: call.chatId, declined: true },
         });
@@ -349,8 +400,7 @@ export function callsRouter(redis: RedisClient, kafka: KafkaProducer): Router {
   // ── Get call info ──
   router.get('/:callId', authMiddleware(), async (req, res, next) => {
     try {
-      const call = await repo.getCall(req.params.callId as CallId);
-      if (!call) throw new AppError('Call not found', 404);
+      const call = await loadAuthorizedCall(repo, req.params.callId as CallId, req.user!.sub);
       res.json({ success: true, data: call });
     } catch (err) { next(err); }
   });
@@ -358,7 +408,9 @@ export function callsRouter(redis: RedisClient, kafka: KafkaProducer): Router {
   // ── Active call in chat ──
   router.get('/chat/:chatId/active', authMiddleware(), async (req, res, next) => {
     try {
-      const call = await repo.getActiveCallInChat(req.params.chatId as ChatId);
+      const chatId = req.params.chatId as ChatId;
+      await requireChatMember(chatId, req.user!.sub);
+      const call = await repo.getActiveCallInChat(chatId);
       res.json({ success: true, data: call });
     } catch (err) { next(err); }
   });
@@ -366,8 +418,18 @@ export function callsRouter(redis: RedisClient, kafka: KafkaProducer): Router {
   // ── Toggle mute/video/screenshare (signaling via Redis pub/sub) ──
   router.post('/:callId/toggle', authMiddleware(), async (req, res, next) => {
     try {
-      const { type } = req.body as { type: 'mute' | 'video' | 'screen' };
-      const callId = req.params.callId;
+      const { type } = (req.body ?? {}) as { type?: string };
+      if (!VALID_TOGGLE_ACTIONS.has(String(type))) {
+        throw new AppError('type must be "mute", "video" or "screen"', 400);
+      }
+
+      const callId = req.params.callId as CallId;
+      const call = await loadAuthorizedCall(repo, callId, req.user!.sub);
+      // Only someone actually in the call may broadcast state for it.
+      if (!call.participants.some((p) => p.userId === req.user!.sub && !p.leftAt)) {
+        throw new AppError('Not a participant of this call', 403);
+      }
+
       await redis.publish(`call:${callId}:signal`, JSON.stringify({
         userId: req.user!.sub,
         action: type,

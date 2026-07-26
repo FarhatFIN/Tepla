@@ -6,6 +6,14 @@ import { SecurityMetrics } from './security-metrics';
 import Redis from 'ioredis';
 
 /**
+ * The caller's address as Express resolved it (honouring `trust proxy`),
+ * never the raw forwarded header — that one is attacker-controlled.
+ */
+function clientIp(req: Request): string {
+  return req.ip || req.socket?.remoteAddress || 'unknown';
+}
+
+/**
  * Express Security Middleware
  * Wraps all security checks into Express middleware functions
  */
@@ -24,8 +32,10 @@ export class SecurityMiddleware {
   ipRateLimit(limit: number = 100) {
     return async (req: Request, res: Response, next: NextFunction) => {
       try {
-        const ip = req.ip || req.headers['x-forwarded-for'] || 'unknown';
-        await this.rateLimiter.check(`ip:${ip}`, limit);
+        // `req.ip` already honours the app's `trust proxy` setting. Falling back
+        // to the raw x-forwarded-for header (as this used to) would let a
+        // client pick its own rate-limit bucket by forging that header.
+        await this.rateLimiter.check(`ip:${clientIp(req)}`, limit);
         next();
       } catch (err) {
         res.status(429).json({
@@ -40,7 +50,7 @@ export class SecurityMiddleware {
   userRateLimit(limit: number = 120) {
     return async (req: Request, res: Response, next: NextFunction) => {
       try {
-        const userId = (req as any).user?.sub || req.ip;
+        const userId = (req as any).user?.sub || clientIp(req);
         await this.rateLimiter.check(`user:${userId}`, limit);
         next();
       } catch (err) {
@@ -52,12 +62,29 @@ export class SecurityMiddleware {
     };
   }
 
-  /** Auth endpoint rate limit with lockout */
+  /**
+   * Auth endpoint rate limit with lockout.
+   *
+   * H-12: `req.body.phone` was read unguarded. Under Express 5 `req.body` is
+   * `undefined` whenever no parser matched the content type, so a GET or a
+   * form-encoded POST to an auth route threw a TypeError and produced a 500.
+   *
+   * The IP is *always* limited as well, not just as a fallback — otherwise an
+   * attacker spraying one password across thousands of accounts sees no
+   * per-account counter move at all.
+   */
   authRateLimit() {
     return async (req: Request, res: Response, next: NextFunction) => {
+      const body = (req.body ?? {}) as { phone?: unknown; email?: unknown };
+      const subject = typeof body.phone === 'string' ? body.phone
+        : typeof body.email === 'string' ? body.email.toLowerCase().trim()
+        : null;
+
       try {
-        const identifier = req.body.phone || req.body.email || req.ip;
-        await this.rateLimiter.checkAuth(identifier);
+        await this.rateLimiter.checkAuth(`ip:${clientIp(req)}`);
+        if (subject) {
+          await this.rateLimiter.checkAuth(subject);
+        }
         next();
       } catch (err) {
         await SecurityMetrics.authFailure(this.redis);
@@ -100,7 +127,7 @@ export class SecurityMiddleware {
       const fingerprint = (req as any).deviceFingerprint ||
         DeviceSecurity.fingerprint(req.headers as Record<string, string>);
 
-      const ip = (req.headers['x-forwarded-for'] as string) || req.ip || 'unknown';
+      const ip = clientIp(req);
       const anomaly = await this.deviceSecurity.detectAnomaly(userId, fingerprint, ip);
 
       if (anomaly.suspicious) {
@@ -128,7 +155,7 @@ export class SecurityMiddleware {
         userId,
         method: req.method,
         path: req.path,
-        ip: req.ip,
+        ip: clientIp(req),
       });
       next();
     };

@@ -5,46 +5,11 @@ import { DeviceSecurity } from './device-security';
 import { AuditLogger } from './audit-logger';
 import { SecurityConfig } from './config';
 import Redis from 'ioredis';
-import crypto from 'crypto';
+import { verifyAccessToken } from './access-token';
 
-function verifyJwtAccessToken(token: string): { userId: string } | null {
-  const secret = process.env.JWT_SECRET;
-  if (!secret) return null;
-
-  try {
-    const parts = token.split('.');
-    if (parts.length !== 3) return null;
-
-    const [header, payload, signature] = parts;
-    
-    // Verify signature using HMAC-SHA256
-    const expected = crypto
-      .createHmac('sha256', secret)
-      .update(`${header}.${payload}`)
-      .digest('base64url');
-
-    const actualBuffer = Buffer.from(signature, 'base64url');
-    const expectedBuffer = Buffer.from(expected, 'base64url');
-    
-    if (actualBuffer.length !== expectedBuffer.length || !crypto.timingSafeEqual(actualBuffer, expectedBuffer)) {
-      return null;
-    }
-
-    // Decode and validate payload
-    const decoded = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')) as { sub?: string; userId?: string; exp?: number; iat?: number };
-    
-    // Support both 'sub' (standard) and 'userId' (custom) claims
-    const userId = decoded.sub || decoded.userId;
-    if (!userId) return null;
-    
-    // Check expiration if present
-    if (decoded.exp && decoded.exp * 1000 <= Date.now()) return null;
-
-    return { userId };
-  } catch {
-    return null;
-  }
-}
+// C-04: token verification lives in ./access-token so it can be unit tested
+// without ioredis. It replaces a hand-rolled verifier that accepted refresh
+// tokens and never-expiring tokens as valid WebSocket credentials.
 
 /**
  * Socket.IO Security Middleware
@@ -64,12 +29,13 @@ export function socketSecurity(redis: Redis) {
       }
 
       // 2. Validate session or JWT token
-      let session = await sessionManager.validate(token);
-      let jwtSession: { userId: string } | null = null;
-      
+      const session = await sessionManager.validate(token);
+      let jwtSession: { userId: string; jti?: string } | null = null;
+
+
       // If session not found, try JWT verification
       if (!session) {
-        jwtSession = verifyJwtAccessToken(token);
+        jwtSession = verifyAccessToken(token);
         if (!jwtSession) {
           await AuditLogger.log('ws_auth_failed', {
             ip: socket.handshake.address,
@@ -93,7 +59,9 @@ export function socketSecurity(redis: Redis) {
         socket.handshake.auth?.deviceId
       );
 
-      // Check for anomaly on WebSocket connection
+      // H-02: detect BEFORE registering. Registering first makes the device
+      // "known" by the time detectAnomaly() looks, so the check could never
+      // fire — the anomaly signal was dead on both this path and the HTTP one.
       const anomaly = await deviceSecurity.detectAnomaly(
         userId,
         fingerprint,
@@ -114,6 +82,8 @@ export function socketSecurity(redis: Redis) {
         userAgent: socket.handshake.headers['user-agent'] || 'unknown',
         ip: socket.handshake.address,
       });
+
+      (socket as any).securityAnomaly = anomaly.suspicious ? anomaly : null;
 
       // 5. Attach user info to socket
       (socket as any).userId = userId;

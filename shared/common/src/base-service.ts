@@ -2,8 +2,10 @@ import express, { Express, Router } from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import compression from 'compression';
-import { errorHandler } from './errors';
-import { correlationMiddleware, requestLoggerMiddleware } from './middleware';
+import { errorHandler, NotFoundError } from './errors';
+import { correlationMiddleware, requestLoggerMiddleware, setRevocationChecker } from './middleware';
+import { cookieMiddleware } from './cookies';
+import { parseTrustProxy } from './proxy';
 import { createLogger, Logger } from './logger';
 import { KafkaProducer } from './kafka';
 import { RedisClient } from './redis';
@@ -44,6 +46,12 @@ export abstract class BaseService {
       this.logger.warn('CORS_ORIGIN is not set; browser CORS requests with credentials will be rejected');
     }
 
+    // H-05: every service sits behind the API gateway, so without this `req.ip`
+    // is the gateway's address and all IP rate limits, audit records and risk
+    // scores collapse onto a single identity. TRUST_PROXY accepts the same
+    // values Express does ('1', 'loopback', a CIDR list, ...).
+    this.app.set('trust proxy', parseTrustProxy(process.env.TRUST_PROXY));
+
     this.app.use(helmet());
     this.app.use(cors({
       origin: (origin, callback) => {
@@ -56,8 +64,9 @@ export abstract class BaseService {
       credentials: true,
     }));
     this.app.use(compression());
-    this.app.use(express.json({ limit: '10mb' }));
-    this.app.use(express.urlencoded({ extended: true }));
+    this.app.use(express.json({ limit: process.env.JSON_BODY_LIMIT || '10mb' }));
+    this.app.use(express.urlencoded({ extended: true, limit: process.env.JSON_BODY_LIMIT || '10mb' }));
+    this.app.use(cookieMiddleware());
     this.app.use(correlationMiddleware());
     this.app.use(requestLoggerMiddleware(this.config.name));
 
@@ -93,6 +102,11 @@ export abstract class BaseService {
       this.redisPersist = new RedisClient('persist');
       await Promise.all([this.redisCache.connect(), this.redisPersist.connect()]);
       this.logger.info('Redis connected (default + cache + persist)');
+
+      // H-03: make `TokenService.revokeToken()` actually mean something by
+      // teaching authMiddleware how to look revoked token ids up.
+      const persist = this.redisPersist ?? this.redis;
+      setRevocationChecker((jti) => persist.exists(`revoked:${jti}`));
     }
 
     if (this.config.enableKafka !== false) {
@@ -140,6 +154,10 @@ export abstract class BaseService {
 
       await this.initInfrastructure();
       await this.setup();
+
+      // Unmatched routes must produce a structured 404 rather than Express's
+      // default HTML page, which leaks the stack in development.
+      this.app.use((req, _res, next) => next(new NotFoundError('Route', req.path)));
 
       // Error handler must be last
       this.app.use(errorHandler);

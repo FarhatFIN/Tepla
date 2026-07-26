@@ -1,15 +1,27 @@
 import http from 'http';
 import express from 'express';
+import helmet from 'helmet';
+import cors from 'cors';
+import compression from 'compression';
 import { Server as SocketIOServer } from 'socket.io';
 import { createAdapter } from '@socket.io/redis-adapter';
 import Redis from 'ioredis';
-import { createLogger, RedisClient, KafkaConsumer, db } from '@tepla/common';
+import {
+  createLogger,
+  RedisClient,
+  KafkaConsumer,
+  cookieMiddleware,
+  correlationMiddleware,
+  requestLoggerMiddleware,
+  errorHandler,
+  parseTrustProxy,
+  db,
+} from '@tepla/common';
 import { EventTopic, EventType, DomainEvent } from '@tepla/types';
 import {
   socketSecurity,
   socketMessageRateLimit,
   AuditLogger,
-  SecurityMetrics,
   initializeSecurity,
 } from '@tepla/security';
 
@@ -38,6 +50,33 @@ async function start() {
   await initializeSecurity();
 
   const app = express();
+
+  // H-10: this app was constructed bare — no body parser, no helmet, no CORS,
+  // no error handler — yet it mounts /api/presence, /api/notifications and
+  // /api/calls. Every POST handler on those routers read `req.body` and got
+  // `undefined`, so they were non-functional, and unhandled errors fell through
+  // to Express's default HTML page. Unlike the other services this one does not
+  // extend BaseService (it needs the raw http.Server for Socket.IO), so the
+  // same middleware stack has to be assembled by hand.
+  app.set('trust proxy', parseTrustProxy(process.env.TRUST_PROXY));
+  app.use(helmet());
+  app.use(cors({
+    origin: (origin, callback) => {
+      if (!origin || allowedCorsOrigins.includes(origin)) {
+        callback(null, true);
+        return;
+      }
+      callback(new Error('CORS origin is not allowed'));
+    },
+    credentials: true,
+  }));
+  app.use(compression());
+  app.use(express.json({ limit: process.env.JSON_BODY_LIMIT || '1mb' }));
+  app.use(express.urlencoded({ extended: true, limit: process.env.JSON_BODY_LIMIT || '1mb' }));
+  app.use(cookieMiddleware());
+  app.use(correlationMiddleware());
+  app.use(requestLoggerMiddleware('realtime-service'));
+
   const server = http.createServer(app);
 
   // Redis instances
@@ -57,14 +96,15 @@ async function start() {
   const kafka = new KafkaProducer('realtime-service');
   await kafka.connect();
 
-  // Health check
-  app.get('/health', async (_req, res) => {
-    const metrics = await SecurityMetrics.getAll(securityRedis);
+  // Health check.
+  // M-01: security metrics used to be returned here, unauthenticated — they
+  // expose auth-failure and anomaly counts to anyone who can reach the port.
+  // Liveness probes need none of that.
+  app.get('/health', (_req, res) => {
     res.json({
       service: 'realtime-service',
       status: 'healthy',
       connections: io.engine.clientsCount,
-      securityMetrics: metrics,
     });
   });
 
@@ -80,6 +120,9 @@ async function start() {
 
   // ─── Calls module ─────────────────────────────
   app.use('/api/calls', callsRouter(redis, kafka));
+
+  // Structured errors instead of Express's default HTML page (H-10).
+  app.use(errorHandler);
 
   // ─── Socket.IO with Redis Adapter ─────────────
   const io = new SocketIOServer(server, {
@@ -222,11 +265,33 @@ async function start() {
 
   // PRIVACY/SCALE: emit user-scoped events only to rooms of chats the user
   // belongs to, instead of broadcasting to every connected client.
+  //
+  // M-09: this ran a `SELECT chat_id FROM chat_members` on every presence
+  // transition. With N users toggling online/offline that is N queries per
+  // heartbeat sweep against the hottest table in the system. A short Redis
+  // cache absorbs the repeats; 60s of staleness only means a just-joined chat
+  // misses one presence blip.
+  const CHAT_IDS_TTL = Number(process.env.PRESENCE_CHATS_CACHE_TTL || 60);
+
+  async function chatIdsForUser(userId: string): Promise<string[]> {
+    const cacheKey = `presence:chats:${userId}`;
+    try {
+      const cached = await redis.get(cacheKey);
+      if (cached) return JSON.parse(cached) as string[];
+    } catch {
+      // Cache is an optimisation; fall through to the source of truth.
+    }
+
+    const rows = await db.queryRows('SELECT chat_id FROM chat_members WHERE user_id = $1', [userId]);
+    const chatIds = (rows as Array<{ chat_id: string }>).map((row) => row.chat_id);
+    await redis.set(cacheKey, JSON.stringify(chatIds), CHAT_IDS_TTL).catch(() => undefined);
+    return chatIds;
+  }
+
   async function emitToUserChats(userId: string, event: string, data: any): Promise<void> {
     try {
-      const rows = await db.queryRows('SELECT chat_id FROM chat_members WHERE user_id = $1', [userId]);
-      for (const row of rows as Array<{ chat_id: string }>) {
-        io.to(`chat:${row.chat_id}`).emit(event, data);
+      for (const chatId of await chatIdsForUser(userId)) {
+        io.to(`chat:${chatId}`).emit(event, data);
       }
     } catch (err) {
       logger.error('emitToUserChats failed', { error: (err as Error).message, userId, event });

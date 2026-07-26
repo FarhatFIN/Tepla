@@ -1,11 +1,12 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
-import { JwtPayload, UserId } from '@tepla/types';
-import { UnauthorizedError, ForbiddenError } from './errors';
+import { JwtPayload } from '@tepla/types';
+import { UnauthorizedError } from './errors';
 import { RedisClient } from './redis';
 import { createLogger } from './logger';
 import { requestContext, RequestContext } from './context';
+import { parseCookieHeader } from './cookies';
 
 const logger = createLogger('middleware');
 
@@ -20,34 +21,82 @@ declare global {
 }
 
 // ─── JWT Auth Middleware ─────────────────────
+
+/**
+ * Optional hook that lets a service answer "has this token id been revoked?".
+ *
+ * `TokenService.revokeToken()` has always written `revoked:<jti>` to Redis, but
+ * nothing ever read it, so logging out left the access token usable for the
+ * rest of its 15-minute lifetime (H-03). Services install a checker at startup;
+ * when none is installed the behaviour is unchanged.
+ */
+export type RevocationChecker = (jti: string) => Promise<boolean>;
+
+let revocationChecker: RevocationChecker | null = null;
+
+export function setRevocationChecker(checker: RevocationChecker | null): void {
+  revocationChecker = checker;
+}
+
+export function getRevocationChecker(): RevocationChecker | null {
+  return revocationChecker;
+}
+
+function extractToken(req: Request): string | null {
+  const authHeader = req.headers.authorization;
+  if (authHeader?.startsWith('Bearer ')) {
+    const bearer = authHeader.slice(7).trim();
+    if (bearer) return bearer;
+  }
+
+  const cookieToken = parseCookieHeader(req.headers.cookie).accessToken;
+  return cookieToken || null;
+}
+
 export function authMiddleware(jwtSecret?: string) {
   const secret = jwtSecret || process.env.JWT_SECRET;
   if (!secret) {
     throw new Error('FATAL: JWT_SECRET environment variable is required');
   }
 
-  return (req: Request, _res: Response, next: NextFunction) => {
-    const authHeader = req.headers.authorization;
-    const cookieToken = req.headers.cookie
-      ?.split(';')
-      .map((part) => part.trim())
-      .find((part) => part.startsWith('accessToken='))
-      ?.slice('accessToken='.length);
-
-    if (!authHeader?.startsWith('Bearer ') && !cookieToken) {
-      throw new UnauthorizedError('Missing or invalid authorization header');
-    }
-
-    const token = authHeader?.startsWith('Bearer ')
-      ? authHeader.slice(7)
-      : decodeURIComponent(cookieToken || '');
+  return async (req: Request, _res: Response, next: NextFunction) => {
     try {
-      const payload = jwt.verify(token, secret) as JwtPayload;
+      const token = extractToken(req);
+      if (!token) {
+        throw new UnauthorizedError('Missing or invalid authorization header');
+      }
+
+      let payload: JwtPayload;
+      try {
+        // Pin the algorithm: without this an attacker who can influence the
+        // header could try to steer verification away from HMAC.
+        payload = jwt.verify(token, secret, { algorithms: ['HS256'] }) as JwtPayload;
+      } catch (err) {
+        if ((err as Error).name === 'TokenExpiredError') {
+          throw new UnauthorizedError('Token expired');
+        }
+        throw new UnauthorizedError('Invalid token');
+      }
 
       // SECURITY: reject refresh tokens presented as access tokens.
       // They are signed with the same secret but live for 30 days.
       if ((payload as { type?: string }).type === 'refresh') {
         throw new UnauthorizedError('Invalid token');
+      }
+
+      const jti = (payload as { jti?: string }).jti;
+      if (jti && revocationChecker) {
+        let revoked = false;
+        try {
+          revoked = await revocationChecker(jti);
+        } catch (err) {
+          // Fail closed would lock everyone out whenever Redis blips; fail open
+          // but make the gap loud.
+          logger.error('Revocation check failed', { error: (err as Error).message });
+        }
+        if (revoked) {
+          throw new UnauthorizedError('Token has been revoked');
+        }
       }
 
       req.user = payload;
@@ -60,10 +109,7 @@ export function authMiddleware(jwtSecret?: string) {
 
       next();
     } catch (err) {
-      if ((err as Error).name === 'TokenExpiredError') {
-        throw new UnauthorizedError('Token expired');
-      }
-      throw new UnauthorizedError('Invalid token');
+      next(err);
     }
   };
 }

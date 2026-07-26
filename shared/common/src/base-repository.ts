@@ -1,5 +1,6 @@
 import { Pool, PoolClient, QueryResult, QueryResultRow } from 'pg';
 import { createLogger, Logger } from './logger';
+import { db } from './db';
 
 export class BaseRepository {
   protected pool: Pool;
@@ -9,12 +10,22 @@ export class BaseRepository {
   constructor(tableName: string, pool?: Pool) {
     this.tableName = tableName;
     this.logger = createLogger(`repo:${tableName}`);
-    this.pool = pool || new Pool({
-      connectionString: process.env.DATABASE_URL,
-      max: 20,
-      idleTimeoutMillis: 30000,
-      connectionTimeoutMillis: 5000,
-    });
+
+    // Default to the process-wide pool from ./db.
+    //
+    // Found during the stage-7 resource sweep: this used to call `new Pool({max: 20})`
+    // per *instance*. Every repository subclass — PushRepository, KTRepository,
+    // E2ERepository, UserRepository, CallRepository, StoryRepository, the
+    // sticker repositories — allocated its own 20-connection pool, and several
+    // are constructed more than once (e.g. `new PushRepository()` in both the
+    // router factory and the Kafka consumer). A single service could therefore
+    // demand well over a hundred Postgres connections while using a handful,
+    // and none of those pools had an 'error' listener, so any one of them
+    // could take the process down (the H-13 failure mode, multiplied).
+    //
+    // An explicitly-passed pool is still honoured for tests and for the rare
+    // repository that genuinely needs isolation.
+    this.pool = pool || db.pool;
   }
 
   protected async query<T extends QueryResultRow = QueryResultRow>(
