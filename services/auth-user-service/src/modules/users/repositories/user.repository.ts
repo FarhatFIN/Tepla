@@ -1,4 +1,4 @@
-import { BaseRepository } from '@tepla/common';
+import { BaseRepository, escapeLikePattern } from '@tepla/common';
 
 export class UserRepository extends BaseRepository {
   constructor() {
@@ -9,19 +9,38 @@ export class UserRepository extends BaseRepository {
     return this.queryOne('SELECT * FROM users WHERE id = $1', [id]);
   }
 
+  /**
+   * Search users by username or display name.
+   *
+   * Two fixes here:
+   *  - H-08: the pattern was `%${query}%` with no wildcard escaping, so a query
+   *    of `%` matched every row and returned the whole directory.
+   *  - Privacy: `email ILIKE $1` let anyone confirm whether an address is
+   *    registered, and find the account behind it, by typing it into search.
+   *    Email is not a public handle; it is no longer a searchable column.
+   */
   async search(query: string, limit: number): Promise<any[]> {
     const sql = `
       SELECT id, username, display_name, avatar_url, bio, is_online, is_verified, last_seen
       FROM users
-      WHERE username ILIKE $1 OR email ILIKE $1 OR display_name ILIKE $1
+      WHERE username ILIKE $1 ESCAPE '\\' OR display_name ILIKE $1 ESCAPE '\\'
       ORDER BY
         CASE WHEN username = $2 THEN 0
-             WHEN username ILIKE $2 || '%' THEN 1
+             WHEN username ILIKE $3 || '%' ESCAPE '\\' THEN 1
              ELSE 2 END,
         username
-      LIMIT $3
+      LIMIT $4
     `;
-    const rows = await this.queryMany(sql, [`%${query}%`, query.toLowerCase(), limit]);
+    // $2 is the raw term (exact-match boost — usernames legitimately contain
+    // '_', which must not be escaped for an equality test); $3 is the escaped
+    // term used inside the LIKE prefix pattern.
+    const escaped = escapeLikePattern(query.toLowerCase());
+    const rows = await this.queryMany(sql, [
+      `%${escapeLikePattern(query)}%`,
+      query.toLowerCase(),
+      escaped,
+      limit,
+    ]);
     return rows.map((r: any) => ({
       id: r.id,
       username: r.username,

@@ -88,16 +88,43 @@ export class DeviceSecurity {
     return await this.redis.sismember(`devices:${userId}`, fingerprint) === 1;
   }
 
-  /** Get all devices for a user */
+  /**
+   * Get all devices for a user.
+   *
+   * M-09: this issued one round-trip per fingerprint. With ~20 devices that is
+   * 20 sequential RTTs on a path that runs during login and on every anomaly
+   * check. A pipeline collapses it to one.
+   */
   async getUserDevices(userId: string): Promise<DeviceInfo[]> {
     const fingerprints = await this.redis.smembers(`devices:${userId}`);
-    const devices: DeviceInfo[] = [];
+    if (fingerprints.length === 0) return [];
 
+    const pipeline = this.redis.pipeline();
     for (const fp of fingerprints) {
-      const raw = await this.redis.get(`device:${userId}:${fp}`);
-      if (raw) {
-        devices.push(JSON.parse(raw));
+      pipeline.get(`device:${userId}:${fp}`);
+    }
+    const results = await pipeline.exec();
+    if (!results) return [];
+
+    const devices: DeviceInfo[] = [];
+    const stale: string[] = [];
+
+    results.forEach(([err, raw], index) => {
+      if (err || typeof raw !== 'string') {
+        // The per-device key expired but the set member outlived it.
+        if (!err) stale.push(fingerprints[index]);
+        return;
       }
+      try {
+        devices.push(JSON.parse(raw) as DeviceInfo);
+      } catch {
+        stale.push(fingerprints[index]);
+      }
+    });
+
+    // Keep the index from growing forever with fingerprints whose payload is gone.
+    if (stale.length > 0) {
+      await this.redis.srem(`devices:${userId}`, ...stale).catch(() => undefined);
     }
 
     return devices;
@@ -124,8 +151,8 @@ export class DeviceSecurity {
   /** Revoke all devices for a user */
   async revokeAllDevices(userId: string): Promise<void> {
     const fingerprints = await this.redis.smembers(`devices:${userId}`);
-    for (const fp of fingerprints) {
-      await this.redis.del(`device:${userId}:${fp}`);
+    if (fingerprints.length > 0) {
+      await this.redis.del(...fingerprints.map((fp) => `device:${userId}:${fp}`));
     }
     await this.redis.del(`devices:${userId}`);
     await AuditLogger.log('devices_revoked_all', { userId, count: fingerprints.length });

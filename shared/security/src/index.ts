@@ -16,6 +16,7 @@ export { DeviceSecurity } from './device-security';
 export { AuditLogger } from './audit-logger';
 export { SecurityMetrics } from './security-metrics';
 export { socketSecurity, socketMessageRateLimit } from './socket-security';
+export { verifyAccessToken, type VerifiedAccessToken } from './access-token';
 export { MessagePipeline, SecureMessage } from './message-pipeline';
 export { SecurityMiddleware } from './middleware';
 export type { AuditEntry } from './audit-logger';

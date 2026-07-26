@@ -176,14 +176,42 @@ function joinChatRooms(chats: Chat[]): void {
 
 // ─── Secret chat (E2E) helpers ──────────────────────────
 
-const secretCacheKey = (messageId: string) => `tepla-sc:${messageId}`;
+/**
+ * Cache of decrypted secret-chat text, keyed by message id.
+ *
+ * M-07: this used to live in `localStorage`, which persists to disk with no
+ * expiry and is readable by any script on the origin. That means the plaintext
+ * of a "secret" chat outlived the session, survived logout, and was one XSS
+ * away from exfiltration — which defeats the point of encrypting it in the
+ * first place. An in-memory Map keeps the same "decrypt each message once"
+ * behaviour but drops everything when the tab closes.
+ *
+ * Bounded so a long scrollback cannot grow it without limit.
+ */
+const SECRET_CACHE_LIMIT = 500;
+const secretTextCache = new Map<string, string>();
 
 function getCachedSecretText(messageId: string): string | null {
-  try { return localStorage.getItem(secretCacheKey(messageId)); } catch { return null; }
+  return secretTextCache.get(messageId) ?? null;
 }
 
 function cacheSecretText(messageId: string, text: string): void {
-  try { localStorage.setItem(secretCacheKey(messageId), text); } catch { /* quota exceeded */ }
+  if (secretTextCache.size >= SECRET_CACHE_LIMIT) {
+    // Map preserves insertion order, so this evicts the oldest entry.
+    const oldest = secretTextCache.keys().next();
+    if (!oldest.done) secretTextCache.delete(oldest.value);
+  }
+  secretTextCache.set(messageId, text);
+}
+
+/** Drop all decrypted secret text (called on logout / lock). */
+export function clearSecretTextCache(): void {
+  secretTextCache.clear();
+  // Purge anything the previous localStorage-backed implementation left behind.
+  try {
+    const stale = Object.keys(localStorage).filter((key) => key.startsWith("tepla-sc:"));
+    for (const key of stale) localStorage.removeItem(key);
+  } catch { /* ignore */ }
 }
 
 function parseHandshake(text: string): { kind: string; handshake: any } | null {

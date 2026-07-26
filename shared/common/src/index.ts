@@ -4,6 +4,7 @@
 // ============================================
 
 export { BaseService } from './base-service';
+export { parseTrustProxy } from './proxy';
 export { BaseWorker } from './base-worker';
 export { BaseRepository } from './base-repository';
 export { requestContext, getContext, getCorrelationId, type RequestContext } from './context';
@@ -18,7 +19,17 @@ export { ServiceRegistry } from './service-registry';
 export { CircuitBreaker } from './circuit-breaker';
 export { RateLimiter } from './rate-limiter';
 export { errorHandler, AppError, NotFoundError, UnauthorizedError, ForbiddenError, ValidationError, ConflictError } from './errors';
-export { authMiddleware, correlationMiddleware, requestLoggerMiddleware, rateLimitMiddleware } from './middleware';
+export {
+  authMiddleware,
+  correlationMiddleware,
+  requestLoggerMiddleware,
+  rateLimitMiddleware,
+  setRevocationChecker,
+  getRevocationChecker,
+  type RevocationChecker,
+} from './middleware';
+export { cookieMiddleware, parseCookieHeader } from './cookies';
+export { escapeLikePattern, isUuid, assertUuid } from './validation';
 export { healthCheck } from './health';
 export { gracefulShutdown } from './shutdown';
 export { slidingWindowLimiter, RATE_LIMITS, type RateLimitConfig } from './sliding-window-limiter';

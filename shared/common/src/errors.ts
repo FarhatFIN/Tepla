@@ -3,15 +3,35 @@ import { createLogger } from './logger';
 
 const logger = createLogger('error-handler');
 
+const STATUS_CODES: Record<number, string> = {
+  400: 'VALIDATION_ERROR',
+  401: 'UNAUTHORIZED',
+  403: 'FORBIDDEN',
+  404: 'NOT_FOUND',
+  409: 'CONFLICT',
+  413: 'PAYLOAD_TOO_LARGE',
+  415: 'UNSUPPORTED_MEDIA_TYPE',
+  429: 'RATE_LIMIT',
+  503: 'SERVICE_UNAVAILABLE',
+};
+
+function defaultCodeForStatus(statusCode: number): string {
+  return STATUS_CODES[statusCode] || (statusCode >= 500 ? 'INTERNAL_ERROR' : 'ERROR');
+}
+
 export class AppError extends Error {
   public readonly statusCode: number;
   public readonly code: string;
   public readonly isOperational: boolean;
 
-  constructor(message: string, statusCode: number, code: string, isOperational = true) {
+  // `code` is optional: several call sites (calls module, media routes) always
+  // constructed AppError with just a message and a status, which does not
+  // typecheck against a required parameter and produced `code: undefined` in
+  // the JSON body at runtime. Derive a sane default from the status instead.
+  constructor(message: string, statusCode: number, code?: string, isOperational = true) {
     super(message);
     this.statusCode = statusCode;
-    this.code = code;
+    this.code = code || defaultCodeForStatus(statusCode);
     this.isOperational = isOperational;
     Object.setPrototypeOf(this, AppError.prototype);
   }
@@ -65,7 +85,30 @@ export class ServiceUnavailableError extends AppError {
   }
 }
 
+/**
+ * Postgres error codes that are caused by bad client input rather than by a
+ * server fault. Without this mapping a request like `/api/polls/not-a-uuid`
+ * raises `22P02` deep inside pg and surfaces as an opaque HTTP 500 (M-04).
+ */
+const PG_CLIENT_ERRORS: Record<string, { status: number; code: string; message: string }> = {
+  '22P02': { status: 400, code: 'INVALID_INPUT', message: 'Malformed identifier or value' },
+  '22001': { status: 400, code: 'VALUE_TOO_LONG', message: 'A submitted value is too long' },
+  '23503': { status: 400, code: 'INVALID_REFERENCE', message: 'Referenced resource does not exist' },
+  '23505': { status: 409, code: 'CONFLICT', message: 'Resource already exists' },
+  '23514': { status: 400, code: 'CONSTRAINT_VIOLATION', message: 'Value violates a constraint' },
+};
+
 export function errorHandler(err: Error, _req: Request, res: Response, _next: NextFunction): void {
+  const pgCode = (err as { code?: string }).code;
+  const mapped = typeof pgCode === 'string' ? PG_CLIENT_ERRORS[pgCode] : undefined;
+  if (mapped) {
+    res.status(mapped.status).json({
+      success: false,
+      error: { code: mapped.code, message: mapped.message },
+    });
+    return;
+  }
+
   if (err instanceof AppError) {
     if (!err.isOperational) {
       logger.error('Non-operational error', { error: err.message, stack: err.stack });

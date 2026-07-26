@@ -15,8 +15,8 @@ import {
 } from '@aws-sdk/client-s3';
 import { Upload } from '@aws-sdk/lib-storage';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
-import { PassThrough, Readable } from 'stream';
-import { writeFile, unlink, mkdtemp } from 'fs/promises';
+import { PassThrough } from 'stream';
+import { writeFile, mkdtemp, rm } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
@@ -25,89 +25,18 @@ ffmpeg.setFfmpegPath(ffmpegPath);
 import { stickerRouter } from './modules/stickers/stickers.module';
 import { gifRouter } from './modules/gifs/gifs.module';
 import { storiesRouter, StoryRepository, startStoryCleanup } from './modules/stories/stories.module';
+import { ALLOWED_MIME_TYPES, validateUpload } from './upload-validation';
 
 const logger = createLogger('media-service');
-const MAX_UPLOAD_SIZE_BYTES = 4 * 1024 * 1024 * 1024;
-const ALLOWED_MIME_TYPES = new Set([
-  'image/jpeg',
-  'image/png',
-  'image/gif',
-  'image/webp',
-  'video/mp4',
-  'video/quicktime',
-  'video/x-msvideo',
-  'video/webm',
-  'video/x-matroska',
-  'application/pdf',
-  'audio/mpeg',
-  'audio/wav',
-  'audio/wave',
-  'audio/ogg',
-  'audio/webm',
-  'audio/mp4',
-  'audio/x-m4a',
-]);
-const MIME_EXTENSIONS: Record<string, string[]> = {
-  'image/jpeg': ['jpg', 'jpeg'],
-  'image/png': ['png'],
-  'image/gif': ['gif'],
-  'image/webp': ['webp'],
-  'video/mp4': ['mp4'],
-  'video/quicktime': ['mov'],
-  'video/x-msvideo': ['avi'],
-  'video/webm': ['webm'],
-  'video/x-matroska': ['mkv'],
-  'application/pdf': ['pdf'],
-  'audio/mpeg': ['mp3'],
-  'audio/wav': ['wav'],
-  'audio/wave': ['wav'],
-  'audio/ogg': ['ogg'],
-  'audio/webm': ['webm'],
-  'audio/mp4': ['m4a'],
-  'audio/x-m4a': ['m4a'],
-};
 
-function safeExtension(originalName: string, mimeType: string): string | null {
-  const extension = (originalName.split('.').pop() || '').toLowerCase();
-  if (!/^[a-z0-9]{1,8}$/.test(extension)) return null;
-  return MIME_EXTENSIONS[mimeType]?.includes(extension) ? extension : null;
-}
-
-function detectMediaFamily(buffer: Buffer): 'image' | 'video' | 'audio' | 'iso' | 'application' | null {
-  if (buffer.length < 12) return null;
-  if (buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) return 'image';
-  if (buffer.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return 'image';
-  if (buffer.subarray(0, 3).toString('ascii') === 'GIF') return 'image';
-  if (buffer.subarray(0, 4).toString('ascii') === 'RIFF' && buffer.subarray(8, 12).toString('ascii') === 'WEBP') return 'image';
-  if (buffer.subarray(4, 8).toString('ascii') === 'ftyp') return 'iso';
-  if (buffer.subarray(0, 4).equals(Buffer.from([0x1a, 0x45, 0xdf, 0xa3]))) return 'video';
-  if (buffer.subarray(0, 4).toString('ascii') === 'RIFF' && buffer.subarray(8, 12).toString('ascii') === 'AVI ') return 'video';
-  if (buffer.subarray(0, 3).toString('ascii') === 'ID3' || (buffer[0] === 0xff && (buffer[1] & 0xe0) === 0xe0)) return 'audio';
-  if (buffer.subarray(0, 4).toString('ascii') === 'RIFF' && buffer.subarray(8, 12).toString('ascii') === 'WAVE') return 'audio';
-  if (buffer.subarray(0, 4).toString('ascii') === 'OggS') return 'audio';
-  if (buffer.subarray(0, 4).toString('ascii') === '%PDF') return 'application';
-  return null;
-}
-
-function validateUpload(file: Express.Multer.File): { mimeType: string; extension: string } {
-  if (!ALLOWED_MIME_TYPES.has(file.mimetype)) {
-    throw new Error('UNSUPPORTED_MEDIA_TYPE');
-  }
-
-  const extension = safeExtension(file.originalname, file.mimetype);
-  const detectedFamily = detectMediaFamily(file.buffer);
-  const declaredFamily = file.mimetype.split('/')[0] as 'image' | 'video' | 'audio';
-
-  const familyMatches = detectedFamily === declaredFamily ||
-    (file.mimetype === 'application/pdf' && detectedFamily === 'application') ||
-    (detectedFamily === 'iso' && (declaredFamily === 'audio' || declaredFamily === 'video'));
-
-  if (!extension || !detectedFamily || !familyMatches) {
-    throw new Error('INVALID_MEDIA_SIGNATURE');
-  }
-
-  return { mimeType: file.mimetype, extension };
-}
+// C-08: this was 4 GiB — paired with `multer.memoryStorage()`, which buffers the
+// entire upload in the heap before a single byte is validated. One request
+// could exhaust the process; a handful of concurrent ones were a guaranteed
+// OOM. (It also exceeded Node's maximum Buffer length on some builds, so the
+// large uploads it purported to allow could never have worked.)
+// Anything genuinely large belongs on a presigned direct-to-S3 upload.
+const MAX_UPLOAD_SIZE_BYTES = Number(process.env.MEDIA_MAX_UPLOAD_MB || 100) * 1024 * 1024;
+const FFMPEG_TIMEOUT_MS = Number(process.env.FFMPEG_TIMEOUT_MS || 30_000);
 
 async function generateImageThumbnails(
   buffer: Buffer,
@@ -140,11 +69,28 @@ async function stripExif(buffer: Buffer): Promise<Buffer> {
   return sharp(buffer).rotate().toBuffer();
 }
 
-async function extractVideoThumbnail(inputPath: string): Promise<{ path: string; width: number; height: number }> {
+/**
+ * Bound an ffmpeg operation.
+ *
+ * M-10: none of the ffmpeg calls had a timeout. A crafted container can make
+ * ffmpeg spin more or less indefinitely, and every such upload pinned a worker
+ * plus a child process with nothing to reclaim them.
+ */
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+    promise.then(
+      (value) => { clearTimeout(timer); resolve(value); },
+      (err) => { clearTimeout(timer); reject(err); },
+    );
+  });
+}
+
+async function extractVideoThumbnail(inputPath: string): Promise<{ dir: string; path: string; width: number; height: number }> {
   const tmpDir = await mkdtemp(join(tmpdir(), 'tepla-'));
   const outPath = join(tmpDir, 'thumb.jpg');
 
-  return new Promise((resolve, reject) => {
+  return withTimeout(new Promise<{ dir: string; path: string; width: number; height: number }>((resolve, reject) => {
     ffmpeg(inputPath)
       .screenshots({
         count: 1,
@@ -153,9 +99,9 @@ async function extractVideoThumbnail(inputPath: string): Promise<{ path: string;
         filename: 'thumb.jpg',
         size: '320x?',
       })
-      .on('end', () => resolve({ path: outPath, width: 320, height: 0 }))
+      .on('end', () => resolve({ dir: tmpDir, path: outPath, width: 320, height: 0 }))
       .on('error', reject);
-  });
+  }), FFMPEG_TIMEOUT_MS, 'video thumbnail');
 }
 
 function probeMedia(inputPath: string): Promise<{
@@ -164,7 +110,7 @@ function probeMedia(inputPath: string): Promise<{
   height: number;
   codec: string;
 }> {
-  return new Promise((resolve, reject) => {
+  return withTimeout(new Promise<{ duration: number; width: number; height: number; codec: string }>((resolve, reject) => {
     ffmpeg.ffprobe(inputPath, (err, data) => {
       if (err) return reject(err);
       const video = data.streams.find((s) => s.codec_type === 'video');
@@ -176,44 +122,57 @@ function probeMedia(inputPath: string): Promise<{
         codec: video?.codec_name ?? audio?.codec_name ?? 'unknown',
       });
     });
-  });
+  }), FFMPEG_TIMEOUT_MS, 'ffprobe');
 }
 
 async function generateWaveform(inputPath: string): Promise<number[]> {
   const tmpDir = await mkdtemp(join(tmpdir(), 'tepla-wave-'));
   const rawPath = join(tmpDir, 'raw.pcm');
 
-  await new Promise<void>((resolve, reject) => {
-    ffmpeg(inputPath)
-      .audioFrequency(8000)
-      .audioChannels(1)
-      .format('s16le')
-      .output(rawPath)
-      .on('end', () => resolve())
-      .on('error', reject)
-      .run();
-  });
+  try {
+    await withTimeout(new Promise<void>((resolve, reject) => {
+      ffmpeg(inputPath)
+        .audioFrequency(8000)
+        .audioChannels(1)
+        .format('s16le')
+        .output(rawPath)
+        .on('end', () => resolve())
+        .on('error', reject)
+        .run();
+    }), FFMPEG_TIMEOUT_MS, 'waveform decode');
 
-  const { readFile } = await import('fs/promises');
-  const raw = await readFile(rawPath);
-  const samples = new Int16Array(raw.buffer, raw.byteOffset, raw.byteLength / 2);
+    const { readFile } = await import('fs/promises');
+    const raw = await readFile(rawPath);
 
-  const bars = 64;
-  const chunkSize = Math.max(1, Math.floor(samples.length / bars));
-  const waveform: number[] = [];
+    // M-10: `new Int16Array(raw.buffer, raw.byteOffset, ...)` throws
+    // "start offset must be a multiple of 2" whenever Node hands back a
+    // pooled Buffer at an odd offset — which happens for any read under 4 KiB.
+    // Reading via the DataView-style accessor sidesteps alignment entirely.
+    const sampleCount = Math.floor(raw.byteLength / 2);
 
-  for (let i = 0; i < bars; i++) {
-    let sum = 0;
-    const start = i * chunkSize;
-    const end = Math.min(start + chunkSize, samples.length);
-    for (let j = start; j < end; j++) {
-      sum += Math.abs(samples[j]);
+    const bars = 64;
+    const chunkSize = Math.max(1, Math.floor(sampleCount / bars));
+    const waveform: number[] = [];
+
+    for (let i = 0; i < bars; i++) {
+      const start = i * chunkSize;
+      const end = Math.min(start + chunkSize, sampleCount);
+      if (start >= end) {
+        waveform.push(0);
+        continue;
+      }
+      let sum = 0;
+      for (let j = start; j < end; j++) {
+        sum += Math.abs(raw.readInt16LE(j * 2));
+      }
+      waveform.push(Math.round((sum / (end - start)) / 327.67));
     }
-    waveform.push(Math.round((sum / (end - start)) / 327.67));
-  }
 
-  await unlink(rawPath).catch(() => {});
-  return waveform;
+    return waveform;
+  } finally {
+    // The temp *directory* used to be left behind on every single upload.
+    await rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+  }
 }
 
 class MediaService extends BaseService {
@@ -276,6 +235,21 @@ class MediaService extends BaseService {
         const fileId = uuid();
         const key = `uploads/${req.user!.sub}/${fileId}.${extension}`;
 
+        // H-09: EXIF was stripped only from the generated thumbnails, while the
+        // *original* — GPS coordinates, camera serial, capture timestamp — was
+        // uploaded verbatim and is what recipients actually download. Normalise
+        // the image before it reaches S3, not after.
+        let storedBuffer = file.buffer;
+        let width: number | null = null;
+        let height: number | null = null;
+
+        if (mimeType.startsWith('image/')) {
+          storedBuffer = await stripExif(file.buffer);
+          const meta = await getImageMetadata(storedBuffer);
+          width = meta.width;
+          height = meta.height;
+        }
+
         const passThrough = new PassThrough();
         const s3Upload = new Upload({
           client: this.s3,
@@ -290,24 +264,17 @@ class MediaService extends BaseService {
           partSize: 10 * 1024 * 1024,
         });
 
-        passThrough.end(file.buffer);
+        passThrough.end(storedBuffer);
         await s3Upload.done();
 
         let thumbnailUrl: string | null = null;
-        let width: number | null = null;
-        let height: number | null = null;
         let durationSeconds: number | null = null;
         let waveform: number[] | null = null;
         const thumbnails: Record<string, string> = {};
         const baseUrl = process.env.S3_PUBLIC_URL || process.env.S3_ENDPOINT;
 
         if (mimeType.startsWith('image/')) {
-          const cleanBuffer = await stripExif(file.buffer);
-          const meta = await getImageMetadata(cleanBuffer);
-          width = meta.width;
-          height = meta.height;
-
-          const thumbs = await generateImageThumbnails(cleanBuffer);
+          const thumbs = await generateImageThumbnails(storedBuffer);
           for (const thumb of thumbs) {
             const thumbKey = `thumbnails/${req.user!.sub}/${fileId}_${thumb.size}.webp`;
             await this.s3.send(new PutObjectCommand({
@@ -333,14 +300,19 @@ class MediaService extends BaseService {
             if (mimeType.startsWith('video/')) {
               try {
                 const videoThumb = await extractVideoThumbnail(tmpPath);
-                const { readFile: rf } = await import('fs/promises');
-                const thumbData = await rf(videoThumb.path);
-                const thumbKey = `thumbnails/${req.user!.sub}/${fileId}_thumb.jpg`;
-                await this.s3.send(new PutObjectCommand({
-                  Bucket: bucket, Key: thumbKey, Body: thumbData, ContentType: 'image/jpeg',
-                }));
-                thumbnailUrl = `${baseUrl}/${bucket}/${thumbKey}`;
-                await unlink(videoThumb.path).catch(() => {});
+                try {
+                  const { readFile: rf } = await import('fs/promises');
+                  const thumbData = await rf(videoThumb.path);
+                  const thumbKey = `thumbnails/${req.user!.sub}/${fileId}_thumb.jpg`;
+                  await this.s3.send(new PutObjectCommand({
+                    Bucket: bucket, Key: thumbKey, Body: thumbData, ContentType: 'image/jpeg',
+                  }));
+                  thumbnailUrl = `${baseUrl}/${bucket}/${thumbKey}`;
+                } finally {
+                  // Remove the whole directory: unlinking just the file left an
+                  // empty mkdtemp dir behind on every video upload (M-10).
+                  await rm(videoThumb.dir, { recursive: true, force: true }).catch(() => {});
+                }
               } catch {
                 logger.warn('Failed to extract video thumbnail', { fileId });
               }
@@ -354,7 +326,7 @@ class MediaService extends BaseService {
               }
             }
           } finally {
-            await unlink(tmpPath).catch(() => {});
+            await rm(tmpDir, { recursive: true, force: true }).catch(() => {});
           }
         }
 

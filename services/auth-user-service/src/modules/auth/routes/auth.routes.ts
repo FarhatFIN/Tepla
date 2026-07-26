@@ -3,15 +3,15 @@ import { v4 as uuid } from 'uuid';
 import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
 import Redis from 'ioredis';
-import { RedisClient, KafkaProducer, authMiddleware, ValidationError, UnauthorizedError, ForbiddenError, createLogger, db } from '@tepla/common';
+import { RedisClient, KafkaProducer, authMiddleware, ValidationError, UnauthorizedError, ForbiddenError, createLogger, db, isUuid } from '@tepla/common';
 import { EventType, EventTopic, UserId } from '@tepla/types';
 import {
   SecurityRateLimiter,
+  SecurityConfig,
   DeviceSecurity,
   SecurityMetrics,
   SessionManager,
   AuditLogger,
-  CryptoCore,
 } from '@tepla/security';
 import { OtpService } from '../services/otp.service';
 import { TokenService } from '../services/token.service';
@@ -19,6 +19,15 @@ import { UserRepository } from '../repositories/user.repository';
 import { sendOtpEmail, sendLoginAlertEmail, sendSecurityAlertEmail } from '../services/email.service';
 import { RiskEngine } from '../services/risk.engine';
 import { ChallengeService } from '../services/challenge.service';
+import {
+  base32Encode,
+  matchTotpCounter,
+  verifyTotp,
+  verifyEd25519,
+  normalizePhone,
+  maskPhone,
+  maskEmail,
+} from '../services/totp.service';
 
 const logger = createLogger('auth-routes');
 
@@ -65,6 +74,10 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
 
   function shouldRequireEmailOtp(): boolean {
     return process.env.AUTH_EMAIL_OTP_REQUIRED === 'true';
+  }
+
+  function shouldRequireBinaryShieldOnLogin(): boolean {
+    return process.env.AUTH_BINARY_SHIELD_LOGIN === 'true';
   }
 
   function sha256(value: string): string {
@@ -358,12 +371,51 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
     });
   }
 
+  function clearAuthCookies(res: Response): void {
+    const secure = process.env.NODE_ENV === 'production';
+    for (const name of ['accessToken', 'refreshToken']) {
+      res.clearCookie(name, { httpOnly: true, secure, sameSite: 'lax', path: '/' });
+    }
+  }
+
+  function extractBearerToken(req: Request): string | null {
+    const header = req.headers.authorization;
+    if (header?.startsWith('Bearer ')) {
+      const token = header.slice(7).trim();
+      if (token) return token;
+    }
+    return req.cookies?.accessToken || null;
+  }
+
+  /**
+   * Verify a TOTP code and burn it.
+   *
+   * Plain `verifyTotp` accepts the same six digits for the whole ±1-step
+   * window, so a code observed over the user's shoulder (or replayed from a
+   * proxy log) stays usable for up to 90 seconds. Recording the accepted
+   * counter makes each code single-use per account.
+   */
+  async function verifyTotpOnce(userId: string, secret: string, code: string): Promise<boolean> {
+    const counter = matchTotpCounter(secret, code);
+    if (counter === null) return false;
+
+    const usedKey = `totp_used:${userId}:${counter}`;
+    const firstUse = await rawRedis.set(usedKey, '1', 'EX', 120, 'NX');
+    return firstUse === 'OK';
+  }
+
   // в”Ђв”Ђв”Ђ Email OTP Helpers в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
   function generateEmailOtp(): string {
     return crypto.randomInt(100000, 999999).toString();
   }
 
-  async function storeAndSendEmailOtp(email: string): Promise<void> {
+  /**
+   * OTP purposes. The purpose is bound into the stored record so that a code
+   * minted for one flow cannot be redeemed by another (C-05).
+   */
+  type OtpPurpose = 'login' | 'verify_email';
+
+  async function storeAndSendEmailOtp(email: string, purpose: OtpPurpose): Promise<void> {
     // Rate limit: 1 per 60s
     const cooldownKey = `otp_cooldown:${email}`;
     if (await redis.exists(cooldownKey)) {
@@ -371,11 +423,22 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
     }
 
     const code = generateEmailOtp();
-    const otpData = JSON.stringify({ code, attempts: 0, createdAt: Date.now() });
+    const otpData = JSON.stringify({ code, purpose, attempts: 0, createdAt: Date.now() });
     await redis.set(`otp:${email}`, otpData, 600); // 10 min TTL
     await redis.set(cooldownKey, '1', 60);
 
     await sendOtpEmail(email, code);
+  }
+
+  /** Is a code of this purpose currently outstanding for this address? */
+  async function hasPendingOtp(email: string, purpose: OtpPurpose): Promise<boolean> {
+    const raw = await redis.get(`otp:${email}`);
+    if (!raw) return false;
+    try {
+      return (JSON.parse(raw) as { purpose?: string }).purpose === purpose;
+    } catch {
+      return false;
+    }
   }
 
   // Atomic OTP verification via Lua script вЂ” prevents race-condition brute-force
@@ -383,10 +446,12 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
     local key = KEYS[1]
     local code = ARGV[1]
     local maxAttempts = tonumber(ARGV[2])
+    local purpose = ARGV[3]
     local raw = redis.call('GET', key)
     if not raw then return -1 end
     local data = cjson.decode(raw)
     if data.attempts >= maxAttempts then return -2 end
+    if data.purpose ~= purpose then return -3 end
     if data.code ~= code then
       data.attempts = data.attempts + 1
       local ttl = redis.call('TTL', key)
@@ -398,10 +463,11 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
     return 1
   `;
 
-  async function verifyEmailOtp(email: string, code: string): Promise<boolean> {
-    const result = await redis.eval(OTP_VERIFY_LUA, [`otp:${email}`], [code, '5']) as number;
+  async function verifyEmailOtp(email: string, code: string, purpose: OtpPurpose): Promise<boolean> {
+    const result = await redis.eval(OTP_VERIFY_LUA, [`otp:${email}`], [code, '5', purpose]) as number;
     if (result === -1) return false;         // key not found / expired
     if (result === -2) throw new ValidationError('Too many attempts. Request a new code.');
+    if (result === -3) return false;         // code was minted for a different flow
     return result === 1;                     // 1 = match, 0 = wrong code
   }
 
@@ -480,18 +546,20 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
       await getOrCreateSavedMessages(user.id);
       await userRepo.updateLastSeen(user.id);
 
-      // Register device
-      await deviceSecurity.registerDevice(user.id, deviceFingerprint, {
-        userAgent: req.headers['user-agent'] || 'unknown',
-        ip: req.ip || 'unknown',
-      });
-
-      // Check for suspicious device/IP
+      // H-02: check for a suspicious device/IP BEFORE registering the device.
+      // Registering first marks it known, so this check could never report an
+      // anomaly — the whole "new device from unknown location" signal was dead.
       const anomaly = await deviceSecurity.detectAnomaly(
         user.id,
         deviceFingerprint,
         req.ip || 'unknown'
       );
+
+      // Register device
+      await deviceSecurity.registerDevice(user.id, deviceFingerprint, {
+        userAgent: req.headers['user-agent'] || 'unknown',
+        ip: req.ip || 'unknown',
+      });
 
       await AuditLogger.log('login_success', {
         userId: user.id,
@@ -655,17 +723,29 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
           await SecurityMetrics.authFailure(rawRedis);
           throw new ForbiddenError('Неверный Shield-код');
         }
-      } else if (submittedShieldCode) {
-        await db.query('UPDATE users SET shield_code_hash = $2 WHERE id = $1', [
-          user.id,
-          await bcrypt.hash(String(submittedShieldCode), 12),
-        ]);
       }
+      // M-06: when the account had no Shield code, the login path used to
+      // *enrol* whatever the request supplied. Someone holding only the
+      // password could therefore plant a Shield code and lock the real owner
+      // out of their own second factor. Enrolment belongs to an authenticated
+      // settings flow, not to login.
 
       if (!shouldRequireEmailOtp()) {
         if (!user.is_verified) {
           await userRepo.markEmailVerified(user.id);
           user.is_verified = true;
+        }
+
+        // M-15: `createBinaryLoginChallenge` was fully implemented, the client
+        // already handles `requiresBinaryShield`, and `/login/binary-verify`
+        // exists — but nothing ever called the helper, so the Binary Shield
+        // second factor was inert. Wire it in behind a flag so enabling it is
+        // a deliberate choice (it depends on working outbound email).
+        if (shouldRequireBinaryShieldOnLogin()) {
+          const challenge = await createBinaryLoginChallenge(user, req);
+          if (challenge) {
+            return res.json({ success: true, data: challenge });
+          }
         }
 
         const data = await issueEmailSession(user, req, 'email');
@@ -675,7 +755,7 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
 
       // If email not verified, send OTP for verification
       if (!user.is_verified) {
-        await storeAndSendEmailOtp(normalizedEmail);
+        await storeAndSendEmailOtp(normalizedEmail, 'verify_email');
         return res.json({
           success: true,
           data: { message: 'Email not verified', email: normalizedEmail, needsVerification: true },
@@ -694,7 +774,7 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
       }
 
       // Send OTP for login verification вЂ” do NOT return JWT yet
-      await storeAndSendEmailOtp(normalizedEmail);
+      await storeAndSendEmailOtp(normalizedEmail, 'login');
 
       await AuditLogger.log('login_otp_sent', { userId: user.id, ip: req.ip });
 
@@ -751,7 +831,7 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
       if (!email || !code) throw new ValidationError('Email and code are required');
 
       const normalizedEmail = email.toLowerCase().trim();
-      const valid = await verifyEmailOtp(normalizedEmail, code);
+      const valid = await verifyEmailOtp(normalizedEmail, code, 'login');
       if (!valid) {
         await rateLimiter.recordAuthFailure(normalizedEmail);
         await SecurityMetrics.authFailure(rawRedis);
@@ -763,6 +843,16 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
 
       const user = await userRepo.findByEmail(normalizedEmail);
       if (!user) throw new UnauthorizedError('User not found');
+
+      // C-05: the email code is a *second* factor, never a replacement for
+      // TOTP. If the account has 2FA enabled, hand back a challenge instead of
+      // tokens — otherwise the OTP path silently skips the authenticator.
+      const totpRow = await userRepo.getTotpSecret(user.id);
+      if (totpRow?.is_verified) {
+        const challengeId = uuid();
+        await redis.set(`2fa:challenge:${challengeId}`, user.id, 300);
+        return res.json({ success: true, data: { requires2FA: true, challengeId } });
+      }
 
       const tokens = tokenService.generateTokens({
         sub: user.id as UserId,
@@ -811,11 +901,19 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
     } catch (err) { next(err); }
   });
 
-  // POST /api/auth/resend-code вЂ” resend OTP email
+  // POST /api/auth/resend-code вЂ” resend a code for an ALREADY PENDING flow
+  //
+  // C-05: this endpoint used to mint a brand-new login OTP for any address, with
+  // no authentication and no prior login attempt. Combined with /verify-login —
+  // which happily exchanges that OTP for a full token pair — it formed a
+  // complete bypass of the password, the Shield code and TOTP: knowing (or
+  // controlling) the mailbox was sufficient, and 2FA was never consulted.
+  //
+  // A resend must only ever re-send a code for a flow the user already started.
   router.post('/resend-code', async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const { email } = req.body;
-      if (!email) throw new ValidationError('Email is required');
+      const { email } = req.body || {};
+      if (!email || typeof email !== 'string') throw new ValidationError('Email is required');
 
       const normalizedEmail = email.toLowerCase().trim();
 
@@ -826,14 +924,23 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
         throw new ValidationError('Too many requests. Try again later.');
       }
 
-      await storeAndSendEmailOtp(normalizedEmail);
+      const pendingLogin = await hasPendingOtp(normalizedEmail, 'login');
+      const pendingVerify = await hasPendingOtp(normalizedEmail, 'verify_email');
 
-      // Increment hourly counter
-      const current = await redis.incr(hourlyKey);
-      if (current === 1) await redis.expire(hourlyKey, 3600);
+      if (pendingLogin || pendingVerify) {
+        await storeAndSendEmailOtp(normalizedEmail, pendingLogin ? 'login' : 'verify_email');
 
-      await AuditLogger.log('otp_resent', { email: normalizedEmail.replace(/(.{2}).*(@.*)/, '$1***$2'), ip: req.ip });
+        // Increment hourly counter
+        const current = await redis.incr(hourlyKey);
+        if (current === 1) await redis.expire(hourlyKey, 3600);
 
+        await AuditLogger.log('otp_resent', { email: maskEmail(normalizedEmail), ip: req.ip });
+      } else {
+        await AuditLogger.log('otp_resend_without_pending', { email: maskEmail(normalizedEmail), ip: req.ip });
+      }
+
+      // Same response either way — otherwise this becomes an oracle for
+      // "does this address have a login in progress?".
       res.json({ success: true, data: { message: 'New code sent' } });
     } catch (err) { next(err); }
   });
@@ -902,7 +1009,7 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
       }
 
       // Send OTP email вЂ” do NOT return JWT yet
-      await storeAndSendEmailOtp(normalizedEmail);
+      await storeAndSendEmailOtp(normalizedEmail, 'verify_email');
 
       res.status(201).json({
         success: true,
@@ -918,7 +1025,7 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
       if (!email || !code) throw new ValidationError('Email and code are required');
 
       const normalizedEmail = email.toLowerCase().trim();
-      const valid = await verifyEmailOtp(normalizedEmail, code);
+      const valid = await verifyEmailOtp(normalizedEmail, code, 'verify_email');
       if (!valid) {
         await rateLimiter.recordAuthFailure(normalizedEmail);
         throw new UnauthorizedError('Invalid verification code');
@@ -1011,10 +1118,11 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
   // POST /api/auth/logout
   router.post('/logout', async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const { refreshToken, sessionId } = req.body;
+      const { refreshToken, sessionId } = req.body || {};
 
-      if (refreshToken) {
-        await redis.del(`session:${refreshToken}`);
+      const presentedRefresh = refreshToken || req.cookies?.refreshToken;
+      if (presentedRefresh) {
+        await redis.del(`session:${presentedRefresh}`);
       }
 
       // Revoke security session
@@ -1022,32 +1130,61 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
         await sessionManager.revoke(sessionId);
       }
 
+      // H-03: revoke the *access* token too. Deleting the refresh mapping only
+      // stops future refreshes; the bearer token in the caller's hand stayed
+      // valid for the rest of its 15-minute TTL, so "log out" did not actually
+      // end the session. authMiddleware now consults `revoked:<jti>`.
+      const accessToken = extractBearerToken(req);
+      if (accessToken) {
+        try {
+          const payload = tokenService.verifyAccessToken(accessToken);
+          if (payload?.jti) await tokenService.revokeToken(payload.jti);
+        } catch {
+          // An expired or malformed token needs no revocation.
+        }
+      }
+
+      clearAuthCookies(res);
       await AuditLogger.log('logout', { ip: req.ip });
 
       res.json({ success: true, data: { message: 'Logged out' } });
     } catch (err) { next(err); }
   });
 
-  // POST /api/auth/logout/all вЂ” revoke all sessions
-  router.post('/logout/all', async (req: Request, res: Response, next: NextFunction) => {
+  // в”Ђв”Ђв”Ђ 2FA / TOTP в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
+
+  const auth = authMiddleware();
+
+  // в”Ђв”Ђв”Ђ Security sessions & devices в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
+  //
+  // C-01: these six routes used to sit ~600 lines above, deriving the caller's
+  // identity from the `x-user-id` **request header** with no auth middleware at
+  // all. Two of them (`GET /sessions`, `DELETE /sessions/:id`) were additionally
+  // shadowed by correctly-authenticated duplicates further down the file —
+  // Express matches the first registration, so the insecure versions were the
+  // live ones and the safe ones were unreachable dead code.
+  //
+  // The gateway strips client-supplied `x-user-id` before proxying, but this
+  // service also listens on :3001 directly. Anything that reached that port —
+  // a pod on the same network, an SSRF, a misconfigured ingress — could list
+  // and revoke any account's sessions and devices by naming its id.
+  //
+  // Identity now comes from the verified JWT, never from a header.
+
+  // POST /api/auth/logout/all — revoke all sessions
+  router.post('/logout/all', auth, async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const userId = req.headers['x-user-id'] as string;
-      if (!userId) throw new UnauthorizedError('User ID required');
-
+      const userId = req.user!.sub;
       await sessionManager.revokeAll(userId);
-
       await AuditLogger.log('logout_all_sessions', { userId, ip: req.ip });
-
       res.json({ success: true, data: { message: 'All sessions revoked' } });
     } catch (err) { next(err); }
   });
 
-  // GET /api/auth/sessions вЂ” list active sessions
-  router.get('/sessions', async (req: Request, res: Response, next: NextFunction) => {
+  // GET /api/auth/security-sessions — list active security sessions
+  router.get('/security-sessions', auth, async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const userId = req.headers['x-user-id'] as string;
-      if (!userId) throw new UnauthorizedError('User ID required');
-
+      const userId = req.user!.sub;
       const sessions = await sessionManager.getActiveSessions(userId);
 
       // SECURITY: never expose raw session tokens. Sessions are identified
@@ -1069,12 +1206,10 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
     } catch (err) { next(err); }
   });
 
-  // DELETE /api/auth/sessions/:id - terminate a single session (Telegram-style)
-  router.delete('/sessions/:id', async (req: Request, res: Response, next: NextFunction) => {
+  // DELETE /api/auth/security-sessions/:id — terminate a single security session
+  router.delete('/security-sessions/:id', auth, async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const userId = req.headers['x-user-id'] as string;
-      if (!userId) throw new UnauthorizedError('User ID required');
-
+      const userId = req.user!.sub;
       const sessions = await sessionManager.getActiveSessions(userId);
       const target = sessions.find((session) => sha256(session.token).slice(0, 16) === req.params.id);
       if (!target) throw new ValidationError('Session not found');
@@ -1087,11 +1222,9 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
   });
 
   // POST /api/auth/sessions/revoke-others - terminate all sessions except the current one
-  router.post('/sessions/revoke-others', async (req: Request, res: Response, next: NextFunction) => {
+  router.post('/sessions/revoke-others', auth, async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const userId = req.headers['x-user-id'] as string;
-      if (!userId) throw new UnauthorizedError('User ID required');
-
+      const userId = req.user!.sub;
       const currentToken = (req.headers['x-session-token'] as string) || req.body?.currentToken;
       if (!currentToken) throw new ValidationError('Current session token is required');
 
@@ -1113,23 +1246,17 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
   });
 
   // GET /api/auth/devices вЂ” list registered devices
-  router.get('/devices', async (req: Request, res: Response, next: NextFunction) => {
+  router.get('/devices', auth, async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const userId = req.headers['x-user-id'] as string;
-      if (!userId) throw new UnauthorizedError('User ID required');
-
-      const devices = await deviceSecurity.getUserDevices(userId);
-
+      const devices = await deviceSecurity.getUserDevices(req.user!.sub);
       res.json({ success: true, data: devices });
     } catch (err) { next(err); }
   });
 
   // DELETE /api/auth/devices/:fingerprint вЂ” revoke device
-  router.delete('/devices/:fingerprint', async (req: Request, res: Response, next: NextFunction) => {
+  router.delete('/devices/:fingerprint', auth, async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const userId = req.headers['x-user-id'] as string;
-      if (!userId) throw new UnauthorizedError('User ID required');
-
+      const userId = req.user!.sub;
       await deviceSecurity.revokeDevice(userId, req.params.fingerprint);
 
       await AuditLogger.log('device_revoked', {
@@ -1141,10 +1268,6 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
       res.json({ success: true, data: { message: 'Device revoked' } });
     } catch (err) { next(err); }
   });
-
-  // в”Ђв”Ђв”Ђ 2FA / TOTP в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
-
-  const auth = authMiddleware();
 
   // Tepla Binary Shield status, device log, controlled rotation, and master-seed reset.
   router.get('/binary-shield/status', auth, async (req: Request, res: Response, next: NextFunction) => {
@@ -1265,9 +1388,16 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
 
       await userRepo.saveTotpSecret(userId, secret, backupCodes);
 
+      // M-14: `user` was dereferenced without a null check — a token for a
+      // deleted account produced a TypeError and a 500 instead of a 401.
       const user = await userRepo.findById(userId);
+      if (!user) throw new UnauthorizedError('User not found');
+
       const issuer = 'Tepla';
-      const otpauthUrl = `otpauth://totp/${issuer}:${user.username}?secret=${secret}&issuer=${issuer}&digits=6&period=30`;
+      // The label must be percent-encoded: an unescaped username containing
+      // `?`, `#` or `&` corrupts the otpauth URI and the QR code with it.
+      const label = encodeURIComponent(`${issuer}:${user.username}`);
+      const otpauthUrl = `otpauth://totp/${label}?secret=${secret}&issuer=${encodeURIComponent(issuer)}&digits=6&period=30`;
 
       await AuditLogger.log('2fa_setup_started', { userId, ip: req.ip });
 
@@ -1303,8 +1433,17 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
   router.post('/2fa/disable', auth, async (req: Request, res: Response, next: NextFunction) => {
     try {
       const userId = req.user!.sub;
-      const { code } = req.body;
+      const { code } = req.body || {};
       if (!code) throw new ValidationError('TOTP code or backup code is required');
+
+      // C-07: disabling 2FA is exactly as sensitive as passing it, and it was
+      // completely unthrottled.
+      const attempt = await rateLimiter.recordFactorAttempt(
+        `2fa_disable:${userId}`,
+        SecurityConfig.MAX_FACTOR_ATTEMPTS,
+        SecurityConfig.FACTOR_ATTEMPT_WINDOW,
+      );
+      if (!attempt.allowed) throw new ForbiddenError('Too many attempts. Try again later.');
 
       const totpRow = await userRepo.getTotpSecret(userId);
       if (!totpRow || !totpRow.is_verified) {
@@ -1312,12 +1451,13 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
       }
 
       // Try TOTP code first, then backup code
-      const validTotp = verifyTotp(totpRow.secret, code);
+      const validTotp = await verifyTotpOnce(userId, totpRow.secret, String(code));
       if (!validTotp) {
         const usedBackup = await userRepo.useBackupCode(userId, code);
         if (!usedBackup) throw new UnauthorizedError('Invalid code');
       }
 
+      await rateLimiter.clearFactorAttempts(`2fa_disable:${userId}`);
       await userRepo.deleteTotp(userId);
       await AuditLogger.log('2fa_disabled', { userId, ip: req.ip });
 
@@ -1328,8 +1468,23 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
   // POST /api/auth/2fa/login вЂ” complete login with 2FA code (after challenge)
   router.post('/2fa/login', async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const { challengeId, code } = req.body;
+      const { challengeId, code } = req.body || {};
       if (!challengeId || !code) throw new ValidationError('challengeId and code are required');
+
+      // C-07: there was no attempt ceiling here. A 6-digit TOTP with a ±1 step
+      // window is ~3·10^5 candidates, and the backup codes are 8 hex chars —
+      // both trivially brute-forceable against an unthrottled endpoint holding
+      // a 5-minute challenge.
+      const attempt = await rateLimiter.recordFactorAttempt(
+        `2fa_login:${challengeId}`,
+        SecurityConfig.MAX_FACTOR_ATTEMPTS,
+        300,
+      );
+      if (!attempt.allowed) {
+        await redis.del(`2fa:challenge:${challengeId}`);
+        await SecurityMetrics.authFailure(rawRedis);
+        throw new UnauthorizedError('Too many attempts. Challenge invalidated.');
+      }
 
       const userId = await redis.get(`2fa:challenge:${challengeId}`);
       if (!userId) throw new UnauthorizedError('Invalid or expired 2FA challenge');
@@ -1339,7 +1494,7 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
         throw new ValidationError('2FA is not enabled');
       }
 
-      const validTotp = verifyTotp(totpRow.secret, code);
+      const validTotp = await verifyTotpOnce(userId, totpRow.secret, String(code));
       if (!validTotp) {
         const usedBackup = await userRepo.useBackupCode(userId, code);
         if (!usedBackup) {
@@ -1347,6 +1502,8 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
           throw new UnauthorizedError('Invalid 2FA code');
         }
       }
+
+      await rateLimiter.clearFactorAttempts(`2fa_login:${challengeId}`);
 
       // 2FA passed вЂ” issue tokens
       await redis.del(`2fa:challenge:${challengeId}`);
@@ -1402,8 +1559,14 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
   // POST /api/auth/pin/verify
   router.post('/pin/verify', async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const { userId, pin } = req.body;
-      if (!userId || !pin) throw new ValidationError('userId and pin are required');
+      const { userId, pin } = req.body || {};
+      if (!isUuid(userId) || typeof pin !== 'string') throw new ValidationError('userId and pin are required');
+
+      // A PIN is a *local unlock* factor, not a credential strong enough to
+      // mint a session on its own. Keep the endpoint (the lock screen depends
+      // on it) but gate it behind the same lockout as password login, so a
+      // known user id plus a 6-digit space is not walkable.
+      await rateLimiter.checkAuth(`pin:${userId}`);
 
       // Atomic rate limit: 5 per user per hour via Lua.
       // SECURITY: keyed by userId only - deviceId is client-controlled and
@@ -1427,11 +1590,13 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
 
       const valid = await bcrypt.compare(pin, user.pin_hash);
       if (!valid) {
+        await rateLimiter.recordAuthFailure(`pin:${userId}`);
         await AuditLogger.log('pin_verify_failed', { userId, ip: req.ip });
         throw new UnauthorizedError('Invalid PIN');
       }
 
       await redis.del(rlKey);
+      await rateLimiter.clearAuthFailures(`pin:${userId}`);
 
       const tokens = tokenService.generateTokens({
         sub: user.id as UserId,
@@ -1445,16 +1610,25 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
   });
 
   // POST /api/auth/pin/reset
+  //
+  // M-03: this used to answer "User not found" for unknown addresses, turning
+  // it into a free membership oracle. The response is now identical either way
+  // and a challenge id is always returned (an unknown address simply gets one
+  // that can never be satisfied).
   router.post('/pin/reset', async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const { email } = req.body;
-      if (!email) throw new ValidationError('Email is required');
+      const { email } = req.body || {};
+      if (!email || typeof email !== 'string') throw new ValidationError('Email is required');
 
-      const user = await userRepo.findByEmail(email.toLowerCase().trim());
-      if (!user) throw new UnauthorizedError('User not found');
+      const normalizedEmail = email.toLowerCase().trim();
+      await rateLimiter.checkAuth(`pin_reset:${normalizedEmail}`);
 
-      const challenge = await challengeService.createOtpChallenge(email, user.id);
-      res.json({ success: true, data: { challengeId: challenge.challengeId, message: 'Check your email' } });
+      const user = await userRepo.findByEmail(normalizedEmail);
+      const challengeId = user
+        ? (await challengeService.createOtpChallenge(normalizedEmail, user.id)).challengeId
+        : uuid();
+
+      res.json({ success: true, data: { challengeId, message: 'Check your email' } });
     } catch (err) { next(err); }
   });
 
@@ -1477,11 +1651,55 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
     } catch (err) { next(err); }
   });
 
+  // POST /api/auth/biometric/challenge — obtain a single-use nonce to sign
+  //
+  // H-15: the old scheme had the client sign `${userId}:${deviceId}:${unixSeconds}`
+  // and the server brute-forced 301 candidate timestamps, calling `crypto.verify`
+  // for each. Three separate problems:
+  //   1. 301 Ed25519 verifications per request is a cheap CPU-exhaustion lever
+  //      for an unauthenticated endpoint.
+  //   2. The signed payload is fully predictable, so any captured signature was
+  //      replayable by anyone for the next five minutes.
+  //   3. `crypto.verify` needs a KeyObject or DER/PEM — a raw 32-byte base64
+  //      Ed25519 key throws, so the endpoint could never have succeeded anyway.
+  // A server-issued nonce fixes all three: one verification, no replay.
+  router.post('/biometric/challenge', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { userId, deviceId } = req.body || {};
+      if (!isUuid(userId) || !deviceId) throw new ValidationError('userId and deviceId required');
+
+      await rateLimiter.checkAuth(`biometric:${userId}`);
+
+      const nonce = crypto.randomBytes(32).toString('base64url');
+      await redis.set(`biometric_nonce:${userId}:${deviceId}`, nonce, 120);
+
+      res.json({ success: true, data: { nonce, expiresIn: 120 } });
+    } catch (err) { next(err); }
+  });
+
   // POST /api/auth/biometric/login
   router.post('/biometric/login', async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const { userId, deviceId, signature } = req.body;
-      if (!userId || !deviceId || !signature) throw new ValidationError('userId, deviceId, signature required');
+      const { userId, deviceId, signature, nonce } = req.body || {};
+      if (!isUuid(userId) || !deviceId || !signature || !nonce) {
+        throw new ValidationError('userId, deviceId, nonce and signature required');
+      }
+
+      const attempt = await rateLimiter.recordFactorAttempt(
+        `biometric:${userId}:${deviceId}`,
+        SecurityConfig.MAX_FACTOR_ATTEMPTS,
+        SecurityConfig.FACTOR_ATTEMPT_WINDOW,
+      );
+      if (!attempt.allowed) throw new ForbiddenError('Too many attempts. Try again later.');
+
+      const nonceKey = `biometric_nonce:${userId}:${deviceId}`;
+      const expectedNonce = await redis.get(nonceKey);
+      if (!expectedNonce || expectedNonce !== String(nonce)) {
+        throw new UnauthorizedError('Invalid or expired challenge');
+      }
+      // Burn the nonce before verifying, so a failed attempt cannot be retried
+      // against the same challenge.
+      await redis.del(nonceKey);
 
       const device = await db.queryRow(
         `SELECT * FROM devices WHERE user_id = $1 AND device_id = $2 AND biometric_public_key IS NOT NULL`,
@@ -1489,27 +1707,18 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
       );
       if (!device) throw new UnauthorizedError('Biometric not registered for this device');
 
-      // Verify Ed25519 signature: client signs a challenge (timestamp + deviceId + userId)
-      const publicKeyBuf = Buffer.from(device.biometric_public_key, 'base64');
-      const signatureBuf = Buffer.from(signature, 'base64');
-
-      // The signed payload is deterministic: the client signs `${userId}:${deviceId}:${timestamp}`
-      // We accept timestamps within a 5-minute window to prevent replay
-      const now = Math.floor(Date.now() / 1000);
-      let signatureValid = false;
-      for (let ts = now - 300; ts <= now; ts++) {
-        const challenge = Buffer.from(`${userId}:${deviceId}:${ts}`);
-        if (crypto.verify('Ed25519', challenge, publicKeyBuf, signatureBuf)) {
-          signatureValid = true;
-          break;
-        }
-      }
+      const signatureValid = verifyEd25519(
+        device.biometric_public_key,
+        Buffer.from(`${userId}:${deviceId}:${expectedNonce}`, 'utf8'),
+        String(signature),
+      );
 
       if (!signatureValid) {
         await AuditLogger.log('biometric_login_failed', { userId, deviceId, ip: req.ip, reason: 'invalid_signature' });
         throw new UnauthorizedError('Biometric signature verification failed');
       }
 
+      await rateLimiter.clearFactorAttempts(`biometric:${userId}:${deviceId}`);
       const user = await userRepo.findById(userId);
       if (!user) throw new UnauthorizedError('User not found');
 
@@ -1536,7 +1745,16 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
       await rateLimiter.checkAuth(normalizedEmail);
 
       const user = await userRepo.findByEmail(normalizedEmail);
-      if (!user) throw new UnauthorizedError('User not found');
+      // M-03: "User not found" here told an unauthenticated caller whether an
+      // address is registered. Return the same shape for unknown accounts —
+      // the challenge id simply never resolves.
+      if (!user) {
+        await AuditLogger.log('login_init_unknown_email', { email: maskEmail(normalizedEmail), ip: req.ip });
+        return res.json({
+          success: true,
+          data: { challengeId: uuid(), challengeType: 'otp', riskLevel: 'medium' },
+        });
+      }
       if (user.blocked_until && new Date(user.blocked_until) > new Date()) {
         throw new ForbiddenError('Account temporarily blocked');
       }
@@ -1600,9 +1818,18 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
       const user = await userRepo.findById(userId);
       if (!user) throw new UnauthorizedError('User not found');
 
-      // Create/trust device
+      // Create/trust device.
+      //
+      // M-05: a fresh random `deviceId` was minted on *every* login, so the
+      // `ON CONFLICT (user_id, device_id)` clause could never fire and the
+      // `devices` table grew by one trusted row per sign-in, forever. Reuse the
+      // row that already matches this browser's fingerprint instead.
       const fingerprint = RiskEngine.generateFingerprint(req.headers as Record<string, string>);
-      const deviceId = crypto.randomUUID();
+      const known = await db.queryRow<{ device_id: string }>(
+        'SELECT device_id FROM devices WHERE user_id = $1 AND fingerprint = $2 LIMIT 1',
+        [userId, fingerprint]
+      );
+      const deviceId = known?.device_id || crypto.randomUUID();
 
       await db.query(
         `INSERT INTO devices (user_id, device_id, fingerprint, name, is_trusted, trust_expires_at, last_ip)
@@ -1634,8 +1861,18 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
   // POST /api/auth/login/trusted вЂ” trusted device login
   router.post('/login/trusted', async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const { userId, deviceId, pinHash, biometricSignature } = req.body;
-      if (!userId || !deviceId) throw new ValidationError('userId and deviceId required');
+      const { userId, deviceId, pinHash, biometricSignature, nonce } = req.body || {};
+      if (!isUuid(userId) || !deviceId) throw new ValidationError('userId and deviceId required');
+
+      // C-06: this endpoint had no throttling at all, so the 6-digit PIN below
+      // could be walked at request rate. `/pin/verify` at least had a counter;
+      // this one was a wide-open second door to the same secret.
+      const attempt = await rateLimiter.recordFactorAttempt(
+        `trusted_login:${userId}:${deviceId}`,
+        SecurityConfig.MAX_FACTOR_ATTEMPTS,
+        SecurityConfig.FACTOR_ATTEMPT_WINDOW,
+      );
+      if (!attempt.allowed) throw new ForbiddenError('Too many attempts. Try again later.');
 
       const device = await db.queryRow(
         `SELECT * FROM devices WHERE user_id = $1 AND device_id = $2`,
@@ -1658,21 +1895,29 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
       if (!user) throw new UnauthorizedError('User not found');
 
       if (pinHash && user.pin_hash) {
-        const valid = await bcrypt.compare(pinHash, user.pin_hash);
+        // NB: despite the field name the client sends the PIN itself — bcrypt
+        // compares a plaintext candidate against the stored hash.
+        const valid = await bcrypt.compare(String(pinHash), user.pin_hash);
         if (!valid) throw new UnauthorizedError('Invalid PIN');
       } else if (biometricSignature && device.biometric_public_key) {
-        const pubKey = Buffer.from(device.biometric_public_key, 'base64');
-        const sigBuf = Buffer.from(biometricSignature, 'base64');
-        const now = Math.floor(Date.now() / 1000);
-        let bioValid = false;
-        for (let ts = now - 300; ts <= now; ts++) {
-          const challenge = Buffer.from(`${userId}:${deviceId}:${ts}`);
-          if (crypto.verify('Ed25519', challenge, pubKey, sigBuf)) { bioValid = true; break; }
+        const nonceKey = `biometric_nonce:${userId}:${deviceId}`;
+        const expectedNonce = await redis.get(nonceKey);
+        if (!expectedNonce || expectedNonce !== String(nonce)) {
+          throw new UnauthorizedError('Invalid or expired challenge');
         }
+        await redis.del(nonceKey);
+
+        const bioValid = verifyEd25519(
+          device.biometric_public_key,
+          Buffer.from(`${userId}:${deviceId}:${expectedNonce}`, 'utf8'),
+          String(biometricSignature),
+        );
         if (!bioValid) throw new UnauthorizedError('Biometric signature verification failed');
       } else {
         throw new ValidationError('PIN or biometric required');
       }
+
+      await rateLimiter.clearFactorAttempts(`trusted_login:${userId}:${deviceId}`);
 
       const tokens = tokenService.generateTokens({
         sub: user.id as UserId,
@@ -1758,81 +2003,11 @@ export function authRouter(redis: RedisClient, kafka: KafkaProducer): Router {
   return router;
 }
 
-// в”Ђв”Ђв”Ђ TOTP Helpers в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
-function generateHOTP(secret: string, counter: number): string {
-  const decodedSecret = base32Decode(secret);
-  const buffer = Buffer.alloc(8);
-  for (let i = 7; i >= 0; i--) {
-    buffer[i] = counter & 0xff;
-    counter = counter >> 8;
-  }
-  const hmac = crypto.createHmac('sha1', decodedSecret);
-  hmac.update(buffer);
-  const hmacResult = hmac.digest();
-  const offset = hmacResult[hmacResult.length - 1] & 0xf;
-  const code =
-    ((hmacResult[offset] & 0x7f) << 24) |
-    ((hmacResult[offset + 1] & 0xff) << 16) |
-    ((hmacResult[offset + 2] & 0xff) << 8) |
-    (hmacResult[offset + 3] & 0xff);
-  return (code % 1_000_000).toString().padStart(6, '0');
-}
-
-function verifyTotp(secret: string, code: string, window: number = 1): boolean {
-  const counter = Math.floor(Date.now() / 30_000);
-  for (let i = -window; i <= window; i++) {
-    if (generateHOTP(secret, counter + i) === code) return true;
-  }
-  return false;
-}
-
-const BASE32_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
-
-function base32Encode(buffer: Buffer): string {
-  let bits = 0;
-  let value = 0;
-  let output = '';
-  for (const byte of buffer) {
-    value = (value << 8) | byte;
-    bits += 8;
-    while (bits >= 5) {
-      output += BASE32_ALPHABET[(value >>> (bits - 5)) & 31];
-      bits -= 5;
-    }
-  }
-  if (bits > 0) {
-    output += BASE32_ALPHABET[(value << (5 - bits)) & 31];
-  }
-  return output;
-}
-
-function base32Decode(encoded: string): Buffer {
-  const cleaned = encoded.replace(/=+$/, '').toUpperCase();
-  let bits = 0;
-  let value = 0;
-  const output: number[] = [];
-  for (const char of cleaned) {
-    const idx = BASE32_ALPHABET.indexOf(char);
-    if (idx === -1) continue;
-    value = (value << 5) | idx;
-    bits += 5;
-    if (bits >= 8) {
-      output.push((value >>> (bits - 8)) & 0xff);
-      bits -= 8;
-    }
-  }
-  return Buffer.from(output);
-}
-
-// в”Ђв”Ђв”Ђ Helpers в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
-function normalizePhone(phone: string): string {
-  return phone.replace(/[^\d+]/g, '').replace(/^8/, '+7');
-}
-
-function maskPhone(phone: string): string {
-  if (phone.length < 6) return '***';
-  return phone.slice(0, 4) + '****' + phone.slice(-2);
-}
+// ─── Helpers ───────────────────────────────
+//
+// TOTP, base32, Ed25519 verification and the masking helpers now live in
+// ./services/totp.service so they can be unit tested on their own; this file
+// was past 1800 lines and none of that logic needs Express or Redis.
 
 function mapUser(row: any) {
   return {

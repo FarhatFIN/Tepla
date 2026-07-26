@@ -282,10 +282,19 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   logout: () => {
     const accounts = getSavedAccounts();
+    // Tell the server first so it can revoke the access token's jti and clear
+    // the auth cookies; a failure here must not block the local teardown.
+    api.post("/auth/logout", {}).catch(() => {});
     api.setToken(null);
     disconnectSocket();
     localStorage.removeItem("tepla-auth");
-    import("@/stores/chat-store").then(({ useChatStore }) => useChatStore.getState().reset()).catch(() => {});
+    import("@/stores/chat-store")
+      .then(({ useChatStore, clearSecretTextCache }) => {
+        // M-07: decrypted secret-chat text must not survive a logout.
+        clearSecretTextCache();
+        useChatStore.getState().reset();
+      })
+      .catch(() => {});
     set({ user: null, token: null, savedAccounts: accounts, otpPending: null });
   },
 

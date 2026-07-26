@@ -4,11 +4,14 @@ import express, { type NextFunction, type Request, type RequestHandler, type Res
 import { createProxyMiddleware, fixRequestBody, type Options as ProxyOptions } from 'http-proxy-middleware';
 import {
   authMiddleware,
+  cookieMiddleware,
   correlationMiddleware,
   createLogger,
   errorHandler,
+  parseTrustProxy,
   RedisClient,
   requestLoggerMiddleware,
+  setRevocationChecker,
 } from '@tepla/common';
 import { AuditLogger, initializeSecurity, SecurityMiddleware } from '@tepla/security';
 import Redis from 'ioredis';
@@ -39,23 +42,33 @@ const redis = new RedisClient(config.redisUrl);
 const securityRedis = new Redis(config.redisUrl);
 const securityMiddleware = new SecurityMiddleware(securityRedis);
 
+// H-05: the gateway is the edge; without trust proxy every request behind a
+// load balancer shares one `req.ip`, collapsing ipRateLimit into a global
+// counter and filling the audit log with the balancer's address.
+app.set('trust proxy', parseTrustProxy(process.env.TRUST_PROXY));
+
 app.use(securityMiddleware.securityHeaders());
 app.use(cors(config.cors));
 app.use(compression());
+// H-04: SecurityMiddleware.deviceFingerprint() reads `req.cookies?.deviceId`,
+// which was permanently undefined because no cookie parser was ever installed.
+app.use(cookieMiddleware());
 app.use(correlationMiddleware());
 app.use(requestLoggerMiddleware('api-gateway'));
 app.use(securityMiddleware.deviceFingerprint());
 app.use(securityMiddleware.ipRateLimit(200));
 
-app.get('/health', async (_req, res) => {
-  const metrics = await securityMiddleware.getMetrics();
-
+// M-01: `securityMetrics` used to be part of this payload. Health endpoints are
+// reachable by anything that can open a socket to the gateway, and auth-failure
+// / anomaly / rate-limit counters are exactly the feedback an attacker wants
+// while tuning an attack. They live behind /api/v2/security/metrics, which
+// requires an admin token.
+app.get('/health', (_req, res) => {
   res.json({
     service: 'api-gateway',
     status: 'healthy',
     timestamp: new Date().toISOString(),
     features: config.features,
-    securityMetrics: metrics,
   });
 });
 
@@ -173,6 +186,15 @@ async function forwardAuthRequest(req: GatewayRequest, res: Response, next: Next
     if (req.correlationId) headers.set('X-Correlation-Id', req.correlationId);
     if (req.deviceFingerprint) headers.set('X-Device-Fingerprint', req.deviceFingerprint);
     if (req.securityAnomaly) headers.set('X-Security-Anomaly', JSON.stringify(req.securityAnomaly));
+    // H-05: `fetch` builds a fresh request, so the forwarded-for chain the
+    // auth service needs for rate limiting and risk scoring has to be set
+    // explicitly. Without it every login looks like it came from the gateway.
+    if (req.ip) {
+      headers.set('X-Forwarded-For', req.ip);
+      headers.set('X-Forwarded-Proto', req.protocol);
+      headers.set('X-Real-IP', req.ip);
+    }
+    if (req.headers['user-agent']) headers.set('User-Agent', req.headers['user-agent'] as string);
 
     const upstream = await fetch(targetUrl, {
       method: req.method,
@@ -211,8 +233,14 @@ app.use(
   forwardAuthRequest,
 );
 
+// M-02: this is the only unauthenticated route that answers questions about
+// other people's accounts, and it was mounted with no middleware at all — so
+// the only thing between an attacker and a full username-enumeration sweep was
+// the global 200/min IP budget shared with every other request. Give it its own,
+// much tighter bucket.
 app.use(
   '/api/v2/users/check-username',
+  securityMiddleware.ipRateLimit(Number(process.env.CHECK_USERNAME_RATE_LIMIT || 20)),
   proxy(config.services.authUser, { '^/': '/api/users/check-username' }),
 );
 
@@ -460,6 +488,10 @@ async function start(): Promise<void> {
   await initializeSecurity();
   await redis.connect();
   AuditLogger.setRedis(securityRedis);
+
+  // H-03: honour access-token revocation at the edge, so a logged-out token is
+  // rejected before it is ever proxied to a downstream service.
+  setRevocationChecker(async (jti) => (await securityRedis.exists(`revoked:${jti}`)) === 1);
 
   app.listen(config.port, () => {
     logger.info(`API Gateway running on port ${config.port}`, {

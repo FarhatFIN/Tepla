@@ -1,10 +1,13 @@
 import { Router, type Request, type Response, type NextFunction } from 'express';
-import { Pool } from 'pg';
 import { v4 as uuid } from 'uuid';
-import { BaseService, KafkaProducer, ForbiddenError, UnauthorizedError, ValidationError } from '@tepla/common';
+import { BaseService, KafkaProducer, ForbiddenError, UnauthorizedError, ValidationError, escapeLikePattern, assertUuid, db } from '@tepla/common';
 import { EventTopic, EventType, UserId } from '@tepla/types';
 
-const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+// Use the shared pool from @tepla/common rather than a second, private one.
+// The private pool had no 'error' listener (so an idle-client failure took the
+// whole service down) and no size limit coordination with the rest of the
+// process — see the H-13 note in docs/AUDIT_TODO.md.
+const pool = db.pool;
 
 function userIdFrom(req: Request): string {
   const value = req.header('x-user-id') || req.header('X-User-Id');
@@ -36,7 +39,11 @@ async function ensureSavedChat(userId: string) {
   return chat.rows[0];
 }
 
+// M-04: `chatId` reaches a `uuid` column on nearly every route. A non-UUID
+// value raises SQLSTATE 22P02 inside pg, which used to escape as an opaque
+// HTTP 500. Validating at the guard covers every caller in one place.
 async function requireMember(chatId: string, userId: string): Promise<void> {
+  assertUuid(chatId, 'chatId');
   const member = await pool.query(
     'SELECT 1 FROM chat_members WHERE chat_id = $1 AND user_id = $2',
     [chatId, userId],
@@ -45,6 +52,7 @@ async function requireMember(chatId: string, userId: string): Promise<void> {
 }
 
 async function requireAdmin(chatId: string, userId: string): Promise<void> {
+  assertUuid(chatId, 'chatId');
   const member = await pool.query(
     "SELECT 1 FROM chat_members WHERE chat_id = $1 AND user_id = $2 AND role IN ('owner', 'admin')",
     [chatId, userId],
@@ -260,6 +268,9 @@ function router(kafka: KafkaProducer): Router {
          RETURNING is_archived`,
         [chatId, userId, typeof archived === 'boolean' ? archived : null],
       );
+      // M-14: a concurrent leave between requireMember() and this UPDATE
+      // returns zero rows, and .is_archived on undefined threw a 500.
+      if (!row.rows[0]) throw new ForbiddenError('Not a member');
       res.json({ success: true, data: { chatId, isArchived: row.rows[0].is_archived } });
     } catch (err) { next(err); }
   });
@@ -277,6 +288,7 @@ function router(kafka: KafkaProducer): Router {
          RETURNING is_pinned`,
         [chatId, userId, typeof pinned === 'boolean' ? pinned : null],
       );
+      if (!row.rows[0]) throw new ForbiddenError('Not a member');
       res.json({ success: true, data: { chatId, isPinned: row.rows[0].is_pinned } });
     } catch (err) { next(err); }
   });
@@ -294,6 +306,7 @@ function router(kafka: KafkaProducer): Router {
          RETURNING is_muted`,
         [chatId, userId, typeof muted === 'boolean' ? muted : null],
       );
+      if (!row.rows[0]) throw new ForbiddenError('Not a member');
       res.json({ success: true, data: { chatId, isMuted: row.rows[0].is_muted } });
     } catch (err) { next(err); }
   });
@@ -531,16 +544,23 @@ function router(kafka: KafkaProducer): Router {
       const role = req.body?.role === 'admin' ? 'admin' : 'member';
       if (ids.length === 0) throw new ValidationError('userId is required');
 
+      const added: string[] = [];
       for (const userId of ids) {
+        // The group equivalent of this route already honoured chat_bans; the
+        // channel one did not, so a banned user could simply be re-added.
+        const banned = await pool.query('SELECT 1 FROM chat_bans WHERE chat_id = $1 AND user_id = $2', [chatId, userId]);
+        if (banned.rows[0]) continue;
+
         await pool.query(
           `INSERT INTO chat_members (chat_id, user_id, role) VALUES ($1, $2, $3)
            ON CONFLICT (chat_id, user_id) DO UPDATE SET role = EXCLUDED.role`,
           [chatId, userId, role],
         );
         await publishMemberJoined(kafka, req, chatId, userId);
+        added.push(userId);
       }
       await refreshMembersCount(chatId);
-      res.status(201).json({ success: true, data: { chatId, added: ids, role } });
+      res.status(201).json({ success: true, data: { chatId, added, role } });
     } catch (err) { next(err); }
   });
 
@@ -549,15 +569,17 @@ function router(kafka: KafkaProducer): Router {
     try {
       userIdFrom(req);
       const q = String(req.query.q || '').trim();
-      const like = `%${q}%`;
+      // Same wildcard-escaping fix as /search (H-08). An empty query still
+      // lists the most popular public channels, which is the intended default.
+      const like = `%${escapeLikePattern(q)}%`;
       const rows = await pool.query(
         `SELECT id, type, name, username, description, avatar_url, members_count, created_at
          FROM chats
          WHERE type = 'channel' AND is_public = true
-           AND ($1 = '%%' OR name ILIKE $1 OR username ILIKE $1 OR description ILIKE $1)
+           AND ($2 = '' OR name ILIKE $1 ESCAPE '\\' OR username ILIKE $1 ESCAPE '\\' OR description ILIKE $1 ESCAPE '\\')
          ORDER BY members_count DESC, created_at DESC
          LIMIT 30`,
-        [like],
+        [like, q],
       );
       res.json({ success: true, data: rows.rows });
     } catch (err) { next(err); }
@@ -1014,13 +1036,19 @@ function router(kafka: KafkaProducer): Router {
       const q = String(req.query.q || '').trim();
       const type = String(req.query.type || 'messages');
       if (q.length < 1) return res.json({ success: true, data: [] });
-      const like = `%${q}%`;
+
+      // H-08: the pattern used to be built as `%${q}%` from raw input, so
+      // `?q=%` produced `%%%` — an ILIKE that matches every row. One
+      // unauthenticated-shaped request dumped the entire user directory.
+      // Escaping the wildcards (and declaring the escape char) makes `%` mean
+      // a literal percent sign, as the user intended when they typed it.
+      const like = `%${escapeLikePattern(q)}%`;
 
       if (type === 'users') {
         const rows = await pool.query(
           `SELECT id, username, display_name, avatar_url, bio, is_online
            FROM users
-           WHERE username ILIKE $1 OR display_name ILIKE $1
+           WHERE username ILIKE $1 ESCAPE '\\' OR display_name ILIKE $1 ESCAPE '\\'
            ORDER BY username LIMIT 20`,
           [like],
         );
@@ -1033,7 +1061,7 @@ function router(kafka: KafkaProducer): Router {
           `SELECT c.*
            FROM chats c
            JOIN chat_members cm ON cm.chat_id = c.id AND cm.user_id = $1
-           WHERE c.type = $2 AND (c.name ILIKE $3 OR c.description ILIKE $3)
+           WHERE c.type = $2 AND (c.name ILIKE $3 ESCAPE '\\' OR c.description ILIKE $3 ESCAPE '\\')
            ORDER BY c.name LIMIT 20`,
           [userId, chatType, like],
         );
@@ -1045,7 +1073,7 @@ function router(kafka: KafkaProducer): Router {
          FROM messages m
          JOIN chat_members cm ON cm.chat_id = m.chat_id AND cm.user_id = $1
          JOIN chats c ON c.id = m.chat_id
-         WHERE m.is_deleted = false AND m.content ILIKE $2
+         WHERE m.is_deleted = false AND m.content ILIKE $2 ESCAPE '\\'
            AND c.type <> 'secret'
          ORDER BY m.created_at DESC
          LIMIT 50`,
@@ -1162,6 +1190,9 @@ function router(kafka: KafkaProducer): Router {
         'UPDATE messages SET is_pinned = NOT is_pinned WHERE id = $1 RETURNING *',
         [req.params.id],
       );
+      // M-14: the message can be deleted between the SELECT above and this
+      // UPDATE, leaving rows[0] undefined for the event payload below.
+      if (!row.rows[0]) throw new ValidationError('Message not found');
 
       await kafka.publish({
         id: uuid(),
@@ -1298,6 +1329,9 @@ function router(kafka: KafkaProducer): Router {
   // ─── Polls (Telegram-style, incl. quizzes) ──────────────────────
 
   async function findPoll(idOrMessageId: string): Promise<any> {
+    // M-04: an id like "abc" made pg raise 22P02 before the "not found" check
+    // could run, turning a client mistake into a 500.
+    assertUuid(idOrMessageId, 'pollId');
     const row = await pool.query('SELECT * FROM polls WHERE id = $1 OR message_id = $1', [idOrMessageId]);
     if (!row.rows[0]) throw new ValidationError('Poll not found');
     return row.rows[0];
@@ -1675,6 +1709,7 @@ function router(kafka: KafkaProducer): Router {
         'UPDATE chat_members SET muted_until = $3 WHERE chat_id = $1 AND user_id = $2 RETURNING user_id, muted_until',
         [chatId, targetUserId, mutedUntil],
       );
+      if (!row.rows[0]) throw new ValidationError('Member not found');
 
       await kafka.publish({
         id: uuid(),
