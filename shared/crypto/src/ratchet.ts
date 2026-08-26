@@ -23,8 +23,9 @@ import { bytesToHex, hexToBytes, utf8ToBytes } from '@noble/hashes/utils.js';
 import { chacha20poly1305 } from '@noble/ciphers/chacha.js';
 import { generateDHKeyPair, type DHKeyPair } from './x3dh';
 
-const ROOT_INFO = 'Tepla-Ratchet-Root-v1';
-const MSG_INFO = 'Tepla-Ratchet-Msg-v1';
+// INFO-строки как байты: @noble/hashes v2 требует Uint8Array для salt/info
+const ROOT_INFO = utf8ToBytes('Tepla-Ratchet-Root-v1');
+const MSG_INFO = utf8ToBytes('Tepla-Ratchet-Msg-v1');
 /** Max number of message keys cached for out-of-order delivery. */
 const MAX_SKIP = 1000;
 

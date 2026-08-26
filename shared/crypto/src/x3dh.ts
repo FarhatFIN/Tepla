@@ -19,9 +19,9 @@ import { x25519 } from '@noble/curves/ed25519.js';
 import * as ed from '@noble/ed25519';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { hkdf } from '@noble/hashes/hkdf.js';
-import { bytesToHex, hexToBytes, concatBytes, randomBytes } from '@noble/hashes/utils.js';
+import { bytesToHex, hexToBytes, concatBytes, randomBytes, utf8ToBytes } from '@noble/hashes/utils.js';
 
-const X3DH_INFO = 'Tepla-X3DH-v1';
+const X3DH_INFO = utf8ToBytes('Tepla-X3DH-v1');
 // Domain separator per the X3DH spec: 32 bytes of 0xFF for curve X25519.
 const F = new Uint8Array(32).fill(0xff);
 

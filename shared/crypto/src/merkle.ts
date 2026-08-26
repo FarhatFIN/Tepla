@@ -132,7 +132,9 @@ export function generateProof(
  * and compare rootHash against the last-known root (consistency check).
  */
 export function verifyProof(proof: MerkleProof): boolean {
-  let hash = hexToBytes(proof.leafHash);
+  // Явная аннотация: hexToBytes даёт Uint8Array<ArrayBuffer>, а hashNode
+  // возвращает общий Uint8Array<ArrayBufferLike> — без неё TS5.7+ ругается.
+  let hash: Uint8Array = hexToBytes(proof.leafHash);
 
   for (let i = 0; i < proof.siblings.length; i++) {
     const sibling = hexToBytes(proof.siblings[i]);
